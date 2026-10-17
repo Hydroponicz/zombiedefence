@@ -114,6 +114,10 @@ describe('ground operations menu', () => {
     onRoof: false,
     threat: 0,
     grabbers: 0,
+    x: 0,
+    z: 0,
+    fuel: 1360,
+    fuelCapacity: 1360,
     ...extra,
   });
 

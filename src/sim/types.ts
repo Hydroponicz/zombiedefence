@@ -77,6 +77,18 @@ export interface Cargo {
   tiredFatigue: number;
   scientists: number;
   crates: CrateKind[];
+  /** Litres in a fuel bladder slung under the helicopter (0 = nothing on the hook). */
+  sling: number;
+}
+
+/** A forward refuelling point the player set up in the city. */
+export interface Farp {
+  id: number;
+  district: number;
+  x: number;
+  z: number;
+  /** Litres available. */
+  fuel: number;
 }
 
 export interface PlayerStats {
@@ -122,6 +134,8 @@ export interface CityState {
   collapsed: boolean;
   collapsedAt: number | null;
   cargo: Cargo;
+  farps: Farp[];
+  farpSeq: number;
   /** Research points earned by scientists at the base. */
   research: number;
   stats: PlayerStats;

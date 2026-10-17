@@ -32,7 +32,8 @@ Add `?seed=1234` to the URL to replay a specific city and outbreak.
 | City map (debug) | View | M |
 | Time speed | D-pad left / right (LT / RT on the map) | [ / ] |
 | Map: select district | D-pad | Arrow keys or click |
-| Map: overlay | LB / RB | 1–6 or Tab |
+| Map: overlay | LB / RB | 1–7 or Tab |
+| Release slung fuel bladder | X | F |
 | Landed: choose operation | D-pad up / down | Up / Down arrows |
 | Landed: start / stop it | A | E or Enter |
 | Pause | Menu | Esc |
@@ -84,11 +85,32 @@ Each runs one person or crate at a time; lift off to leave.
   base; scientists there earn research points; a crash loses everyone aboard.
 - **HUD:** seats and crates, people saved, scientists extracted and research earned.
 
+## What's in phase 4
+
+- **Fuel:** a 1,360 L tank, about 14 minutes hovering or 11–12 at cruise; climbing, speed and load
+  burn more. The HUD shows litres and minutes left, with low-fuel and bingo warnings.
+- **Flameout:** run dry and the engine quits. The rotor windmills you down at a survivable rate if
+  you stay level, and throttle up gives one flare to soften the landing. Without fuel you can't take
+  off again.
+- **Refuelling:** automatic while landed at Fort Kessler or a forward refuelling point, from their
+  stocks. Base fuel also runs the base's generators when the grid fails. In the city you can siphon
+  petrol stations (slow); stranded with nothing to siphon, you can abandon the helicopter, leaving
+  passengers and cargo in the district and taking a replacement at the base.
+- **Depots:** Harbor and Industrial Park truck fuel to the base while they're held, calm and guarded
+  by 15+ troops. Land at a depot (or the base) to hook up a 2,000 L fuel bladder on a sling. It swings
+  under the helicopter and weighs it down. Set it down from the menu or release it with F / X while
+  it's within 4 m of the ground; dropped from higher, it bursts.
+- **Forward refuelling points:** with a bladder slung and 4+ troops aboard, land anywhere in the city
+  to set one up. The troops stay to guard it, more bladders refill it, and it's lost if the district is
+  overrun. They show on the map, which also gains a Fuel overlay (7).
+
 ## Project layout
 
 ```
 src/sim/      City simulation (no browser dependencies), clock, layout, worker bridge
-src/world/    City generation and collision, street grid, people on the streets, effects, sky
+src/game/     Ground operations menu (loading, deploying, evacuating, fuel work)
+src/world/    City generation and collision, street grid, people on the streets, effects,
+              refuelling points, sky
 src/heli/     Helicopter flight model and chase camera
 src/input/    Keyboard, mouse and gamepad input
 src/ui/       HUD and debug map

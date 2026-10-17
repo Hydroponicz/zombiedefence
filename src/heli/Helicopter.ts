@@ -38,6 +38,21 @@ const GRAB_PULL = 1.3;
 const GRAB_PULL_MAX = 5;
 const GRAB_DAMAGE = 1.2;
 
+export const FUEL_CAPACITY = 1360; // litres
+/** Fuel burn in litres per real second. */
+const BURN_IDLE = 0.35;
+const BURN_HOVER = 1.6;
+const BURN_CLIMB = 0.7;
+const BURN_PER_MS = 0.008;
+const BURN_LOAD = 0.6;
+/** Engine out: the rotor windmills and gives this fraction of hover lift, plus one flare. */
+const AUTOROTATION_LIFT = 0.55;
+const FLARE_ACCEL = 8;
+const FLARE_SECONDS = 2.5;
+/** Sling rope length and bladder size. */
+const ROPE = 11;
+const BLADDER_HALF_HEIGHT = 0.7;
+
 export class Helicopter {
   readonly object = new THREE.Group();
   readonly velocity = new THREE.Vector3();
@@ -58,6 +73,20 @@ export class Helicopter {
   load = 0;
   /** Zombies hanging off the skids. */
   grabbers = 0;
+  fuel = FUEL_CAPACITY;
+  /** Litres per second being burned right now. */
+  burnRate = 0;
+  /** Litres in a bladder on the sling (set from the simulation's cargo). */
+  sling = 0;
+  /** Rope and bladder hang in world space, so they're added to the scene separately. */
+  readonly slingObject = new THREE.Group();
+  /** Height of the slung bladder's underside above whatever is below it. */
+  bladderClearance = 0;
+  readonly bladder = new THREE.Vector3();
+  private bladderVel = new THREE.Vector3();
+  private bladderMesh: THREE.Mesh;
+  private rope: THREE.Line;
+  private flare = FLARE_SECONDS;
 
   private mainRotor = new THREE.Group();
   private tailRotor = new THREE.Group();
@@ -138,6 +167,26 @@ export class Helicopter {
     this.searchlight.position.set(0, -1.1, -3.2);
     this.searchlight.target.position.set(0, -40, -60);
     this.object.add(this.searchlight, this.searchlight.target);
+
+    this.bladderMesh = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), new THREE.MeshLambertMaterial({ color: 0x1d1f1c }));
+    this.bladderMesh.scale.set(2.4, BLADDER_HALF_HEIGHT, 1.7);
+    this.bladderMesh.castShadow = true;
+    this.rope = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+      new THREE.LineBasicMaterial({ color: 0x222222 }),
+    );
+    this.rope.frustumCulled = false;
+    this.slingObject.add(this.bladderMesh, this.rope);
+    this.slingObject.visible = false;
+  }
+
+  /** Litres per second in level flight with the current load, for endurance estimates. */
+  get flightBurn(): number {
+    return BURN_HOVER + BURN_LOAD * this.load;
+  }
+
+  get engineOut(): boolean {
+    return this.fuel <= 0;
   }
 
   get position(): THREE.Vector3 {
@@ -154,7 +203,9 @@ export class Helicopter {
   }
 
   /** Place the helicopter on a surface, rotors stopped. */
-  reset(x: number, y: number, z: number, yaw: number): void {
+  reset(x: number, y: number, z: number, yaw: number, fuel = FUEL_CAPACITY): void {
+    this.fuel = fuel;
+    this.flare = FLARE_SECONDS;
     this.position.set(x, y + SKID_DEPTH, z);
     this.velocity.set(0, 0, 0);
     this.yaw = yaw;
@@ -172,8 +223,13 @@ export class Helicopter {
     const live = !this.destroyed;
     const controls = live ? input : { collective: -1, yaw: 0, pitch: 0, roll: 0 };
 
-    this.rotor = live ? Math.min(1, this.rotor + dt / SPOOL_TIME) : Math.max(0, this.rotor - dt / 6);
+    const engine = !this.engineOut;
+    if (live && engine) this.rotor = Math.min(1, this.rotor + dt / SPOOL_TIME);
+    // Out of fuel: the rotor windmills in the descent, and stops once down.
+    else if (live && !this.landed) this.rotor = Math.max(Math.min(this.rotor, 0.6), this.rotor - dt / 8);
+    else this.rotor = Math.max(0, this.rotor - dt / 6);
     const lift = this.rotor * this.rotor;
+    const thrust = engine ? lift : this.landed ? 0 : AUTOROTATION_LIFT;
 
     // Attitude: approach the stick's target and self-level when it is released.
     const k = 1 - Math.exp(-ATTITUDE_RESPONSE * (1 - LOAD_RESPONSE * this.load) * dt);
@@ -194,12 +250,30 @@ export class Helicopter {
 
     // Thrust along the rotor axis, scaled so neutral throttle holds altitude at any tilt.
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.object.quaternion);
-    const hold = (G / Math.max(0.45, up.y)) * lift;
+    const hold = (G / Math.max(0.45, up.y)) * thrust;
     const ceilingFade = Math.max(0, Math.min(1, (CEILING - this.position.y) / 80));
     const accel = up.multiplyScalar(hold * (0.6 + 0.4 * ceilingFade));
     const climb = CLIMB_ACCEL * (1 - LOAD_CLIMB * this.load) * ceilingFade;
-    const collective = controls.collective > 0 ? controls.collective * climb : controls.collective * DESCEND_ACCEL;
-    accel.y += collective * lift - G;
+    let collective: number;
+    if (engine) {
+      collective = (controls.collective > 0 ? controls.collective * climb : controls.collective * DESCEND_ACCEL) * lift;
+    } else if (controls.collective > 0 && this.flare > 0 && !this.landed) {
+      // Trade the rotor's stored energy for one flare before touchdown.
+      collective = controls.collective * FLARE_ACCEL;
+      this.flare -= dt;
+    } else {
+      collective = Math.min(0, controls.collective) * DESCEND_ACCEL * 0.5;
+    }
+    accel.y += collective - G;
+
+    if (live && engine) {
+      this.burnRate = this.landed && controls.collective <= 0.05
+        ? BURN_IDLE
+        : BURN_HOVER + BURN_CLIMB * Math.max(0, controls.collective) + BURN_PER_MS * this.speed + BURN_LOAD * this.load;
+      this.fuel = Math.max(0, this.fuel - this.burnRate * dt);
+    } else {
+      this.burnRate = 0;
+    }
     if (this.grabbers > 0 && live) {
       accel.y -= Math.min(GRAB_PULL_MAX, this.grabbers * GRAB_PULL);
       this.damage(this.grabbers * GRAB_DAMAGE * dt);
@@ -212,13 +286,52 @@ export class Helicopter {
     accel.addScaledVector(hv, -(DRAG_LINEAR + DRAG_QUAD * hs));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     accel.addScaledVector(right, -right.dot(hv) * LATERAL_DRAG);
-    accel.y -= v.y * VERTICAL_DRAG * lift;
+    accel.y -= v.y * VERTICAL_DRAG * (engine ? lift : this.landed ? 0 : 0.9);
 
     v.addScaledVector(accel, dt);
     this.position.addScaledVector(v, dt);
 
     this.resolveCollisions(dt, world);
+    this.updateSling(dt, world);
     this.animate(dt);
+  }
+
+  /** The slung bladder swings as a pendulum on its rope and rests on whatever is below. */
+  private updateSling(dt: number, world: CollisionWorld): void {
+    const hook = this.position.clone();
+    hook.y -= SKID_DEPTH;
+    if (this.sling <= 0) {
+      this.slingObject.visible = false;
+      this.bladder.copy(hook).y -= ROPE;
+      this.bladderVel.set(0, 0, 0);
+      return;
+    }
+    this.slingObject.visible = true;
+    const b = this.bladder;
+    this.bladderVel.y -= G * dt;
+    this.bladderVel.multiplyScalar(Math.exp(-0.6 * dt));
+    b.addScaledVector(this.bladderVel, dt);
+    const toBladder = b.clone().sub(hook);
+    const len = toBladder.length();
+    if (len > ROPE) {
+      const dir = toBladder.divideScalar(len);
+      b.copy(hook).addScaledVector(dir, ROPE);
+      const radial = this.bladderVel.dot(dir);
+      if (radial > 0) this.bladderVel.addScaledVector(dir, -radial);
+    }
+    const ground = world.surfaceHeight(b.x, b.z) + BLADDER_HALF_HEIGHT;
+    if (b.y < ground) {
+      b.y = ground;
+      this.bladderVel.y = Math.max(0, this.bladderVel.y);
+      this.bladderVel.x *= Math.exp(-6 * dt);
+      this.bladderVel.z *= Math.exp(-6 * dt);
+    }
+    this.bladderClearance = b.y - ground;
+    this.bladderMesh.position.copy(b);
+    const pos = this.rope.geometry.getAttribute('position') as THREE.BufferAttribute;
+    pos.setXYZ(0, hook.x, hook.y, hook.z);
+    pos.setXYZ(1, b.x, b.y + BLADDER_HALF_HEIGHT, b.z);
+    pos.needsUpdate = true;
   }
 
   private resolveCollisions(dt: number, world: CollisionWorld): void {

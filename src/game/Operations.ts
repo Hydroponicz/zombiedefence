@@ -1,9 +1,25 @@
 // What the player can do while the helicopter is on the ground: a short menu of operations
-// (load at the base; deploy, drop, evacuate, relieve or extract in the city). An operation
-// runs one person or crate at a time and pauses while zombies are at the doors.
+// (load at the base; deploy, drop, evacuate, relieve or extract in the city; fuel work). An
+// operation runs one person, crate or pump-load at a time and pauses while zombies are at the
+// doors. Refuelling at the base or a forward refuelling point happens on its own.
 
 import type { Action } from '../input/Input';
-import { canApply, CRATES, passengers, ROUNDS_PER_TROOP, SEATS, seatsUsed, BASE_RESERVE_TROOPS, baseOf, type PlayerCommand } from '../sim/operations';
+import {
+  BASE_RESERVE_TROOPS,
+  baseOf,
+  BLADDER_LITRES,
+  canApply,
+  CRATES,
+  FARP_GUARDS,
+  farpNear,
+  fuelStock,
+  passengers,
+  ROUNDS_PER_TROOP,
+  SEATS,
+  seatsUsed,
+  type FuelSource,
+  type PlayerCommand,
+} from '../sim/operations';
 import type { CityState, CrateKind } from '../sim/types';
 
 export interface GroundContext {
@@ -15,7 +31,20 @@ export interface GroundContext {
   /** Zombies close to the doors, and hanging off the skids. */
   threat: number;
   grabbers: number;
+  /** Where the helicopter is, for forward refuelling points. */
+  x: number;
+  z: number;
+  fuel: number;
+  fuelCapacity: number;
 }
+
+/** Forward refuelling points serve helicopters landed within this many metres. */
+export const FARP_RADIUS = 35;
+/** Pump rates in litres per second: base and refuelling points, and siphoning in the city. */
+const PUMP_RATE = 80;
+const SIPHON_RATE = 20;
+/** Below this share of a tank, with no fuel to be had, the crew can abandon the helicopter. */
+const ABANDON_FUEL = 0.05;
 
 export interface OperationView {
   label: string;
@@ -40,6 +69,8 @@ interface Option {
   detail: string;
   enabled: boolean;
   command: PlayerCommand;
+  /** Runs after the command is sent (e.g. putting pumped fuel in the tank). */
+  after?: () => void;
   /** Seconds per person or crate. */
   interval: number;
   /** Keep going until full, empty or stopped. */
@@ -58,8 +89,18 @@ export class Operations {
   private active: { id: string; timer: number; interval: number } | null = null;
   private wasLanded = false;
   private lastDistrict = -1;
+  private pumpTimer = 0;
 
-  constructor(private send: (cmd: PlayerCommand) => void) {}
+  /**
+   * @param send passes a command to the simulation
+   * @param addFuel puts litres into the helicopter's tank
+   * @param onAbandon the crew leaves the helicopter (a replacement is waiting at the base)
+   */
+  constructor(
+    private send: (cmd: PlayerCommand) => void,
+    private addFuel: (litres: number) => void = () => {},
+    private onAbandon: () => void = () => {},
+  ) {}
 
   update(dt: number, ctx: GroundContext, state: CityState | null, actions: Set<Action>): void {
     if (!ctx.landed || !state || ctx.district < 0) {
@@ -89,7 +130,26 @@ export class Operations {
     }
     this.wasLanded = true;
 
-    const options = atBase ? this.baseOptions(state) : this.districtOptions(state, ctx);
+    // Pumps at the base and at forward refuelling points fill the tank on their own.
+    const farp = farpNear(state, ctx.x, ctx.z, FARP_RADIUS);
+    const pump: FuelSource | null = atBase ? { district: ctx.district } : farp ? { farp: farp.id } : null;
+    let pumping = '';
+    if (pump && ctx.fuel < ctx.fuelCapacity - 0.5) {
+      this.pumpTimer += dt;
+      const stock = fuelStock(state, pump);
+      if (stock <= 0) pumping = farp ? 'Refuelling point is dry' : 'Base fuel stores are empty';
+      else {
+        pumping = `Refuelling ${Math.floor(ctx.fuel)}/${ctx.fuelCapacity} L`;
+        if (this.pumpTimer >= 0.25) {
+          const litres = Math.min(this.pumpTimer * PUMP_RATE, ctx.fuelCapacity - ctx.fuel, stock);
+          this.pumpTimer = 0;
+          this.send({ type: 'refuel', source: pump, litres });
+          this.addFuel(litres);
+        }
+      }
+    }
+
+    const options = atBase ? this.baseOptions(state, ctx) : this.districtOptions(state, ctx);
     if (actions.has('dpadUp') || actions.has('arrowUp')) this.selected--;
     if (actions.has('dpadDown') || actions.has('arrowDown')) this.selected++;
     this.selected = (this.selected + options.length) % options.length;
@@ -111,6 +171,7 @@ export class Operations {
         this.active.timer -= dt;
         if (this.active.timer <= 0) {
           this.send(option.command);
+          option.after?.();
           if (option.repeat) this.active.timer = option.interval;
           else this.active = null;
         }
@@ -121,8 +182,8 @@ export class Operations {
 
     const c = state.cargo;
     this.view = {
-      title: `${state.districts[ctx.district].name}: on the ground${ctx.onRoof ? ' (rooftop)' : ''}`,
-      status: status || `Seats ${seatsUsed(c)}/${SEATS}`,
+      title: `${state.districts[ctx.district].name}: on the ground${farp ? ' at the refuelling point' : ctx.onRoof ? ' (rooftop)' : ''}`,
+      status: status || [`Seats ${seatsUsed(c)}/${SEATS}`, pumping].filter(Boolean).join(' · '),
       warning: !!status,
       options: options.map((o, i) => ({
         label: o.label,
@@ -135,7 +196,60 @@ export class Operations {
     };
   }
 
-  private baseOptions(s: CityState): Option[] {
+  /** Fuel work available here: bladders, refuelling points, siphoning, and abandoning when stranded. */
+  private fuelOptions(s: CityState, ctx: GroundContext, atBase: boolean): Option[] {
+    const d = s.districts[ctx.district];
+    const c = s.cargo;
+    const options: Option[] = [];
+    const farp = farpNear(s, ctx.x, ctx.z, FARP_RADIUS);
+    if (d.features.fuelDepot && c.sling === 0) {
+      const command: PlayerCommand = { type: 'hookBladder', district: d.id };
+      options.push({
+        id: 'hook', label: 'Hook up a fuel bladder',
+        detail: `${BLADDER_LITRES.toLocaleString('en-US')} L · ${fmt(d.fuel)} L in the depot`,
+        enabled: canApply(s, command), command, interval: 3, repeat: false,
+      });
+    }
+    if (c.sling > 0) {
+      const release: PlayerCommand = { type: 'releaseBladder', district: d.id, farp: farp?.id };
+      options.push({
+        id: 'release', label: farp ? 'Refill the refuelling point' : 'Set down the fuel bladder',
+        detail: farp ? `${fmt(farp.fuel)} L there now` : `Into ${d.name}'s stocks`,
+        enabled: canApply(s, release), command: release, interval: 2, repeat: false,
+      });
+      if (!atBase && !farp) {
+        const setup: PlayerCommand = { type: 'setupFarp', district: d.id, x: ctx.x, z: ctx.z };
+        options.push({
+          id: 'farp', label: 'Set up a forward refuelling point',
+          detail: c.troops < FARP_GUARDS ? `Needs ${FARP_GUARDS} troops aboard to guard it` : `Leaves ${FARP_GUARDS} troops on guard`,
+          enabled: canApply(s, setup), command: setup, interval: 4, repeat: false,
+        });
+      }
+    }
+    if (!atBase && !farp) {
+      const source: FuelSource = { district: d.id };
+      const litres = SIPHON_RATE * 0.5;
+      options.push({
+        id: 'siphon', label: d.features.fuelDepot ? 'Refuel from the depot' : 'Siphon fuel from petrol stations',
+        detail: `${fmt(d.fuel)} L here · tank ${Math.floor(ctx.fuel)}/${ctx.fuelCapacity}`,
+        enabled: d.fuel > 0 && ctx.fuel < ctx.fuelCapacity - 1,
+        command: { type: 'refuel', source, litres },
+        after: () => this.addFuel(Math.min(litres, fuelStock(s, source))),
+        interval: 0.5, repeat: true,
+      });
+      if (ctx.fuel < ctx.fuelCapacity * ABANDON_FUEL && d.fuel <= 0) {
+        options.push({
+          id: 'abandon', label: 'Abandon the helicopter',
+          detail: 'Passengers and cargo stay here; the crew is recovered',
+          enabled: true, command: { type: 'abandon', district: d.id }, after: () => this.onAbandon(),
+          interval: 2, repeat: false,
+        });
+      }
+    }
+    return options;
+  }
+
+  private baseOptions(s: CityState, ctx: GroundContext): Option[] {
     const base = baseOf(s);
     const c = s.cargo;
     const crate = (kind: CrateKind, stock: number): Option => {
@@ -175,7 +289,7 @@ export class Operations {
         repeat: true,
       });
     }
-    return options;
+    return [...options, ...this.fuelOptions(s, ctx, true)];
   }
 
   private districtOptions(s: CityState, ctx: GroundContext): Option[] {
@@ -235,6 +349,6 @@ export class Operations {
         repeat: true,
       });
     }
-    return options;
+    return [...options, ...this.fuelOptions(s, ctx, false)];
   }
 }

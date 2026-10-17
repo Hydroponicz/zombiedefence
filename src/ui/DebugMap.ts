@@ -5,7 +5,7 @@ import { formatClock, MINUTES_PER_DAY, NIGHT_START, DAY_START } from '../sim/clo
 import { CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE, DISTRICT_TEMPLATES, GRID_COLS, GRID_ROWS } from '../sim/layout';
 import type { CityState, DistrictState } from '../sim/types';
 
-const OVERLAYS = ['Status', 'Infection', 'Power', 'Order', 'Supplies', 'Troops'] as const;
+const OVERLAYS = ['Status', 'Infection', 'Power', 'Order', 'Supplies', 'Troops', 'Fuel'] as const;
 type Overlay = (typeof OVERLAYS)[number];
 
 const STATUS_COLOR = { held: '#3f8f5a', contested: '#c98a2b', overrun: '#a8322d' } as const;
@@ -123,7 +123,7 @@ export class DebugMap {
     );
     const tabs = OVERLAYS.map((o, i) => (o === this.overlay ? `[${i + 1} ${o}]` : `${i + 1} ${o}`)).join('   ');
     this.text(tabs, W - pad, 30, 14, '#e8ecdf', 'right');
-    this.text('D-pad/arrows: select   ·   LB/RB or 1–6: overlay   ·   LT/RT or [ ]: time   ·   View/B or M/Esc: close', W - pad, 54, 12, '#a5ad9c', 'right');
+    this.text('D-pad/arrows: select   ·   LB/RB or 1–7: overlay   ·   LT/RT or [ ]: time   ·   View/B or M/Esc: close', W - pad, 54, 12, '#a5ad9c', 'right');
   }
 
   private districtColor(d: DistrictState): string {
@@ -141,6 +141,9 @@ export class DebugMap {
         return ramp(d.rations / Math.max(1, people) / 3);
       case 'Troops':
         return d.troops.strength < 1 ? '#3a3d40' : ramp(d.troops.morale * (1 - d.troops.fatigue * 0.5));
+      case 'Fuel':
+        // Log scale: a few thousand litres at petrol stations up to hundreds of thousands at a depot.
+        return ramp(Math.log10(Math.max(1, d.fuel)) / 5.5);
     }
   }
 
@@ -159,6 +162,8 @@ export class DebugMap {
         return `food ${(d.rations / Math.max(1, people)).toFixed(1)} days`;
       case 'Troops':
         return `${fmt(d.troops.strength)} · fat ${(d.troops.fatigue * 100).toFixed(0)}% · mor ${(d.troops.morale * 100).toFixed(0)}%`;
+      case 'Fuel':
+        return `${fmt(d.fuel)} L${d.features.fuelDepot && d.kind !== 'airbase' ? (d.flags.convoyStopped ? ' · convoys stopped' : ' · convoys running') : ''}`;
     }
   }
 
@@ -186,6 +191,18 @@ export class DebugMap {
         .filter(Boolean)
         .join(' ');
       this.text(icons, x + cell - 10, y + 10 + size, size, light, 'right');
+    }
+
+    // Forward refuelling points.
+    for (const f of s.farps) {
+      const fx = mx + (f.x + CITY_WIDTH / 2) * scale;
+      const fy = my + (f.z + CITY_DEPTH / 2) * scale;
+      g.fillStyle = '#c9772b';
+      g.strokeStyle = '#000';
+      g.lineWidth = 1.5;
+      g.fillRect(fx - 6, fy - 6, 12, 12);
+      g.strokeRect(fx - 6, fy - 6, 12, 12);
+      this.text(`FARP ${fmt(f.fuel)} L`, fx + 9, fy + 4, 11, '#f3d2a8');
     }
 
     // Helicopter marker.

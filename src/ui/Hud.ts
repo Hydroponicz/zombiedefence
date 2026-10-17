@@ -21,9 +21,10 @@ export const CONTROLS_HTML = `
   <tr><td>City map (debug)</td><td>View</td><td><kbd>M</kbd></td></tr>
   <tr><td>Time speed</td><td>D-pad ◀ ▶ (LT / RT on the map)</td><td><kbd>[</kbd> / <kbd>]</kbd></td></tr>
   <tr><td>Map: select district</td><td>D-pad</td><td>Arrow keys or click</td></tr>
-  <tr><td>Map: overlay</td><td>LB / RB</td><td><kbd>1</kbd>–<kbd>6</kbd> or <kbd>Tab</kbd></td></tr>
+  <tr><td>Map: overlay</td><td>LB / RB</td><td><kbd>1</kbd>–<kbd>7</kbd> or <kbd>Tab</kbd></td></tr>
   <tr><td>Pause</td><td>Menu</td><td><kbd>Esc</kbd></td></tr>
   <tr><td>Show / hide controls</td><td></td><td><kbd>H</kbd></td></tr>
+  <tr><td>Release slung fuel bladder</td><td>X</td><td><kbd>F</kbd></td></tr>
   <tr><td>Landed: choose operation</td><td>D-pad ▲ ▼</td><td><kbd>↑</kbd> / <kbd>↓</kbd></td></tr>
   <tr><td>Landed: start / stop it</td><td>A</td><td><kbd>E</kbd> or <kbd>Enter</kbd></td></tr>
   <tr><td>Controller readout</td><td></td><td><kbd>G</kbd></td></tr>
@@ -45,7 +46,17 @@ export interface FlightReadout {
   drawn: number;
   /** Zombies hanging off the skids. */
   grabbers: number;
+  fuel: number;
+  fuelCapacity: number;
+  /** Litres per second being burned. */
+  burnRate: number;
+  engineOut: boolean;
+  /** Litres slung under the helicopter. */
+  sling: number;
 }
+
+const LOW_FUEL = 0.2;
+const BINGO_FUEL = 0.1;
 
 export class Hud {
   private clock = el('hud-clock');
@@ -184,19 +195,36 @@ export class Hud {
         : `<div class="name">Outside the city</div>`;
     }
 
+    const fuelShare = flight.fuel / flight.fuelCapacity;
+    const warn = (text: string, color = 'var(--warn)') => `<span style="color:${color}">${text}</span>`;
     const state = flight.destroyed
       ? 'DESTROYED'
       : flight.grabbers > 0
-        ? `<span style="color:var(--critical)">${flight.grabbers} ON THE SKIDS · CLIMB!</span>`
-        : flight.drawn > 0
-        ? `<span style="color:var(--warn)">ROTOR NOISE · ${flight.drawn} drawn in</span>`
-        : flight.landed ? 'LANDED' : flight.searchlight ? 'SEARCHLIGHT ON' : '';
+        ? warn(`${flight.grabbers} ON THE SKIDS · CLIMB!`, 'var(--critical)')
+        : flight.engineOut && !flight.landed
+          ? warn('FLAMEOUT · AUTOROTATE, THROTTLE UP TO FLARE', 'var(--critical)')
+          : flight.engineOut
+            ? warn('OUT OF FUEL', 'var(--critical)')
+            : flight.drawn > 0
+              ? warn(`ROTOR NOISE · ${flight.drawn} drawn in`)
+              : flight.sling > 0 && !flight.landed
+                ? `SLING ${flight.sling.toLocaleString('en-US')} L · release low (F / X)`
+                : fuelShare < BINGO_FUEL
+                  ? warn('BINGO FUEL · LAND NOW', 'var(--critical)')
+                  : fuelShare < LOW_FUEL
+                    ? warn('LOW FUEL')
+                    : flight.landed ? 'LANDED' : flight.searchlight ? 'SEARCHLIGHT ON' : '';
+    const minutes = flight.burnRate > 0 ? flight.fuel / flight.burnRate / 60 : 0;
+    const fuelColor = fuelShare > LOW_FUEL ? 'var(--held)' : fuelShare > BINGO_FUEL ? 'var(--warn)' : 'var(--critical)';
     const hp = Math.round(flight.health);
     this.flight.innerHTML = `
       <span class="label">ALT</span><span>${Math.round(flight.altitude)} m</span>
       <span class="label">SPD</span><span>${Math.round(flight.speed * 3.6)} km/h</span>
       <span class="label">V/S</span><span>${flight.verticalSpeed >= 0 ? '+' : ''}${flight.verticalSpeed.toFixed(1)} m/s</span>
       <span class="label">HDG</span><span>${String(Math.round(flight.heading)).padStart(3, '0')}°</span>
+      <span class="label">FUEL</span><span style="color:${fuelColor}">${Math.floor(flight.fuel)} L${minutes ? ` · ${minutes < 1 ? '<1' : Math.floor(minutes)} min` : ''}</span>
+      <div class="bar"><div style="width:${Math.round(fuelShare * 100)}%;background:${fuelColor}"></div></div>
+      <span class="label">HULL</span><span>${hp}%</span>
       <div class="bar"><div style="width:${hp}%;background:${hp > 50 ? 'var(--held)' : hp > 25 ? 'var(--warn)' : 'var(--critical)'}"></div></div>
       <span class="state">${state}</span>`;
 

@@ -55,6 +55,8 @@ export type Action =
   | 'padDebug'
   /** Start or stop the selected ground operation. */
   | 'confirm'
+  /** Let go of the slung fuel bladder. */
+  | 'sling'
   | `overlay${number}`;
 
 const KEY_ACTIONS: Record<string, Action> = {
@@ -66,6 +68,7 @@ const KEY_ACTIONS: Record<string, Action> = {
   KeyC: 'camera',
   KeyG: 'padDebug',
   KeyE: 'confirm',
+  KeyF: 'sling',
   Enter: 'confirm',
   BracketRight: 'timeFaster',
   BracketLeft: 'timeSlower',
@@ -78,6 +81,7 @@ const PAD_ACTIONS: [number, Action][] = [
   [PAD.VIEW, 'map'],
   [PAD.MENU, 'pause'],
   [PAD.A, 'confirm'],
+  [PAD.X, 'sling'],
   [PAD.Y, 'searchlight'],
   [PAD.R3, 'camera'],
   [PAD.RB, 'next'],

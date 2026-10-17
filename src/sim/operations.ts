@@ -3,7 +3,7 @@
 // one crate, so the game can pace them (and a hot landing zone can interrupt them).
 
 import { nextRandom } from './rng';
-import type { Cargo, CityState, CrateKind, DistrictState, Severity } from './types';
+import type { Cargo, CityState, CrateKind, DistrictState, Farp, Severity } from './types';
 
 export const SEATS = 8;
 export const CRATE_SLOTS = 2;
@@ -17,6 +17,14 @@ export const CRATES: Record<CrateKind, { amount: number; order: number; label: s
   ammo: { amount: 15000, order: 2, label: 'ammunition' },
   medicine: { amount: 3000, order: 3, label: 'medicine' },
 };
+
+/** Litres in one sling-loaded fuel bladder. */
+export const BLADDER_LITRES = 2000;
+/** Soldiers left behind to guard a forward refuelling point. */
+export const FARP_GUARDS = 4;
+/** Minimum distance between forward refuelling points, in metres. */
+export const FARP_SPACING = 150;
+const FUEL_KG_PER_LITRE = 0.8;
 
 const PASSENGER_KG = 100;
 const TROOP_KG = 120;
@@ -34,12 +42,34 @@ export type PlayerCommand =
   | { type: 'board'; district: number; kind: BoardKind }
   | { type: 'unloadAtBase' }
   /** The helicopter went down: everyone and everything aboard is lost. */
-  | { type: 'crash'; district: number };
+  | { type: 'crash'; district: number }
+  /** Pump fuel into the helicopter from a district's stocks or a forward refuelling point. */
+  | { type: 'refuel'; source: FuelSource; litres: number }
+  | { type: 'hookBladder'; district: number }
+  /** Set the slung bladder down: into a forward refuelling point if given, else the district's stocks. */
+  | { type: 'releaseBladder'; district: number; farp?: number }
+  /** Dropped from too high: the fuel is lost. */
+  | { type: 'burstBladder'; district: number }
+  | { type: 'setupFarp'; district: number; x: number; z: number }
+  /** Out of fuel with no way to get more: everything aboard stays in the district and the crew is recovered. */
+  | { type: 'abandon'; district: number };
+
+export type FuelSource = { district: number } | { farp: number };
+
+/** Litres available from a fuel source. */
+export function fuelStock(s: CityState, source: FuelSource): number {
+  if ('farp' in source) return s.farps.find((f) => f.id === source.farp)?.fuel ?? 0;
+  return s.districts[source.district]?.fuel ?? 0;
+}
+
+export function farpNear(s: CityState, x: number, z: number, radius: number): Farp | undefined {
+  return s.farps.find((f) => Math.hypot(f.x - x, f.z - z) < radius);
+}
 
 export type Emit = (district: number | null, severity: Severity, text: string) => void;
 
 export function emptyCargo(): Cargo {
-  return { troops: 0, troopFatigue: 0, civilians: 0, infected: 0, tired: 0, tiredFatigue: 0, scientists: 0, crates: [] };
+  return { troops: 0, troopFatigue: 0, civilians: 0, infected: 0, tired: 0, tiredFatigue: 0, scientists: 0, crates: [], sling: 0 };
 }
 
 export function seatsUsed(c: Cargo): number {
@@ -51,7 +81,8 @@ export function passengers(c: Cargo): number {
 }
 
 export function payloadKg(c: Cargo): number {
-  return (c.troops + c.tired) * TROOP_KG + (c.civilians + c.infected + c.scientists) * PASSENGER_KG + c.crates.length * CRATE_KG;
+  return (c.troops + c.tired) * TROOP_KG + (c.civilians + c.infected + c.scientists) * PASSENGER_KG +
+    c.crates.length * CRATE_KG + c.sling * FUEL_KG_PER_LITRE;
 }
 
 export function baseOf(s: CityState): DistrictState {
@@ -94,7 +125,21 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
     case 'unloadAtBase':
       return passengers(c) > 0;
     case 'crash':
+    case 'abandon':
       return true;
+    case 'refuel':
+      return cmd.litres > 0 && fuelStock(s, cmd.source) > 0;
+    case 'hookBladder': {
+      const d = s.districts[cmd.district];
+      return c.sling === 0 && !!d.features.fuelDepot && d.fuel >= BLADDER_LITRES;
+    }
+    case 'releaseBladder':
+      return c.sling > 0 && (cmd.farp === undefined || s.farps.some((f) => f.id === cmd.farp));
+    case 'burstBladder':
+      return c.sling > 0;
+    case 'setupFarp':
+      return c.sling > 0 && c.troops >= FARP_GUARDS && s.districts[cmd.district].kind !== 'airbase' &&
+        !farpNear(s, cmd.x, cmd.z, FARP_SPACING);
   }
 }
 
@@ -185,6 +230,60 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       s.stats.troopsRelieved += c.tired;
       c.civilians = c.infected = c.tired = c.tiredFatigue = c.scientists = 0;
       emit(base.id, 'info', `${parts.join(', ')} brought in to ${base.name}.`);
+      return true;
+    }
+    case 'refuel': {
+      const take = Math.min(cmd.litres, fuelStock(s, cmd.source));
+      if ('farp' in cmd.source) s.farps.find((f) => f.id === (cmd.source as { farp: number }).farp)!.fuel -= take;
+      else s.districts[cmd.source.district].fuel -= take;
+      return true;
+    }
+    case 'hookBladder': {
+      const d = s.districts[cmd.district];
+      d.fuel -= BLADDER_LITRES;
+      c.sling = BLADDER_LITRES;
+      return true;
+    }
+    case 'releaseBladder': {
+      const d = s.districts[cmd.district];
+      const farp = s.farps.find((f) => f.id === cmd.farp);
+      if (farp) farp.fuel += c.sling;
+      else d.fuel += c.sling;
+      emit(d.id, 'info', `${c.sling.toLocaleString('en-US')} litres of fuel delivered to ${farp ? `the refuelling point in ${d.name}` : d.name}.`);
+      c.sling = 0;
+      return true;
+    }
+    case 'burstBladder':
+      emit(cmd.district >= 0 ? cmd.district : null, 'warn', 'A fuel bladder burst on impact. The fuel is lost.');
+      c.sling = 0;
+      return true;
+    case 'setupFarp': {
+      const d = s.districts[cmd.district];
+      const farp: Farp = { id: ++s.farpSeq, district: d.id, x: cmd.x, z: cmd.z, fuel: c.sling };
+      s.farps.push(farp);
+      mergeTroops(d, FARP_GUARDS, c.troopFatigue, 0.95, FARP_GUARDS * ROUNDS_PER_TROOP);
+      c.troops -= FARP_GUARDS;
+      if (c.troops === 0) c.troopFatigue = 0;
+      c.sling = 0;
+      emit(d.id, 'info', `Forward refuelling point set up in ${d.name}, guarded by ${FARP_GUARDS} troops.`);
+      return true;
+    }
+    case 'abandon': {
+      const d = s.districts[cmd.district];
+      if (d) {
+        d.population += c.civilians;
+        d.infected += c.infected;
+        d.scientists += c.scientists;
+        if (c.troops + c.tired > 0) mergeTroops(d, c.troops + c.tired, (c.troopFatigue * c.troops + c.tiredFatigue * c.tired) / (c.troops + c.tired), 0.7, c.troops * ROUNDS_PER_TROOP);
+        for (const kind of c.crates) {
+          if (kind === 'rations') d.rations += CRATES.rations.amount;
+          else if (kind === 'medicine') d.medicine += CRATES.medicine.amount;
+          else d.troops.ammo += CRATES.ammo.amount;
+        }
+        d.fuel += c.sling;
+      }
+      s.cargo = emptyCargo();
+      emit(d ? d.id : null, 'warn', `Helicopter abandoned${d ? ` in ${d.name}` : ''} out of fuel. The crew has been recovered.`);
       return true;
     }
     case 'crash': {

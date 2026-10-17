@@ -220,9 +220,9 @@ throttle, light assists. Deadzones and sensitivity are configurable. Uses the Ga
 
 ## Build order
 
-Status: phases 1–3 are done (see README). Research points accumulate but there is nothing to spend
+Status: phases 1–4 are done (see README). Research points accumulate but there is nothing to spend
 them on yet (phase 7). The base gets a daily supply flight so the player has troops and stores to
-move; base stores and the flight are where fuel will hook in (phase 4).
+move. The supply flight deliberately brings no fuel: fuel comes from the city's depots.
 
 Phase 1 tuning note: with no player, the baseline run is a slow outbreak on days 1–4, shortages
 and riots on days 4–6, most districts falling on days 6–9, and the base falling around day 14–16.

@@ -55,6 +55,10 @@ export const TUNING = {
   supplyFlightAmmo: 30000,
   /** Research points per scientist at the base per game hour. */
   researchPerScientist: 1,
+  /** Litres per hour a defended fuel depot trucks to the base. */
+  convoyLitres: 600,
+  /** Troops a depot needs to keep its convoys running. */
+  convoyGuards: 15,
 };
 
 export class CitySim {
@@ -102,6 +106,8 @@ export function createCity(seed: number | string): CityState {
     collapsedAt: null,
     flags: {},
     cargo: emptyCargo(),
+    farps: [],
+    farpSeq: 0,
     research: 0,
     stats: { civiliansEvacuated: 0, scientistsEvacuated: 0, troopsDeployed: 0, troopsRelieved: 0, cratesDelivered: 0, lostInCrashes: 0 },
   };
@@ -125,7 +131,8 @@ export function createCity(seed: number | string): CityState {
       troops: { strength: tpl.troops, fatigue: 0, morale: 0.85, ammo: tpl.troops * TUNING.roundsPerSoldier },
       rations: tpl.rations ?? people * TUNING.startingRationDays * (0.75 + rand() * 0.5),
       medicine: tpl.medicine ?? people * 0.05,
-      fuel: tpl.fuel ?? 0,
+      // Districts without a depot still have a little at petrol stations.
+      fuel: tpl.fuel ?? 3000,
       power: 'on',
       powerThreshold: tpl.powerThreshold ?? 0.35 + rand() * 0.45,
       order: 80,
@@ -172,7 +179,9 @@ function tick(s: CityState, out: SimEvent[]): void {
 
   migrate(s, night);
   if (hourly) distributeRations(s, emit);
+  if (hourly) fuelConvoys(s, emit);
   for (const d of ds) updateStatus(d, emit);
+  loseFarps(s, emit);
 
   const base = baseOf(s);
   s.research += base.scientists * TUNING.researchPerScientist * H;
@@ -195,6 +204,39 @@ function makeEmit(s: CityState, out: SimEvent[]): Emit {
     s.log.push(e);
     if (s.log.length > LOG_LIMIT) s.log.shift();
   };
+}
+
+/** Defended depots truck fuel to the base. Convoys stop when a depot riots, falls or loses its guards. */
+function fuelConvoys(s: CityState, emit: Emit): void {
+  const base = baseOf(s);
+  if (base.status === 'overrun') return;
+  for (const d of s.districts) {
+    if (!d.features.fuelDepot || d === base) continue;
+    const running = d.status !== 'overrun' && !d.rioting && d.troops.strength >= TUNING.convoyGuards && d.fuel > 0;
+    const key = 'convoyStopped';
+    if (running) {
+      const litres = Math.min(TUNING.convoyLitres, d.fuel);
+      d.fuel -= litres;
+      base.fuel += litres;
+      if (d.flags[key]) {
+        d.flags[key] = false;
+        emit(d.id, 'info', `Fuel convoys from ${d.name} are running again.`);
+      }
+    } else if (!d.flags[key]) {
+      d.flags[key] = true;
+      emit(d.id, 'warn', `Fuel convoys from ${d.name} have stopped.`);
+    }
+  }
+}
+
+/** A forward refuelling point is lost when its district is overrun. */
+function loseFarps(s: CityState, emit: Emit): void {
+  s.farps = s.farps.filter((f) => {
+    const d = s.districts[f.district];
+    if (d.status !== 'overrun') return true;
+    emit(d.id, 'critical', `The forward refuelling point in ${d.name} has been overrun.`);
+    return false;
+  });
 }
 
 /** Fresh soldiers and supplies flown in from outside, while the base holds. */
