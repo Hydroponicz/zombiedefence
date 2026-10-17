@@ -46,7 +46,12 @@ interface Person extends HumanRef {
   timer: number;
   cooldown: number;
   post: number;
+  /** Clothes and skin, fixed for life so the figure keeps its colours. */
+  look: number;
 }
+
+const CLOTHES = [0x2f5f9a, 0xa83a32, 0xd8c9a8, 0x3d6b45, 0x7a4f8c, 0xc98f2b, 0x2c2c2c, 0xe0e0dc];
+const SKINS = [0xe0b48f, 0xb98563, 0x8d5a3b, 0xf1c9a5];
 
 /** Radius around the helicopter that is populated with residents and people. */
 export const ACTIVE_RADIUS = RESIDENT_RADIUS;
@@ -107,6 +112,7 @@ export class Agents {
   private e = new THREE.Euler();
   private v = new THREE.Vector3();
   private s = new THREE.Vector3(1, 1, 1);
+  private c = new THREE.Color();
 
   constructor(seed: number | string, private effects: Effects, walk: WalkGrid | null = null) {
     this.rand = makeRandom(`agents-${seed}`);
@@ -280,6 +286,7 @@ export class Agents {
         ni, nj, pi: i, pj: j,
         ox: (this.rand() - 0.5) * 16, oz: (this.rand() - 0.5) * 16,
         speed: 1.2 + this.rand() * 0.5, phase: this.rand() * 10, timer: 0, cooldown: 0, post: -1,
+        look: Math.floor(this.rand() * 1024),
       };
     }
     return null;
@@ -299,7 +306,7 @@ export class Agents {
       kind: Kind.Soldier, civilian: false, mode: Mode.Post, district,
       x: p.x + Math.cos(ang) * r, z: p.z + Math.sin(ang) * r, heading: ang,
       ni: 0, nj: 0, pi: 0, pj: 0, ox: 0, oz: 0, speed: 0,
-      phase: 0, timer: 0, cooldown: this.rand() * 2, post: i,
+      phase: 0, timer: 0, cooldown: this.rand() * 2, post: i, look: 0,
     };
   }
 
@@ -502,40 +509,52 @@ export class Agents {
   // --- Rendering ------------------------------------------------------------------------
 
   private buildMeshes(): void {
-    const box = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+    const box = (w: number, h: number, d: number, x: number, y: number, z: number, color?: number) => {
       const g = new THREE.BoxGeometry(w, h, d);
       g.translate(x, y, z);
+      if (color !== undefined) {
+        const c = new THREE.Color(color);
+        const n = g.getAttribute('position').count;
+        g.setAttribute('color', new THREE.Float32BufferAttribute(Array.from({ length: n }, () => [c.r, c.g, c.b]).flat(), 3));
+      }
       return g;
     };
-    const legs = box(0.36, 0.86, 0.2, 0, 0.43, 0);
-    const torso = box(0.44, 0.6, 0.25, 0, 1.15, 0);
-    const armsDown = [box(0.11, 0.6, 0.11, -0.29, 1.12, 0), box(0.11, 0.6, 0.11, 0.29, 1.12, 0)];
-    const armsForward = [box(0.11, 0.11, 0.6, -0.22, 1.36, -0.3), box(0.11, 0.11, 0.6, 0.22, 1.36, -0.3)];
-    const rifle = box(0.07, 0.09, 0.9, 0.11, 1.28, -0.4);
-    const bodyGeo = {
-      [Kind.Civilian]: mergeGeometries([legs, torso, ...armsDown]),
-      [Kind.Soldier]: mergeGeometries([legs, torso, ...armsForward, rifle]),
-    };
-    const headGeo = {
-      [Kind.Civilian]: box(0.22, 0.25, 0.22, 0, 1.6, 0),
-      [Kind.Soldier]: box(0.28, 0.2, 0.28, 0, 1.66, 0),
-    };
-    const civilianClothes = [0x2f5f9a, 0xa83a32, 0xd8c9a8, 0x3d6b45, 0x7a4f8c, 0xc98f2b, 0x2c2c2c, 0xe0e0dc];
-    const skins = [0xe0b48f, 0xb98563, 0x8d5a3b, 0xf1c9a5];
+    // Civilians: plain clothes, arms at their sides (colours per instance).
+    const civilianBody = mergeGeometries([
+      box(0.36, 0.86, 0.2, 0, 0.43, 0), box(0.44, 0.6, 0.25, 0, 1.15, 0),
+      box(0.11, 0.6, 0.11, -0.29, 1.12, 0), box(0.11, 0.6, 0.11, 0.29, 1.12, 0),
+    ]);
+    const civilianHead = box(0.22, 0.25, 0.22, 0, 1.6, 0);
+    // Soldiers: olive uniform under a tan plate carrier, pack, boots, a helmet wider than the head,
+    // and a rifle carried low at the hip: nothing like the dead's reaching arms.
+    const OLIVE = 0x56603d;
+    const soldierBody = mergeGeometries([
+      box(0.36, 0.74, 0.2, 0, 0.5, 0, OLIVE),
+      box(0.38, 0.14, 0.26, 0, 0.07, -0.02, 0x1d1b18),
+      box(0.44, 0.6, 0.25, 0, 1.15, 0, OLIVE),
+      box(0.48, 0.44, 0.31, 0, 1.2, 0, 0xb5a679),
+      box(0.36, 0.42, 0.18, 0, 1.2, 0.24, 0x3d3b2d),
+      box(0.12, 0.34, 0.12, -0.3, 1.26, 0, OLIVE),
+      box(0.12, 0.34, 0.12, 0.3, 1.26, 0, OLIVE),
+      box(0.1, 0.1, 0.34, -0.24, 1.08, -0.16, OLIVE),
+      box(0.1, 0.1, 0.34, 0.24, 1.08, -0.16, OLIVE),
+      box(0.07, 0.1, 0.95, 0.04, 1.06, -0.36, 0x161616),
+    ]);
+    const soldierHead = mergeGeometries([
+      box(0.2, 0.2, 0.2, 0, 1.6, 0, 0xc49a76),
+      box(0.32, 0.15, 0.34, 0, 1.76, 0.01, 0x3b4429),
+    ]);
+    const geo = { [Kind.Civilian]: [civilianBody, civilianHead], [Kind.Soldier]: [soldierBody, soldierHead] };
 
     for (const kind of [Kind.Civilian, Kind.Soldier]) {
       const capacity = CAPACITY[kind];
-      const body = new THREE.InstancedMesh(bodyGeo[kind], new THREE.MeshLambertMaterial(), capacity);
-      const head = new THREE.InstancedMesh(headGeo[kind], new THREE.MeshLambertMaterial(), capacity);
-      const c = new THREE.Color();
-      for (let i = 0; i < capacity; i++) {
-        if (kind === Kind.Civilian) {
-          body.setColorAt(i, c.setHex(civilianClothes[(i * 7) % civilianClothes.length]));
-          head.setColorAt(i, c.setHex(skins[(i * 3) % skins.length]));
-        } else {
-          body.setColorAt(i, c.setHex(0x4b5a32));
-          head.setColorAt(i, c.setHex(0x3a4428));
-        }
+      const vertexColors = kind === Kind.Soldier;
+      const body = new THREE.InstancedMesh(geo[kind][0], new THREE.MeshLambertMaterial({ vertexColors }), capacity);
+      const head = new THREE.InstancedMesh(geo[kind][1], new THREE.MeshLambertMaterial({ vertexColors }), capacity);
+      if (kind === Kind.Civilian) {
+        // Allocate the colour buffers; render() fills them from each person's look.
+        body.setColorAt(0, new THREE.Color());
+        head.setColorAt(0, new THREE.Color());
       }
       for (const mesh of [body, head]) {
         mesh.count = 0;
@@ -563,12 +582,18 @@ export class Agents {
       this.m.compose(this.v.set(p.x, lying ? 0.2 : bob, p.z), this.q, this.s.set(1, 1, 1));
       this.bodies[kind].setMatrixAt(i, this.m);
       this.heads[kind].setMatrixAt(i, this.m);
+      // Colours follow the person, not the slot: slots shift as people come and go.
+      if (kind === Kind.Civilian) {
+        this.bodies[kind].setColorAt(i, this.c.setHex(CLOTHES[p.look % CLOTHES.length]));
+        this.heads[kind].setColorAt(i, this.c.setHex(SKINS[(p.look >> 3) % SKINS.length]));
+      }
     }
     for (const kind of [Kind.Civilian, Kind.Soldier]) {
       const n = Math.min(counts[kind], CAPACITY[kind]);
       for (const mesh of [this.bodies[kind], this.heads[kind]]) {
         mesh.count = n;
         mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       }
     }
   }

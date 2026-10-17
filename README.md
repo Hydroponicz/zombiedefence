@@ -133,7 +133,7 @@ Each runs one person or crate at a time; lift off to leave.
 
 ## Strategic sites
 
-Every district has key buildings the military holds: about 54 in all, laid out per seed.
+Every district has key buildings the military holds: about 54 in all. They're clustered on the blocks around each district's central intersection, as a defensible core, with exact blocks varying by seed.
 
 - **Police stations** keep an armoury that resupplies the district's troops. Their own officers keep looters out.
 - **Supermarkets** and **pharmacies** hold most of the district's food and medicine, and hand it out

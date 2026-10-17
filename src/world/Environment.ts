@@ -54,8 +54,18 @@ export class Environment {
     const angle = p * Math.PI;
     // Sun travels east to west; the moon follows the same arc at night.
     const dir = new THREE.Vector3(Math.cos(angle), Math.max(0.08, Math.sin(angle)), 0.35).normalize();
-    this.sun.position.copy(focus).addScaledVector(dir, 800);
-    this.sun.target.position.copy(focus);
+    // Move the shadow camera in whole shadow-map texels, so shadow edges don't crawl and flicker
+    // as the helicopter flies.
+    const right = new THREE.Vector3(0, 1, 0).cross(dir).normalize();
+    const up = dir.clone().cross(right);
+    const texel = (SHADOW_EXTENT * 2) / this.sun.shadow.mapSize.x;
+    const u = focus.dot(right);
+    const v = focus.dot(up);
+    const snapped = focus.clone()
+      .addScaledVector(right, Math.round(u / texel) * texel - u)
+      .addScaledVector(up, Math.round(v / texel) * texel - v);
+    this.sun.position.copy(snapped).addScaledVector(dir, 800);
+    this.sun.target.position.copy(snapped);
 
     const duskness = sun ? Math.max(0, 1 - Math.sin(angle) * 3) : 0;
     this.sky.copy(DAY_SKY).lerp(DUSK_SKY, duskness * 0.6).lerp(NIGHT_SKY, night);

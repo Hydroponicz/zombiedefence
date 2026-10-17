@@ -250,15 +250,15 @@ export class City {
         const i = i0 + bi;
         const j = j0 + bj;
         const lot = this.lotAt(i, j, district);
-        // Sidewalk around every block; houses sit on lawns inside it.
+        // Sidewalk around every block; houses sit on lawns inside it. Sites lay their own grounds.
         this.pad(lot, CONCRETE, district, 0.18);
-        if (kind === 'residential') this.pad(lot, GRASS, district, 0.22, SIDEWALK);
-        if (i === landmark.i && j === landmark.j && this.buildLandmark(district, kind, lot)) continue;
         const site = this.sitePlans.get(`${i},${j}`);
         if (site) {
           this.buildSite(district, site, lot, rand);
           continue;
         }
+        if (kind === 'residential') this.pad(lot, GRASS, district, 0.22, SIDEWALK);
+        if (i === landmark.i && j === landmark.j && this.buildLandmark(district, kind, lot)) continue;
         const parkChance = kind === 'harbor' || kind === 'industrial' ? 0 : kind === 'downtown' ? 0.04 : 0.07;
         if (rand() < parkChance) {
           this.buildPark(district, lot, rand);
@@ -964,11 +964,18 @@ export class City {
           // Real storeys are about 3.5 m; windows about 1.5 m wide on a 3 m rhythm.
           if (vWinLit > 0.5 && abs(vWinNormal.y) < 0.5 && vWinPos.y > 1.2) {
             float along = abs(vWinNormal.x) > 0.5 ? vWinPos.z : vWinPos.x;
-            vec2 cell = vec2(floor(along / 3.0), floor(vWinPos.y / 3.5));
-            vec2 f = vec2(fract(along / 3.0), fract(vWinPos.y / 3.5));
-            float pane = step(0.22, f.x) * step(f.x, 0.78) * step(0.28, f.y) * step(f.y, 0.78);
+            vec2 uv = vec2(along / 3.0, vWinPos.y / 3.5);
+            vec2 cell = floor(uv);
+            vec2 f = fract(uv);
+            // Soft pane edges a pixel wide, fading to the average once a window is only a few
+            // pixels across, so distant facades don't shimmer as the camera moves.
+            vec2 px = max(fwidth(uv), vec2(1e-4));
+            float far = smoothstep(0.15, 0.4, max(px.x, px.y));
+            float pane = (smoothstep(0.22 - px.x, 0.22 + px.x, f.x) - smoothstep(0.78 - px.x, 0.78 + px.x, f.x)) *
+              (smoothstep(0.28 - px.y, 0.28 + px.y, f.y) - smoothstep(0.78 - px.y, 0.78 + px.y, f.y));
+            pane = mix(pane, 0.56 * 0.5, far);
             float h = winHash(cell + floor(vWinPos.xz / 97.0));
-            float on = step(1.0 - 0.55 * vWinLight, h);
+            float on = mix(step(1.0 - 0.55 * vWinLight, h), 0.55 * vWinLight, far);
             vec3 warm = mix(vec3(1.0, 0.78, 0.45), vec3(0.75, 0.85, 1.0), step(0.8, h));
             totalEmissiveRadiance += warm * pane * on * uNight * 1.1;
             diffuseColor.rgb *= 1.0 - pane * 0.35;

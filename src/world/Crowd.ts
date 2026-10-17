@@ -791,7 +791,7 @@ const dist2 = (x: number, z: number, cx: number, cz: number) => (x - cx) * (x - 
  *   aLook = (pose code, lean, clothing tint, stride)
  */
 function buildFigure(): { geometry: THREE.InstancedBufferGeometry; material: THREE.Material } {
-  const SKIN = new THREE.Color(0x7f9470);
+  const SKIN = new THREE.Color(0xa3a894);
   const WHITE = new THREE.Color(1, 1, 1);
   const part = (w: number, h: number, d: number, x: number, y: number, z: number, id: number, skin: boolean) => {
     const g = new THREE.BoxGeometry(w, h, d);
@@ -815,7 +815,8 @@ function buildFigure(): { geometry: THREE.InstancedBufferGeometry; material: THR
   geometry.index = merged.index;
   for (const name of ['position', 'normal', 'color', 'aPart']) geometry.setAttribute(name, merged.getAttribute(name));
 
-  const tints = [0x4d4a3e, 0x3e4a52, 0x5a3d34, 0x45473f, 0x5b5546, 0x2f3a46, 0x6b5b4a, 0x3d3d3d].map((c) => new THREE.Color(c));
+  // Grimy civilian clothes, bloodied: no olive, so soldiers stand apart.
+  const tints = [0x5a4640, 0x3b4658, 0x6e2f2a, 0x7a746a, 0x4a3a36, 0x2e3542, 0x86786a, 0x5c2a2a].map((c) => new THREE.Color(c));
   const material = new THREE.MeshLambertMaterial({ vertexColors: true });
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTints = { value: tints };

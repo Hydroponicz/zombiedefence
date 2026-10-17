@@ -48,7 +48,9 @@ class ParticleField {
         varying vec2 vUv;
         varying float vAlpha;
         varying vec3 vTint;
+        #include <common>
         #include <fog_pars_vertex>
+        #include <logdepthbuf_pars_vertex>
         void main() {
           vUv = uv;
           vAlpha = aAlpha;
@@ -56,6 +58,7 @@ class ParticleField {
           vec4 mvPosition = viewMatrix * vec4(aPos, 1.0);
           mvPosition.xy += position.xy * aSize;
           gl_Position = projectionMatrix * mvPosition;
+          #include <logdepthbuf_vertex>
           #include <fog_vertex>
         }`,
       fragmentShader: `
@@ -64,7 +67,9 @@ class ParticleField {
         varying float vAlpha;
         varying vec3 vTint;
         #include <fog_pars_fragment>
+        #include <logdepthbuf_pars_fragment>
         void main() {
+          #include <logdepthbuf_fragment>
           vec4 t = texture2D(uMap, vUv);
           gl_FragColor = vec4(vTint, t.a * vAlpha);
           #include <fog_fragment>

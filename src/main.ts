@@ -38,7 +38,9 @@ const SKID_DEPTH = 1.9;
 const SLING_SAFE_DROP = 4;
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+// A logarithmic depth buffer: the city is drawn out to 20 km, and the thin ground layers (sidewalk,
+// lawn, car park, landing pad) would otherwise flicker against each other in the distance.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;

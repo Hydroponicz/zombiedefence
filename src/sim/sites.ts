@@ -102,21 +102,24 @@ export function planSites(seed: number | string): SitePlan[] {
   const out: SitePlan[] = [];
 
   DISTRICT_TEMPLATES.forEach((tpl, district) => {
-    const taken: [number, number][] = [[5, 5]];
-    const free = (bi: number, bj: number) => taken.every(([a, b]) => Math.max(Math.abs(a - bi), Math.abs(b - bj)) >= 2);
+    // The district's defensible core: blocks ranked by distance from its central intersection
+    // (with a little jitter per seed), skipping the landmark block beside it.
+    const centre = BLOCKS_PER_DISTRICT / 2;
+    const core: { bi: number; bj: number; score: number }[] = [];
+    for (let bi = 1; bi < BLOCKS_PER_DISTRICT - 1; bi++) {
+      for (let bj = 1; bj < BLOCKS_PER_DISTRICT - 1; bj++) {
+        if (bi === 5 && bj === 5) continue;
+        core.push({ bi, bj, score: Math.hypot(bi + 0.5 - centre, bj + 0.5 - centre) + rand() * 1.2 });
+      }
+    }
+    core.sort((a, b) => a.score - b.score);
     const counts = COUNTS[tpl.kind];
+    // The police and the shelters take the most central blocks.
     for (const kind of ['police', 'shelter', 'supermarket', 'pharmacy'] as SiteKind[]) {
       for (let n = 0; n < (counts[kind] ?? 0); n++) {
-        let bi = -1;
-        let bj = -1;
-        for (let attempt = 0; attempt < 400 && bi < 0; attempt++) {
-          // Keep off the outer ring of blocks (and the waterfront).
-          const a = 1 + Math.floor(rand() * (BLOCKS_PER_DISTRICT - 2));
-          const b = (tpl.row === 0 ? 2 : 1) + Math.floor(rand() * (BLOCKS_PER_DISTRICT - (tpl.row === 0 ? 3 : 2)));
-          if (free(a, b)) [bi, bj] = [a, b];
-        }
-        if (bi < 0) continue;
-        taken.push([bi, bj]);
+        const block = core.shift();
+        if (!block) continue;
+        const { bi, bj } = block;
         let variant: SiteVariant;
         let name: string;
         switch (kind) {
@@ -266,7 +269,9 @@ function siege(s: CityState, d: DistrictState, site: Site, e: number, night: boo
   const draw = DRAW[site.kind] + site.sheltered / 2000;
   let localZ = d.zombies * 0.03 * draw * (night && d.power !== 'dark' ? 1.3 : 1);
   for (const h of s.hordes) {
-    if (Math.hypot(h.x - site.x, h.z - site.z) < HORDE_REACH) localZ += h.size * (h.settle > 0 ? 0.15 : 0.04) * draw;
+    // Hardest on the sites nearest where the horde stands.
+    const near = 1 - Math.hypot(h.x - site.x, h.z - site.z) / HORDE_REACH;
+    if (near > 0) localZ += h.size * (h.settle > 0 ? 0.2 : 0.05) * draw * near;
   }
   const fort = site.kind === 'police' ? 1.5 : 1;
   const barricade = site.status === 'fallen' ? 0 : site.integrity * 0.3;

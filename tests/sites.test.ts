@@ -51,6 +51,15 @@ describe('site planning', () => {
     }
   });
 
+  it('clusters them around the district centre', () => {
+    for (const p of plans) {
+      const tpl = DISTRICT_TEMPLATES[p.district];
+      const bi = p.i - tpl.col * BLOCKS_PER_DISTRICT + 0.5;
+      const bj = p.j - tpl.row * BLOCKS_PER_DISTRICT + 0.5;
+      expect(Math.hypot(bi - BLOCKS_PER_DISTRICT / 2, bj - BLOCKS_PER_DISTRICT / 2)).toBeLessThan(3.5);
+    }
+  });
+
   it('is the same for a seed and differs between seeds', () => {
     expect(planSites('plan')).toBe(plans);
     expect(planSites('other').map((p) => `${p.i},${p.j}`)).not.toEqual(plans.map((p) => `${p.i},${p.j}`));
