@@ -17,10 +17,12 @@ import {
   ROUNDS_PER_TROOP,
   SEATS,
   seatsUsed,
+  siteStock,
   type FuelSource,
   type PlayerCommand,
 } from '../sim/operations';
-import type { CityState, CrateKind } from '../sim/types';
+import { guardsNeeded, SITE_LABELS, siteNear } from '../sim/sites';
+import type { CityState, CrateKind, Site } from '../sim/types';
 
 export interface GroundContext {
   /** On the ground and nearly stopped. */
@@ -40,6 +42,8 @@ export interface GroundContext {
 
 /** Forward refuelling points serve helicopters landed within this many metres. */
 export const FARP_RADIUS = 35;
+/** Landed within this many metres of a site's landing zone, the helicopter is at that site. */
+export const SITE_RADIUS = 60;
 /** Pump rates in litres per second: base and refuelling points, and siphoning in the city. */
 const PUMP_RATE = 80;
 const SIPHON_RATE = 20;
@@ -88,7 +92,7 @@ export class Operations {
   private selected = 0;
   private active: { id: string; timer: number; interval: number } | null = null;
   private wasLanded = false;
-  private lastDistrict = -1;
+  private lastPlace = '';
   private pumpTimer = 0;
 
   /**
@@ -110,11 +114,13 @@ export class Operations {
       return;
     }
     const atBase = state.districts[ctx.district].kind === 'airbase';
+    const site = atBase ? undefined : siteNear(state, ctx.x, ctx.z, SITE_RADIUS);
     // A new landing site has a different menu: start from the top.
-    if (ctx.district !== this.lastDistrict || !this.wasLanded) {
+    const place = `${ctx.district}:${site?.id ?? ''}`;
+    if (place !== this.lastPlace || !this.wasLanded) {
       this.selected = 0;
       this.active = null;
-      this.lastDistrict = ctx.district;
+      this.lastPlace = place;
     }
 
     // Touching down at the base unloads everyone aboard.
@@ -149,7 +155,7 @@ export class Operations {
       }
     }
 
-    const options = atBase ? this.baseOptions(state, ctx) : this.districtOptions(state, ctx);
+    const options = atBase ? this.baseOptions(state, ctx) : [...(site ? this.siteOptions(state, ctx, site) : []), ...this.districtOptions(state, ctx)];
     if (actions.has('dpadUp') || actions.has('arrowUp')) this.selected--;
     if (actions.has('dpadDown') || actions.has('arrowDown')) this.selected++;
     this.selected = (this.selected + options.length) % options.length;
@@ -181,9 +187,15 @@ export class Operations {
     else if (ctx.threat > 0) status = `Zombies at the doors (${ctx.threat}): loading paused`;
 
     const c = state.cargo;
+    const where = site
+      ? `${site.name}: ${site.status}`
+      : `${state.districts[ctx.district].name}: on the ground${farp ? ' at the refuelling point' : ctx.onRoof ? ' (rooftop)' : ''}`;
+    const siteInfo = site
+      ? `${Math.round(site.guards)}/${Math.ceil(guardsNeeded(site))} guards${site.capacity ? ` · ${fmt(site.sheltered)} sheltered` : ''}`
+      : '';
     this.view = {
-      title: `${state.districts[ctx.district].name}: on the ground${farp ? ' at the refuelling point' : ctx.onRoof ? ' (rooftop)' : ''}`,
-      status: status || [`Seats ${seatsUsed(c)}/${SEATS}`, pumping].filter(Boolean).join(' · '),
+      title: where,
+      status: status || [`Seats ${seatsUsed(c)}/${SEATS}`, siteInfo, pumping].filter(Boolean).join(' · '),
       warning: !!status,
       options: options.map((o, i) => ({
         label: o.label,
@@ -290,6 +302,51 @@ export class Operations {
       });
     }
     return [...options, ...this.fuelOptions(s, ctx, true)];
+  }
+
+  /** What can be done at a police station, supermarket, shelter or pharmacy. */
+  private siteOptions(s: CityState, ctx: GroundContext, site: Site): Option[] {
+    const d = s.districts[ctx.district];
+    const c = s.cargo;
+    const full = seatsUsed(c) >= SEATS;
+    const label = SITE_LABELS[site.kind];
+    const deploy: PlayerCommand = { type: 'deployTroop', district: d.id, site: site.id };
+    const options: Option[] = [{
+      id: 'site-garrison',
+      label: site.status === 'fallen' ? `Retake the ${label}` : `Garrison the ${label}`,
+      detail: c.troops ? `${c.troops} aboard · ${Math.round(site.guards)} posted, ${Math.ceil(guardsNeeded(site))} wanted` : 'No troops aboard',
+      enabled: canApply(s, deploy), command: deploy, interval: 0.5, repeat: true,
+    }];
+    if (site.capacity > 0) {
+      const board: PlayerCommand = { type: 'board', district: d.id, kind: 'civilian', site: site.id };
+      options.push({
+        id: 'site-evacuate', label: 'Evacuate the shelter',
+        detail: full ? 'Seats full' : site.status === 'fallen' ? 'Nobody left inside' : `${fmt(site.sheltered)} sheltering · screened at the door`,
+        // Organised and waiting at the door: quicker than gathering people off the street.
+        enabled: canApply(s, board), command: board, interval: 0.6, repeat: true,
+      });
+    }
+    // Take stock away: food from a supermarket, ammunition from an armoury, medicine from a pharmacy.
+    const kinds: CrateKind[] = site.kind === 'police' ? ['ammo'] : site.kind === 'pharmacy' ? ['medicine'] : site.kind === 'supermarket' ? ['rations'] : ['rations', 'medicine'];
+    for (const kind of kinds) {
+      const stock = siteStock(site, kind);
+      if (stock < 1 && site.kind === 'shelter') continue;
+      const load: PlayerCommand = { type: 'loadCrate', kind, site: site.id };
+      options.push({
+        id: `site-load-${kind}`, label: `Load ${CRATES[kind].label} from the ${label}`,
+        detail: c.crates.length >= 2 ? 'Hold full' : `${Math.floor(stock / CRATES[kind].amount)} crates' worth here`,
+        enabled: canApply(s, load), command: load, interval: 3, repeat: false,
+      });
+    }
+    if (c.crates.length) {
+      const drop: PlayerCommand = { type: 'dropCrate', district: d.id, site: site.id };
+      options.push({
+        id: 'site-drop', label: `Restock the ${label}`,
+        detail: `${c.crates.map((k) => CRATES[k].label).join(', ')} · handed out from here`,
+        enabled: canApply(s, drop), command: drop, interval: 2, repeat: true,
+      });
+    }
+    return options;
   }
 
   private districtOptions(s: CityState, ctx: GroundContext): Option[] {

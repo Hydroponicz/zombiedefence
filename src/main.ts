@@ -15,6 +15,8 @@ import { City } from './world/City';
 import { Effects } from './world/Effects';
 import { Environment } from './world/Environment';
 import { Farps } from './world/Farps';
+import { Sites } from './world/Sites';
+import { siteNear } from './sim/sites';
 
 const params = new URLSearchParams(location.search);
 const seed = params.get('seed') ?? String(Math.floor(Math.random() * 1e6));
@@ -29,6 +31,8 @@ const NOISE_PER_REPORT = 0.15;
 /** Below this ground speed (m/s) a landed helicopter counts as parked for ground operations. */
 const PARKED_SPEED = 2;
 const HELIPAD_RADIUS = 12;
+/** The HUD names a strategic site when the helicopter is within this many metres of it. */
+const SITE_HUD_RADIUS = 150;
 const SKID_DEPTH = 1.9;
 /** A slung bladder released lower than this (metres) survives the drop. */
 const SLING_SAFE_DROP = 4;
@@ -52,6 +56,8 @@ const agents = new Agents(seed, effects, city.walk);
 scene.add(agents.group);
 const farps = new Farps();
 scene.add(farps.group);
+const sites = new Sites(seed);
+scene.add(sites.group);
 const fleet = new AiFleet(city.helipads);
 scene.add(fleet.group);
 
@@ -221,6 +227,7 @@ function update(dt: number): void {
     state.districts.forEach((d, i) => city.setDistrictLight(i, POWER_LIGHT[d.power]));
     effects.syncWithSim(state);
     farps.sync(state.farps);
+    sites.sync(state.sites);
   }
 
   const surface = city.surfaceHeight(heli.position.x, heli.position.z);
@@ -230,6 +237,7 @@ function update(dt: number): void {
   if (!heli.destroyed) agents.doorGunners(dt, heli.position, state?.cargo.troops ?? 0);
   effects.update(dt, night);
   farps.update(dt);
+  sites.update(dt, night);
   fleet.update(dt, state, sim.time);
 
   // Ground operations: loading, deploying, evacuating.
@@ -280,7 +288,8 @@ function update(dt: number): void {
     landed: heli.landed,
     destroyed: heli.destroyed,
     searchlight: heli.searchlight.intensity > 0,
-  });
+  }, state && districtIndex >= 0 ? state.sites.filter((x) => x.district === districtIndex) : [],
+  state ? siteNear(state, heli.position.x, heli.position.z, SITE_HUD_RADIUS) ?? null : null);
 
   if (map.visible) {
     mapTimer -= dt;
@@ -305,4 +314,4 @@ window.addEventListener('resize', () => {
 });
 
 // Handy for debugging from the console.
-Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops, command, fleet } });
+Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops, command, fleet, sites } });

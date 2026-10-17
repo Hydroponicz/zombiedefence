@@ -247,8 +247,17 @@ function land(s: CityState, p: Pilot, d: DistrictState): void {
   }
   trip.crates = [];
   if (kind === 'evacuate') {
+    // Pilots land at the fullest shelter still holding, where people are screened at the door.
+    const shelter = s.sites
+      .filter((x) => x.district === d.id && x.status !== 'fallen' && x.sheltered >= 1)
+      .sort((a, b) => b.sheltered - a.sheltered)[0];
+    const screened = shelter ? 0.25 : 1;
     for (let i = 0; i < SEATS && d.population + d.infected >= 1; i++) {
-      if (nextRandom(s) < d.infected / (d.population + d.infected)) {
+      if (shelter && shelter.sheltered >= 1) {
+        shelter.sheltered -= 1;
+        d.sheltered = Math.max(0, d.sheltered - 1);
+      }
+      if (nextRandom(s) < (screened * d.infected) / (d.population + d.infected)) {
         d.infected -= 1;
         trip.infected += 1;
       } else {

@@ -4,7 +4,8 @@
 
 import { addAirframe, maybeRecruit, validOrder } from './pilots';
 import { nextRandom } from './rng';
-import type { Cargo, CityState, CrateKind, DistrictState, Farp, Order, Severity } from './types';
+import { siteName } from './sites';
+import type { Cargo, CityState, CrateKind, DistrictState, Farp, Order, Severity, Site } from './types';
 
 export const SEATS = 8;
 export const CRATE_SLOTS = 2;
@@ -37,10 +38,14 @@ export type BoardKind = 'civilian' | 'soldier' | 'scientist' | 'pilot';
 export type PlayerCommand =
   | { type: 'loadTroop' }
   | { type: 'returnTroop' }
-  | { type: 'loadCrate'; kind: CrateKind }
-  | { type: 'deployTroop'; district: number }
-  | { type: 'dropCrate'; district: number }
-  | { type: 'board'; district: number; kind: BoardKind }
+  /** From the base's stores, or from a site's stock when `site` is given. */
+  | { type: 'loadCrate'; kind: CrateKind; site?: number }
+  /** Into the district; with `site`, posted to guard that site. */
+  | { type: 'deployTroop'; district: number; site?: number }
+  /** Into the district's stocks, or a site's when `site` is given. */
+  | { type: 'dropCrate'; district: number; site?: number }
+  /** With `site`, civilians come out of that shelter. */
+  | { type: 'board'; district: number; kind: BoardKind; site?: number }
   | { type: 'unloadAtBase' }
   /** The helicopter went down: everyone and everything aboard is lost. */
   | { type: 'crash'; district: number }
@@ -116,15 +121,23 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
       return seatFree && base.troops.strength >= BASE_RESERVE_TROOPS + 1;
     case 'returnTroop':
       return c.troops >= 1;
-    case 'loadCrate':
-      return c.crates.length < CRATE_SLOTS && baseStock(base, cmd.kind) >= CRATES[cmd.kind].amount;
+    case 'loadCrate': {
+      if (c.crates.length >= CRATE_SLOTS) return false;
+      if (cmd.site === undefined) return baseStock(base, cmd.kind) >= CRATES[cmd.kind].amount;
+      const site = siteOf(s, cmd.site);
+      return !!site && siteStock(site, cmd.kind) >= CRATES[cmd.kind].amount;
+    }
     case 'deployTroop':
-      return c.troops >= 1;
+      return c.troops >= 1 && (cmd.site === undefined || !!siteOf(s, cmd.site));
     case 'dropCrate':
-      return c.crates.length > 0;
+      return c.crates.length > 0 && (cmd.site === undefined || !!siteOf(s, cmd.site));
     case 'board': {
       if (!seatFree) return false;
       const d = s.districts[cmd.district];
+      if (cmd.kind === 'civilian' && cmd.site !== undefined) {
+        const site = siteOf(s, cmd.site);
+        return !!site && site.status !== 'fallen' && site.sheltered >= 1 && d.population >= 1;
+      }
       if (cmd.kind === 'civilian') return d.population + d.infected >= 1;
       if (cmd.kind === 'soldier') return d.troops.strength >= 1;
       if (cmd.kind === 'pilot') return s.pilots.some((p) => p.status === 'stranded' && p.district === d.id);
@@ -185,19 +198,27 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       mergeTroops(base, 1, c.troopFatigue, base.troops.morale, ROUNDS_PER_TROOP);
       if (c.troops === 0) c.troopFatigue = 0;
       return true;
-    case 'loadCrate':
-      takeBaseStock(base, cmd.kind, CRATES[cmd.kind].amount);
+    case 'loadCrate': {
+      const site = cmd.site === undefined ? undefined : siteOf(s, cmd.site);
+      if (site) takeSiteStock(site, cmd.kind, CRATES[cmd.kind].amount);
+      else takeBaseStock(base, cmd.kind, CRATES[cmd.kind].amount);
       c.crates.push(cmd.kind);
       return true;
+    }
     case 'deployTroop': {
       const d = s.districts[cmd.district];
       // Fresh troops arriving lift the defenders' spirits a little.
       mergeTroops(d, 1, c.troopFatigue, 0.95, ROUNDS_PER_TROOP);
       c.troops -= 1;
       s.stats.troopsDeployed += 1;
+      const site = cmd.site === undefined ? undefined : siteOf(s, cmd.site);
+      if (site) {
+        site.pinned += 1;
+        site.guards += 1;
+      }
       if (c.troops === 0) {
         c.troopFatigue = 0;
-        emit(d.id, 'info', `Fresh troops have landed in ${d.name}.`, true);
+        emit(d.id, 'info', site ? `Fresh troops are holding ${siteName(site, d)}.` : `Fresh troops have landed in ${d.name}.`, true);
       }
       return true;
     }
@@ -205,6 +226,17 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       const d = s.districts[cmd.district];
       const kind = c.crates.shift()!;
       const crate = CRATES[kind];
+      const site = cmd.site === undefined ? undefined : siteOf(s, cmd.site);
+      if (site) {
+        // Stocked at a site, handed out from there as long as it holds.
+        if (kind === 'rations') site.rations += crate.amount;
+        else if (kind === 'medicine') site.medicine += crate.amount;
+        else site.ammo += crate.amount;
+        d.order = Math.min(100, d.order + crate.order);
+        s.stats.cratesDelivered += 1;
+        emit(d.id, 'info', `A crate of ${crate.label} has been delivered to ${siteName(site, d)}.`, true);
+        return true;
+      }
       if (kind === 'rations') d.rations += crate.amount;
       else if (kind === 'medicine') d.medicine += crate.amount;
       else d.troops.ammo += crate.amount;
@@ -215,7 +247,19 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
     }
     case 'board': {
       const d = s.districts[cmd.district];
-      if (cmd.kind === 'civilian') {
+      if (cmd.kind === 'civilian' && cmd.site !== undefined) {
+        // A shelter screens people at the door: few of the bitten get through.
+        const site = siteOf(s, cmd.site)!;
+        site.sheltered -= 1;
+        d.sheltered = Math.max(0, d.sheltered - 1);
+        if (d.infected >= 1 && nextRandom(s) < (0.25 * d.infected) / (d.population + d.infected)) {
+          d.infected -= 1;
+          c.infected += 1;
+        } else {
+          d.population = Math.max(0, d.population - 1);
+          c.civilians += 1;
+        }
+      } else if (cmd.kind === 'civilian') {
         // The bitten hide among the people you pick up.
         const infected = nextRandom(s) < d.infected / (d.population + d.infected);
         if (infected) {
@@ -373,6 +417,20 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       return true;
     }
   }
+}
+
+function siteOf(s: CityState, id: number): Site | undefined {
+  return s.sites.find((x) => x.id === id);
+}
+
+export function siteStock(site: Site, kind: CrateKind): number {
+  return kind === 'rations' ? site.rations : kind === 'medicine' ? site.medicine : site.ammo;
+}
+
+function takeSiteStock(site: Site, kind: CrateKind, amount: number): void {
+  if (kind === 'rations') site.rations -= amount;
+  else if (kind === 'medicine') site.medicine -= amount;
+  else site.ammo -= amount;
 }
 
 function baseStock(base: DistrictState, kind: CrateKind): number {

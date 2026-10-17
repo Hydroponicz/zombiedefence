@@ -4,7 +4,8 @@
 import { formatClock, MINUTES_PER_DAY, NIGHT_START, DAY_START } from '../sim/clock';
 import { CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE, DISTRICT_TEMPLATES, GRID_COLS, GRID_ROWS } from '../sim/layout';
 import { totalZombies } from '../sim/hordes';
-import type { CityState, DistrictState } from '../sim/types';
+import { guardsNeeded } from '../sim/sites';
+import type { CityState, DistrictState, SiteKind, SiteStatus } from '../sim/types';
 
 const OVERLAYS = ['Status', 'Infection', 'Power', 'Order', 'Supplies', 'Troops', 'Fuel'] as const;
 type Overlay = (typeof OVERLAYS)[number];
@@ -31,6 +32,9 @@ export interface MapContext {
   /** AI pilots in the air. */
   aiHelis: { x: number; z: number; yaw: number; name: string }[];
 }
+
+const SITE_COLOR: Record<SiteStatus, string> = { held: '#5fc46b', besieged: '#e8a83a', fallen: '#5a2a26' };
+const SITE_LETTER: Record<SiteKind, string> = { police: 'P', supermarket: 'S', shelter: 'H', pharmacy: '+' };
 
 export class DebugMap {
   visible = false;
@@ -208,6 +212,18 @@ export class DebugMap {
       this.text(`FARP ${fmt(f.fuel)} L`, fx + 9, fy + 4, 11, '#f3d2a8');
     }
 
+    // Strategic sites: a letter on a square coloured by status.
+    for (const site of s.sites) {
+      const sx = mx + (site.x + CITY_WIDTH / 2) * scale;
+      const sy = my + (site.z + CITY_DEPTH / 2) * scale;
+      g.fillStyle = SITE_COLOR[site.status];
+      g.strokeStyle = '#000';
+      g.lineWidth = 1;
+      g.fillRect(sx - 6, sy - 6, 12, 12);
+      g.strokeRect(sx - 6, sy - 6, 12, 12);
+      this.text(SITE_LETTER[site.kind], sx, sy + 4, 10, site.status === 'fallen' ? '#ddd' : '#000', 'center', true);
+    }
+
     // Hordes: a disc sized by the crowd, with a line toward where they're heading.
     for (const h of s.hordes) {
       const hx = mx + (h.x + CITY_WIDTH / 2) * scale;
@@ -303,7 +319,22 @@ export class DebugMap {
       this.text(v, x + w - 14, y + 54 + i * 20, 13, '#e8ecdf', 'right');
     });
 
-    const logTop = y + 54 + rows.length * 20 + 20;
+    // The district's strategic sites.
+    const sites = s.sites.filter((x) => x.district === d.id);
+    const sitesTop = y + 54 + rows.length * 20 + 14;
+    if (sites.length) this.text('Sites', x + 14, sitesTop, 14, '#e8ecdf', 'left', true);
+    sites.forEach((site, i) => {
+      const yy = sitesTop + 20 + i * 18;
+      g.fillStyle = SITE_COLOR[site.status];
+      g.fillRect(x + 14, yy - 9, 9, 9);
+      const name = site.name.length > 26 ? `${site.name.slice(0, 25)}…` : site.name;
+      this.text(name, x + 28, yy, 12, '#e8ecdf');
+      const stock = site.kind === 'police' ? `ammo ${fmt(site.ammo)}` : site.kind === 'pharmacy' ? `med ${fmt(site.medicine)}`
+        : site.kind === 'shelter' ? `${fmt(site.sheltered)}/${fmt(site.capacity)} in` : `food ${fmt(site.rations)}`;
+      const info = site.status === 'fallen' ? 'fallen' : `${Math.round(site.guards)}/${Math.ceil(guardsNeeded(site))} gd · ${stock}`;
+      this.text(info, x + w - 14, yy, 12, site.status === 'held' ? '#a5ad9c' : SITE_COLOR[site.status], 'right');
+    });
+    const logTop = (sites.length ? sitesTop + 20 + sites.length * 18 : y + 54 + rows.length * 20) + 20;
     this.text('Radio log', x + 14, logTop, 14, '#e8ecdf', 'left', true);
     const lines = Math.max(0, Math.floor((y + h - logTop - 16) / 18));
     const recent = s.log.slice(-lines).reverse();

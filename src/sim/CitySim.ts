@@ -7,6 +7,7 @@ import { DISTRICT_TEMPLATES, neighborsOf } from './layout';
 import { applyCommand, baseOf, emptyCargo, mergeTroops, type PlayerCommand } from './operations';
 import { applyHordeLosses, countHordes, formHordes, moveHordes, totalZombies } from './hordes';
 import { initialFleet, payday, updatePilots } from './pilots';
+import { createSites, updateSites } from './sites';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
 
@@ -116,6 +117,7 @@ export function createCity(seed: number | string): CityState {
     airframes: [],
     hordes: [],
     hordeSeq: 0,
+    sites: [],
     pilotSeq: 0,
     airframeSeq: 0,
   };
@@ -153,6 +155,8 @@ export function createCity(seed: number | string): CityState {
       scientists: tpl.scientists ?? 0,
       salvage: tpl.salvage ?? 0,
       hordeZombies: 0,
+      sheltered: 0,
+      outposts: 0,
       flags: {},
       cooldowns: {},
     };
@@ -167,6 +171,7 @@ export function createCity(seed: number | string): CityState {
   first.infected = TUNING.outbreakStartInfected;
   first.population -= TUNING.outbreakStartInfected;
 
+  createSites(state);
   initialFleet(state);
   sampleHistory(state);
   return state;
@@ -196,6 +201,7 @@ function tick(s: CityState, out: SimEvent[]): void {
   if (hourly) distributeRations(s, emit);
   if (hourly) fuelConvoys(s, emit);
   if (hourly) formHordes(s, emit);
+  if (hourly) updateSites(s, night, emit, (d) => effectiveness(d, night));
   moveHordes(s, night, emit);
   countHordes(s);
   for (const d of ds) updateStatus(d, emit);
@@ -354,7 +360,9 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const crowd = (d.rioting ? 1.5 : 1) * (d.power === 'dark' ? 1.2 : 1);
   // In an overrun district the survivors left are barricaded holdouts.
   const exposure = d.status === 'overrun' ? 0.08 : 1;
-  const encounters = Math.min(P * 0.5, biteRate * crowd * exposure * freeZ * (P / (P + T + 10)) * H);
+  // Civilians inside held shelters are mostly out of reach.
+  const sheltered = P > 0 ? Math.min(d.sheltered, P) / P : 0;
+  const encounters = Math.min(P * 0.5, biteRate * crowd * exposure * (1 - 0.9 * sheltered) * freeZ * (P / (P + T + 10)) * H);
   const bitten = encounters * 0.75;
   let civDeaths = encounters * 0.1;
   const civKills = Math.min(Z, encounters * 0.15);
@@ -457,8 +465,10 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const security = clamp(tr.strength / Math.max(1, d.population / 400));
   const dread = Math.min(15, (day - 1) * 2);
   const dark = d.power === 'dark' ? (night ? 18 : 10) : 0;
+  // Guarded police stations, shelters and food points steady people.
+  const outposts = Math.min(10, d.outposts * 3);
   const target = clamp(
-    85 - 25 * shortage - 30 * fearNow - dark - dread + 15 * security - (medicineShort ? 5 : 0),
+    85 - 25 * shortage - 30 * fearNow - dark - dread + 15 * security + outposts - (medicineShort ? 5 : 0),
     0,
     100,
   );

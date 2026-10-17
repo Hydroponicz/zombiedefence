@@ -91,6 +91,23 @@ troops pulled off the barricade → breach.
 
 **The light dilemma:** lit districts are calmer but draw hordes at night.
 
+**Strategic sites** (`src/sim/sites.ts`):
+- **Layout:** sites are planned from the seed (block, variant and landing zone), so the 3D city
+  builds them where the simulation has them.
+- **Starting stock:** half of a district's food starts in its supermarkets, 10% in its shelters, and
+  60% of its medicine in its pharmacies. Police armouries are extra.
+- **Hourly update:**
+  1. Guards are posted, with player-landed troops pinned in place.
+  2. Each site's pressure is computed: local resident dead × the site's draw, plus any horde
+     within 450 m (settled hordes count much more), divided by guards × effectiveness, plus the
+     barricades.
+  3. Barricade integrity falls above a pressure of 0.6. The site is besieged below 60 integrity and
+     falls at 0.
+  4. Shelters fill as the threat grows.
+  5. Staffed sites hand stock out when the district runs short.
+- **Effects on the district:** the sheltered cut bite encounters by up to 90% for their share of the
+  population, and each held, guarded site adds 3 to the order target (at most 10).
+
 **Hordes** (`src/sim/hordes.ts`): a district whose zombies outnumber its prey (or that has fallen)
 sheds 30% of them as a horde. Hordes move along the street lattice at about 2.5 m/s (twice that
 when hunting noise). They pick the district with the strongest draw: √(people) × light at night ×

@@ -105,7 +105,7 @@ const MAX_TRACERS = 160;
 
 export class Effects {
   readonly group = new THREE.Group();
-  private smoke = new ParticleField(2400, false);
+  private smoke = new ParticleField(4000, false);
   private fire = new ParticleField(1400, true);
   private emitters = new Map<string, Emitter>();
   private flashes: { x: number; y: number; z: number; ttl: number }[] = [];
@@ -162,6 +162,11 @@ export class Effects {
       for (let k = 0; k < fires; k++) {
         want(`smoke-${d.id}-${k}`, 'smoke', spots[k].x, spots[k].z);
         want(`fire-${d.id}-${k}`, 'fire', spots[k].x, spots[k].z);
+      }
+      // Fallen strategic sites burn.
+      for (const site of state.sites) {
+        if (site.district !== d.id || site.status !== 'fallen') continue;
+        want(`sitesmoke-${site.id}`, 'smoke', site.x - 10, site.z - 30);
       }
       if (d.burning > 0) {
         for (const site of this.fuelSites.filter((s) => s.district === d.id)) {

@@ -56,3 +56,12 @@ export function stepToward(i: number, j: number, x: number, z: number, away = fa
   }
   return best;
 }
+
+/** The ground of block (i, j) between the curbs of the roads around it (sidewalks included). */
+export function blockLot(i: number, j: number): { x0: number; z0: number; x1: number; z1: number; cx: number; cz: number; w: number; d: number } {
+  const x0 = nodeX(i) + roadWidth(i) / 2;
+  const x1 = nodeX(i + 1) - roadWidth(i + 1) / 2;
+  const z0 = nodeZ(j) + roadWidth(j) / 2;
+  const z1 = nodeZ(j + 1) - roadWidth(j + 1) / 2;
+  return { x0, z0, x1, z1, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, w: x1 - x0, d: z1 - z0 };
+}

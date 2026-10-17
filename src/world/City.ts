@@ -17,7 +17,8 @@ import {
   type DistrictKind,
 } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
-import { BLOCKS_PER_DISTRICT, NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, SIDEWALK, STREET_SPACING } from '../sim/streets';
+import { planSites, type SitePlan } from '../sim/sites';
+import { BLOCKS_PER_DISTRICT, blockLot, NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, SIDEWALK, STREET_SPACING } from '../sim/streets';
 
 interface Box {
   x: number;
@@ -147,9 +148,12 @@ export class City {
   private lampPools!: THREE.InstancedMesh;
   private lampsOn: boolean[] = DISTRICT_TEMPLATES.map(() => false);
   private night = 0;
+  /** Strategic sites by block, built in place of ordinary buildings. */
+  private sitePlans = new Map<string, SitePlan>();
 
   constructor(seed: number | string) {
     const rand = makeRandom(`city-${seed}`);
+    for (const p of planSites(seed)) this.sitePlans.set(`${p.i},${p.j}`, p);
     DISTRICT_TEMPLATES.forEach((tpl, i) => this.buildDistrict(i, tpl.kind, rand));
     this.buildWaterfront(rand);
     this.placeStreetFurniture(rand);
@@ -227,13 +231,8 @@ export class City {
   private lotAt(i: number, j: number, district: number): Lot {
     const tpl = DISTRICT_TEMPLATES[district];
     const c = districtCenter(tpl.col, tpl.row);
-    const x0 = nodeX(i) + roadWidth(i) / 2;
-    const x1 = nodeX(i + 1) - roadWidth(i + 1) / 2;
-    const z0 = nodeZ(j) + roadWidth(j) / 2;
-    const z1 = nodeZ(j + 1) - roadWidth(j + 1) / 2;
-    const cx = (x0 + x1) / 2;
-    const cz = (z0 + z1) / 2;
-    return { x0, z0, x1, z1, cx, cz, w: x1 - x0, d: z1 - z0, ox: cx - c.x, oz: cz - c.z };
+    const lot = blockLot(i, j);
+    return { ...lot, ox: lot.cx - c.x, oz: lot.cz - c.z };
   }
 
   private buildDistrict(district: number, kind: DistrictKind, rand: () => number): void {
@@ -255,6 +254,11 @@ export class City {
         this.pad(lot, CONCRETE, district, 0.18);
         if (kind === 'residential') this.pad(lot, GRASS, district, 0.22, SIDEWALK);
         if (i === landmark.i && j === landmark.j && this.buildLandmark(district, kind, lot)) continue;
+        const site = this.sitePlans.get(`${i},${j}`);
+        if (site) {
+          this.buildSite(district, site, lot, rand);
+          continue;
+        }
         const parkChance = kind === 'harbor' || kind === 'industrial' ? 0 : kind === 'downtown' ? 0.04 : 0.07;
         if (rand() < parkChance) {
           this.buildPark(district, lot, rand);
@@ -283,6 +287,80 @@ export class City {
         z: lot.cz + (rand() - 0.5) * (lot.d - 14),
         s: 1.2 + rand() * 0.8,
       });
+    }
+  }
+
+  /**
+   * A police station, supermarket, shelter or pharmacy, built around its landing zone (the car
+   * park, playing field or plaza the simulation puts at LZ_OFFSET from the block centre).
+   */
+  private buildSite(district: number, site: SitePlan, lot: Lot, rand: () => number): void {
+    const { cx, cz } = lot;
+    const asphalt = 0x45474a;
+    const lz = (color: number) => this.boxes.push({ x: site.x, z: site.z, w: 18, d: 18, h: 0.3, color, district });
+    const parked = (n: number, z: number, colors: number[]) => {
+      for (let k = 0; k < n; k++) {
+        const x = cx + (k % 2 === 0 ? -1 : 1) * (16 + Math.floor(k / 2) * 6);
+        if (Math.abs(x - cx) > lot.w / 2 - 8) break;
+        this.cars.push({ x, z: z + (rand() - 0.5) * 2, yaw: Math.PI / 2, color: colors[Math.floor(rand() * colors.length)] });
+      }
+    };
+    switch (site.variant) {
+      case 'station':
+      case 'hq': {
+        const big = site.variant === 'hq';
+        this.boxes.push({ x: cx, z: cz + 24, w: lot.w - 2 * SIDEWALK, d: 40, h: 0.22, color: asphalt, district });
+        this.building(district, cx, cz - 18, big ? 70 : 56, 34, big ? 26 : 11, 0x46566e);
+        // White band under the roofline and a radio mast.
+        this.building(district, cx, cz - 18, big ? 71 : 57, 35, 1.4, 0xe6e6e0, false, big ? 22 : 8);
+        this.cylinders.push({ x: cx + (big ? 30 : 23), z: cz - 30, r: 0.5, h: 34, y: big ? 26 : 11, color: 0xb8bcc0 });
+        parked(6, cz + 8, [0xf2f2f2, 0x16181c]);
+        lz(0xd7d2c4);
+        break;
+      }
+      case 'store': {
+        this.boxes.push({ x: cx, z: cz + 22, w: lot.w - 2 * SIDEWALK, d: 44, h: 0.22, color: asphalt, district });
+        this.building(district, cx, cz - 20, lot.w - 18, 42, 9, 0xcfc6b2, false);
+        // Shopfront sign.
+        this.building(district, cx, cz + 1.3, 30, 1, 3, 0xc23b2e, false, 5.5);
+        parked(10, cz + 8, [0x7d2a24, 0x2b4a72, 0xb9b9b4, 0x3c3c3c, 0x6d6f4a]);
+        lz(0xd7d2c4);
+        break;
+      }
+      case 'pharmacy': {
+        this.boxes.push({ x: cx, z: cz + 14, w: lot.w - 2 * SIDEWALK, d: 56, h: 0.22, color: asphalt, district });
+        this.building(district, cx - 20, cz - 24, 32, 24, 6, 0xe9e4da, false);
+        this.building(district, cx - 20, cz - 11.6, 12, 0.8, 2.4, 0x2e9e5b, false, 3.4);
+        // Shops sharing the block.
+        this.building(district, cx + 22, cz - 26, 30, 20, 8 + rand() * 6, 0xb0a58f);
+        lz(0xd7d2c4);
+        break;
+      }
+      case 'school': {
+        this.pad(lot, GRASS, district, 0.22, SIDEWALK);
+        this.building(district, cx - 24, cz - 8, 36, 64, 10, 0xa8604a);
+        this.building(district, cx + 6, cz - 32, 48, 18, 10, 0xa8604a);
+        // Playing field with its track.
+        this.boxes.push({ x: site.x, z: site.z, w: 44, d: 54, h: 0.26, color: 0xa65a3c, district });
+        this.boxes.push({ x: site.x, z: site.z, w: 38, d: 48, h: 0.3, color: 0x5d8a3e, district });
+        break;
+      }
+      case 'hall': {
+        this.pad(lot, GRASS, district, 0.22, SIDEWALK);
+        this.building(district, cx - 16, cz - 12, 28, 46, 11, 0xd9d2c3);
+        this.roofs.push({ x: cx - 16, z: cz - 12, w: 46, d: 28, h: 7, y: 11, yaw: Math.PI / 2, color: 0x5b4a3f });
+        this.building(district, cx - 16, cz - 39, 9, 9, 30, 0xd9d2c3, false);
+        this.cylinders.push({ x: cx - 16, z: cz - 39, r: 3.2, h: 10, y: 30, color: 0x5b4a3f });
+        lz(0x9aa58e);
+        break;
+      }
+      case 'arena': {
+        this.boxes.push({ x: cx, z: cz + 30, w: lot.w - 2 * SIDEWALK, d: 30, h: 0.24, color: 0xb9b6ac, district });
+        this.building(district, cx, cz - 14, lot.w - 16, 52, 22, 0x8c97a3);
+        this.building(district, cx, cz - 14, lot.w - 24, 44, 4, 0xc9ced3, false, 22);
+        lz(0xd7d2c4);
+        break;
+      }
     }
   }
 

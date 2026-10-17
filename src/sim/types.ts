@@ -59,11 +59,48 @@ export interface DistrictState {
   salvage: number;
   /** Zombies in hordes currently inside the district (recounted every tick). */
   hordeZombies: number;
+  /** Civilians inside the district's standing shelters, a share of `population` (recounted hourly). */
+  sheltered: number;
+  /** Strategic sites still held and guarded: they steady the district (recounted hourly). */
+  outposts: number;
 
   /** One-shot event flags. */
   flags: Record<string, boolean>;
   /** Game minute something last happened, for rate-limiting. */
   cooldowns: Record<string, number>;
+}
+
+export type SiteKind = 'police' | 'supermarket' | 'shelter' | 'pharmacy';
+export type SiteStatus = 'held' | 'besieged' | 'fallen';
+
+/**
+ * A building the military holds in a district: a police station (armoury), a supermarket (food),
+ * a school or hall used as a shelter, or a pharmacy. Held sites hand out their stock to the district,
+ * and shelters keep the civilians inside away from the dead.
+ */
+export interface Site {
+  id: number;
+  district: number;
+  kind: SiteKind;
+  name: string;
+  /** Landing zone (parking lot or playing field) in world metres. */
+  x: number;
+  z: number;
+  status: SiteStatus;
+  /** Barricades and doors, 0..100. The site falls at 0. */
+  integrity: number;
+  /** Soldiers posted here (a share of the district's troops). */
+  guards: number;
+  /** Soldiers the player landed here; the military leaves them in place. */
+  pinned: number;
+  /** Civilians inside (a share of the district's population). */
+  sheltered: number;
+  capacity: number;
+  rations: number;
+  medicine: number;
+  ammo: number;
+  /** Looting has been reported, to report it once. */
+  looted: boolean;
 }
 
 /** A roaming mass of the dead. Positions are world metres; it walks the street grid. */
@@ -242,6 +279,7 @@ export interface CityState {
   airframes: Airframe[];
   hordes: Horde[];
   hordeSeq: number;
+  sites: Site[];
   pilotSeq: number;
   airframeSeq: number;
   /** Research points earned by scientists at the base. */

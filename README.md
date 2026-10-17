@@ -131,6 +131,35 @@ Each runs one person or crate at a time; lift off to leave.
   and use the menu). Crashes and desertions lose them.
 - **Downed pilots** who survive a crash wait in the district: land there to pick them up.
 
+## Strategic sites
+
+Every district has key buildings the military holds: about 54 in all, laid out per seed.
+
+- **Police stations** keep an armoury that resupplies the district's troops. Their own officers keep looters out.
+- **Supermarkets** and **pharmacies** hold most of the district's food and medicine, and hand it out
+  while staffed and the district runs short.
+- **Shelters** take civilians in once the dead are in the streets: schools (1,500), churches and halls
+  (800), and the Civic Convention Center and University Arena (6,000). People inside are mostly out of
+  reach of the dead.
+
+How sites change over time:
+- **Guards:** the military posts up to 60% of a district's soldiers at its sites: police stations and
+  shelters first, then food, then pharmacies. Unguarded stores are looted in a riot.
+- **Sieges:** the dead besiege sites, a settled horde hardest. Barricades hold for hours, longer with
+  guards. A fallen shelter loses many of the people inside, and fallen sites burn. Troops can retake a
+  site once the district is quiet again.
+- **Showing their status:** each site flies a flag (green held, amber under siege, black fallen),
+  has a sandbag ring while guarded, and blinks a beacon at night while it holds. The map marks every
+  site (P, S, H, +), the district panel lists them, and the HUD names the one you're over.
+- **Land in the site's car park, field or plaza** to use it:
+  - Garrison it with troops aboard (they stay posted there), or retake it if it has fallen.
+  - Evacuate the shelter: quicker than the street, with people screened at the door so few of the
+    bitten get aboard.
+  - Load crates from its stock: food from a supermarket, ammunition from a police armoury, medicine
+    from a pharmacy. This works even at a fallen site, if you dare.
+  - Restock it with crates you brought.
+- **AI pilots** on an evacuation run take people from the fullest shelter.
+
 ## Hordes
 
 - **Hordes form on their own.** Once a district runs short of prey (or falls), part of its dead set
@@ -161,7 +190,7 @@ Each runs one person or crate at a time; lift off to leave.
 ```
 src/sim/      City simulation (no browser dependencies), clock, layout, worker bridge
 src/game/     Ground operations menu (loading, deploying, evacuating, fuel, salvage, rescues)
-src/world/    City generation and collision, walk grid, the zombie crowd, people on the streets, effects,
+src/world/    City generation and collision, walk grid, the zombie crowd, people on the streets, site markers, effects,
               refuelling points, sky
 src/heli/     Helicopter flight model and chase camera
 src/input/    Keyboard, mouse and gamepad input

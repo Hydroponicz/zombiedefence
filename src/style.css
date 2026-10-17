@@ -57,6 +57,9 @@ html, body {
 #hud-district { top: 16px; left: 50%; transform: translateX(-50%); text-align: center; min-width: 220px; }
 #hud-district .name { font-size: 16px; font-weight: 600; }
 #hud-district .meta { font-size: 12px; color: var(--muted); }
+#hud-district .site { color: var(--text); }
+#hud-district .site.besieged { color: var(--warn); }
+#hud-district .site.fallen { color: var(--critical); }
 
 .chip {
   display: inline-block;

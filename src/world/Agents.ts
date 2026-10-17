@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { DISTRICT_SIZE, DISTRICT_TEMPLATES, districtAt } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
+import { planSites } from '../sim/sites';
 import { BLOCKS_PER_DISTRICT, nearestNode, neighbors, nodeX, nodeZ, NODES_X, NODES_Z, stepToward } from '../sim/streets';
 import type { CityState, DistrictState } from '../sim/types';
 import type { WalkGrid } from './City';
@@ -92,7 +93,9 @@ export class Agents {
   private people: Person[] = [];
   private rand: () => number;
   private reconcileTimer = 0;
-  private posts: { x: number; z: number; district: number }[] = [];
+  /** Street posts, and posts at strategic sites (`site` set; their sandbags are drawn by Sites). */
+  private posts: { x: number; z: number; district: number; site?: number }[] = [];
+  private postSoldiers: number[] = [];
   private postVisible: boolean[] = [];
   private sandbags: THREE.InstancedMesh;
   private bodies: THREE.InstancedMesh[] = [];
@@ -183,10 +186,21 @@ export class Agents {
       else counts.set(key, [p]);
     }
 
-    // Posts are manned while the district has troops and hasn't fallen.
+    // Street posts are manned while the district has troops and hasn't fallen; site posts while the
+    // site holds and has guards.
+    const sites = new Map(state.sites.map((x) => [x.id, x]));
     this.posts.forEach((p, i) => {
       const d = state.districts[p.district];
+      if (p.site !== undefined) {
+        const site = sites.get(p.site);
+        const guards = site && site.status !== 'fallen' ? site.guards : 0;
+        this.postVisible[i] = guards >= 1;
+        this.postSoldiers[i] = Math.min(8, guards);
+        return;
+      }
       this.postVisible[i] = d.troops.strength >= 1 && d.status !== 'overrun';
+      const posted = state.sites.reduce((n, x) => n + (x.district === d.id ? x.guards : 0), 0);
+      this.postSoldiers[i] = Math.min(Math.max(0, d.troops.strength - posted), 36) / POSTS_PER_DISTRICT;
     });
     this.updateSandbags();
 
@@ -194,8 +208,11 @@ export class Agents {
     for (const [district, frac] of share) {
       const d = state.districts[district];
       targets.push([Kind.Civilian, district, visibleCivilians(d, night) * frac]);
-      const postsInRange = this.posts.filter((p, i) => p.district === district && this.postVisible[i] && Math.hypot(p.x - cx, p.z - cz) < ACTIVE_RADIUS).length;
-      targets.push([Kind.Soldier, district, (Math.min(d.troops.strength, 36) / POSTS_PER_DISTRICT) * postsInRange]);
+      let soldiers = 0;
+      this.posts.forEach((p, i) => {
+        if (p.district === district && this.postVisible[i] && Math.hypot(p.x - cx, p.z - cz) < ACTIVE_RADIUS) soldiers += this.postSoldiers[i];
+      });
+      targets.push([Kind.Soldier, district, soldiers]);
     }
 
     // Respect overall capacity.
@@ -446,8 +463,15 @@ export class Agents {
         const j = Math.min(NODES_Z - 1, tpl.row * BLOCKS_PER_DISTRICT + 3 + Math.floor(rand() * 7));
         this.posts.push({ x: nodeX(i), z: nodeZ(j), district });
         this.postVisible.push(true);
+        this.postSoldiers.push(0);
       }
     });
+    // Inside the sandbag ring at each site's landing zone, toward the street.
+    for (const p of planSites(seed)) {
+      this.posts.push({ x: p.x - 6, z: p.z + 6, district: p.district, site: p.id });
+      this.postVisible.push(false);
+      this.postSoldiers.push(0);
+    }
   }
 
   private buildSandbags(): THREE.InstancedMesh {
@@ -463,7 +487,7 @@ export class Agents {
   private updateSandbags(): void {
     let n = 0;
     this.posts.forEach((p, i) => {
-      if (!this.postVisible[i]) return;
+      if (!this.postVisible[i] || p.site !== undefined) return;
       for (let k = 0; k < 8; k++) {
         const ang = (k / 8) * Math.PI * 2;
         this.q.setFromAxisAngle(this.v.set(0, 1, 0), -ang);
