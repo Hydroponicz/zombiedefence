@@ -36,6 +36,7 @@ Add `?seed=1234` to the URL to replay a specific city and outbreak.
 | Release slung fuel bladder | X | F |
 | Landed: choose operation | D-pad up / down | Up / Down arrows |
 | Landed: start / stop it | A | E or Enter |
+| Flight command (AI pilots) | L3, or Y on the map | P |
 | Pause | Menu | Esc |
 | Show / hide controls | | H |
 
@@ -104,16 +105,32 @@ Each runs one person or crate at a time; lift off to leave.
   to set one up. The troops stay to guard it, more bladders refill it, and it's lost if the district is
   overrun. They show on the map, which also gains a Fuel overlay (7).
 
+## What's in phase 5
+
+- **AI pilots.** You start with Lt. Ana Reyes and one spare helicopter. About 3% of the civilians you
+  bring in turn out to be pilots looking for work; hire them or turn them away in flight command
+  (P, L3, or Y on the map). Each has skill (crash risk), nerve (which landing zones they'll accept),
+  loyalty and fatigue, and asks a daily wage in rations.
+- **Orders:** reinforce, resupply (rations, ammo or medicine), evacuate, relieve troops, or a fuel run
+  from a depot; once, or as a standing route. Trips draw troops, crates and 700 L of fuel from the base,
+  take real game time (flight, 15 minutes on the ground, the flight home) and risk a crash on landing.
+  AI helicopters fly their routes in the world and on the map, and report on the radio.
+- **Pay and loyalty:** wages come out of base rations at 06:00, with a bonus for dangerous jobs. Unpaid
+  pilots lose loyalty, refuse orders, and finally desert with a helicopter. Tired pilots rest.
+- **Helicopters are limited:** salvage abandoned ones at St. Mary's, Downtown and the Harbor (land there
+  and use the menu). Crashes and desertions lose them.
+- **Downed pilots** who survive a crash wait in the district: land there to pick them up.
+
 ## Project layout
 
 ```
 src/sim/      City simulation (no browser dependencies), clock, layout, worker bridge
-src/game/     Ground operations menu (loading, deploying, evacuating, fuel work)
+src/game/     Ground operations menu (loading, deploying, evacuating, fuel, salvage, rescues)
 src/world/    City generation and collision, street grid, people on the streets, effects,
               refuelling points, sky
 src/heli/     Helicopter flight model and chase camera
 src/input/    Keyboard, mouse and gamepad input
-src/ui/       HUD and debug map
+src/ui/       HUD, debug map and flight command
 scripts/      Headless simulation runner
 tests/        Vitest tests
 ```

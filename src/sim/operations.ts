@@ -2,8 +2,9 @@
 // crates, evacuate people and rotate exhausted soldiers out. Each command moves one person or
 // one crate, so the game can pace them (and a hot landing zone can interrupt them).
 
+import { addAirframe, maybeRecruit, validOrder } from './pilots';
 import { nextRandom } from './rng';
-import type { Cargo, CityState, CrateKind, DistrictState, Farp, Severity } from './types';
+import type { Cargo, CityState, CrateKind, DistrictState, Farp, Order, Severity } from './types';
 
 export const SEATS = 8;
 export const CRATE_SLOTS = 2;
@@ -31,7 +32,7 @@ const TROOP_KG = 120;
 const CRATE_KG = 800;
 export const MAX_PAYLOAD_KG = SEATS * TROOP_KG + CRATE_SLOTS * CRATE_KG;
 
-export type BoardKind = 'civilian' | 'soldier' | 'scientist';
+export type BoardKind = 'civilian' | 'soldier' | 'scientist' | 'pilot';
 
 export type PlayerCommand =
   | { type: 'loadTroop' }
@@ -52,7 +53,13 @@ export type PlayerCommand =
   | { type: 'burstBladder'; district: number }
   | { type: 'setupFarp'; district: number; x: number; z: number }
   /** Out of fuel with no way to get more: everything aboard stays in the district and the crew is recovered. */
-  | { type: 'abandon'; district: number };
+  | { type: 'abandon'; district: number }
+  /** Give an AI pilot orders (null clears them). */
+  | { type: 'setOrder'; pilot: number; order: Order | null }
+  | { type: 'dismissPilot'; pilot: number }
+  | { type: 'hirePilot'; pilot: number }
+  /** Make an abandoned helicopter in the district airworthy; it is ferried to the base. */
+  | { type: 'salvage'; district: number };
 
 export type FuelSource = { district: number } | { farp: number };
 
@@ -66,18 +73,18 @@ export function farpNear(s: CityState, x: number, z: number, radius: number): Fa
   return s.farps.find((f) => Math.hypot(f.x - x, f.z - z) < radius);
 }
 
-export type Emit = (district: number | null, severity: Severity, text: string) => void;
+export type Emit = (district: number | null, severity: Severity, text: string, radio?: boolean) => void;
 
 export function emptyCargo(): Cargo {
-  return { troops: 0, troopFatigue: 0, civilians: 0, infected: 0, tired: 0, tiredFatigue: 0, scientists: 0, crates: [], sling: 0 };
+  return { troops: 0, troopFatigue: 0, civilians: 0, infected: 0, tired: 0, tiredFatigue: 0, scientists: 0, crates: [], sling: 0, pilots: [] };
 }
 
 export function seatsUsed(c: Cargo): number {
-  return c.troops + c.civilians + c.infected + c.tired + c.scientists;
+  return c.troops + passengers(c);
 }
 
 export function passengers(c: Cargo): number {
-  return c.civilians + c.infected + c.tired + c.scientists;
+  return c.civilians + c.infected + c.tired + c.scientists + c.pilots.length;
 }
 
 export function payloadKg(c: Cargo): number {
@@ -120,6 +127,7 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
       const d = s.districts[cmd.district];
       if (cmd.kind === 'civilian') return d.population + d.infected >= 1;
       if (cmd.kind === 'soldier') return d.troops.strength >= 1;
+      if (cmd.kind === 'pilot') return s.pilots.some((p) => p.status === 'stranded' && p.district === d.id);
       return d.scientists >= 1;
     }
     case 'unloadAtBase':
@@ -127,6 +135,20 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
     case 'crash':
     case 'abandon':
       return true;
+    case 'setOrder': {
+      const p = s.pilots.find((x) => x.id === cmd.pilot);
+      return !!p && p.hired && !['dead', 'deserted', 'stranded'].includes(p.status) && (cmd.order === null || validOrder(s, cmd.order));
+    }
+    case 'dismissPilot': {
+      const p = s.pilots.find((x) => x.id === cmd.pilot);
+      return !!p && (p.status === 'idle' || p.status === 'resting');
+    }
+    case 'salvage':
+      return s.districts[cmd.district].salvage >= 1;
+    case 'hirePilot': {
+      const p = s.pilots.find((x) => x.id === cmd.pilot);
+      return !!p && !p.hired && (p.status === 'idle' || p.status === 'resting');
+    }
     case 'refuel':
       return cmd.litres > 0 && fuelStock(s, cmd.source) > 0;
     case 'hookBladder': {
@@ -175,7 +197,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       s.stats.troopsDeployed += 1;
       if (c.troops === 0) {
         c.troopFatigue = 0;
-        emit(d.id, 'info', `Fresh troops have landed in ${d.name}.`);
+        emit(d.id, 'info', `Fresh troops have landed in ${d.name}.`, true);
       }
       return true;
     }
@@ -188,7 +210,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       else d.troops.ammo += crate.amount;
       d.order = Math.min(100, d.order + crate.order);
       s.stats.cratesDelivered += 1;
-      emit(d.id, 'info', `A relief crate of ${crate.label} has been delivered to ${d.name}.`);
+      emit(d.id, 'info', `A relief crate of ${crate.label} has been delivered to ${d.name}.`, true);
       return true;
     }
     case 'board': {
@@ -210,10 +232,40 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
         c.tired += 1;
         tr.strength -= 1;
         tr.ammo = Math.max(0, tr.ammo - ammo);
+      } else if (cmd.kind === 'pilot') {
+        const p = s.pilots.find((x) => x.status === 'stranded' && x.district === d.id)!;
+        p.status = 'resting';
+        p.district = -1;
+        c.pilots.push(p.id);
       } else {
         d.scientists -= 1;
         c.scientists += 1;
       }
+      return true;
+    }
+    case 'setOrder': {
+      const p = s.pilots.find((x) => x.id === cmd.pilot)!;
+      p.order = cmd.order ? { ...cmd.order } : null;
+      p.blockedReason = '';
+      return true;
+    }
+    case 'dismissPilot': {
+      const p = s.pilots.find((x) => x.id === cmd.pilot)!;
+      s.pilots = s.pilots.filter((x) => x !== p);
+      emit(null, 'info', p.hired ? `${p.name} has been let go.` : `${p.name} has been turned away.`, true);
+      return true;
+    }
+    case 'hirePilot': {
+      const p = s.pilots.find((x) => x.id === cmd.pilot)!;
+      p.hired = true;
+      emit(null, 'info', `${p.name} has signed on for ${p.wage.toLocaleString('en-US')} rations a day.`, true);
+      return true;
+    }
+    case 'salvage': {
+      const d = s.districts[cmd.district];
+      d.salvage -= 1;
+      addAirframe(s);
+      emit(d.id, 'info', `An abandoned helicopter in ${d.name} has been made airworthy and ferried to ${base.name}.`, true);
       return true;
     }
     case 'unloadAtBase': {
@@ -221,6 +273,17 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       if (c.civilians + c.infected > 0) parts.push(`${c.civilians + c.infected} civilians`);
       if (c.tired > 0) parts.push(`${c.tired} exhausted soldiers`);
       if (c.scientists > 0) parts.push(`${c.scientists} scientists`);
+      if (c.pilots.length > 0) parts.push(`${c.pilots.length} rescued pilot${c.pilots.length > 1 ? 's' : ''}`);
+      for (const id of c.pilots) {
+        const p = s.pilots.find((x) => x.id === id);
+        // Grateful to be alive, and ready after a rest.
+        if (p) {
+          p.status = 'resting';
+          p.restUntil = s.t + 120;
+          p.loyalty = Math.min(1, p.loyalty + 0.2);
+        }
+      }
+      const civilians = c.civilians;
       base.population += c.civilians;
       base.infected += c.infected;
       if (c.tired > 0) mergeTroops(base, c.tired, c.tiredFatigue, 0.6, 0);
@@ -229,7 +292,9 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       s.stats.scientistsEvacuated += c.scientists;
       s.stats.troopsRelieved += c.tired;
       c.civilians = c.infected = c.tired = c.tiredFatigue = c.scientists = 0;
-      emit(base.id, 'info', `${parts.join(', ')} brought in to ${base.name}.`);
+      c.pilots = [];
+      emit(base.id, 'info', `${parts.join(', ')} brought in to ${base.name}.`, true);
+      maybeRecruit(s, civilians, emit);
       return true;
     }
     case 'refuel': {
@@ -249,7 +314,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       const farp = s.farps.find((f) => f.id === cmd.farp);
       if (farp) farp.fuel += c.sling;
       else d.fuel += c.sling;
-      emit(d.id, 'info', `${c.sling.toLocaleString('en-US')} litres of fuel delivered to ${farp ? `the refuelling point in ${d.name}` : d.name}.`);
+      emit(d.id, 'info', `${c.sling.toLocaleString('en-US')} litres of fuel delivered to ${farp ? `the refuelling point in ${d.name}` : d.name}.`, true);
       c.sling = 0;
       return true;
     }
@@ -265,7 +330,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       c.troops -= FARP_GUARDS;
       if (c.troops === 0) c.troopFatigue = 0;
       c.sling = 0;
-      emit(d.id, 'info', `Forward refuelling point set up in ${d.name}, guarded by ${FARP_GUARDS} troops.`);
+      emit(d.id, 'info', `Forward refuelling point set up in ${d.name}, guarded by ${FARP_GUARDS} troops.`, true);
       return true;
     }
     case 'abandon': {
@@ -282,6 +347,14 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
         }
         d.fuel += c.sling;
       }
+      // Rescued pilots aboard wait with everyone else.
+      for (const id of c.pilots) {
+        const p = s.pilots.find((x) => x.id === id);
+        if (p && d) {
+          p.status = 'stranded';
+          p.district = d.id;
+        }
+      }
       s.cargo = emptyCargo();
       emit(d ? d.id : null, 'warn', `Helicopter abandoned${d ? ` in ${d.name}` : ''} out of fuel. The crew has been recovered.`);
       return true;
@@ -289,6 +362,10 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
     case 'crash': {
       const aboard = seatsUsed(c);
       s.stats.lostInCrashes += aboard;
+      for (const id of c.pilots) {
+        const p = s.pilots.find((x) => x.id === id);
+        if (p) p.status = 'dead';
+      }
       const where = s.districts[cmd.district]?.name;
       s.cargo = emptyCargo();
       emit(cmd.district >= 0 ? cmd.district : null, 'critical',

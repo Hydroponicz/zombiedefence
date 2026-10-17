@@ -55,6 +55,8 @@ export interface DistrictState {
   burning: number;
   /** Researchers in the district (the lab, the hospital, and at base once evacuated). */
   scientists: number;
+  /** Abandoned helicopters here that the player can salvage. */
+  salvage: number;
 
   /** One-shot event flags. */
   flags: Record<string, boolean>;
@@ -79,6 +81,79 @@ export interface Cargo {
   crates: CrateKind[];
   /** Litres in a fuel bladder slung under the helicopter (0 = nothing on the hook). */
   sling: number;
+  /** Rescued pilots aboard (by id); each takes a seat. */
+  pilots: number[];
+}
+
+export type JobKind = 'reinforce' | 'resupply' | 'evacuate' | 'relieve' | 'fuel';
+
+/** A standing or one-off order for an AI pilot. */
+export interface Order {
+  kind: JobKind;
+  district: number;
+  /** What a resupply run carries. */
+  crate: CrateKind;
+  /** Keep flying it until told otherwise. */
+  repeat: boolean;
+}
+
+export type TripPhase = 'outbound' | 'ground' | 'return';
+
+/** An AI pilot's flight in progress. */
+export interface Trip {
+  phase: TripPhase;
+  district: number;
+  /** Game minutes the current phase began and ends. */
+  start: number;
+  end: number;
+  troops: number;
+  crates: CrateKind[];
+  civilians: number;
+  infected: number;
+  tired: number;
+  tiredFatigue: number;
+  fuel: number;
+  /** Danger at the landing zone when the trip was planned, for the bonus. */
+  danger: number;
+}
+
+export type PilotStatus = 'idle' | 'flying' | 'resting' | 'stranded' | 'dead' | 'deserted';
+
+export interface Pilot {
+  id: number;
+  name: string;
+  /** 0..1: lowers the chance of a crash. */
+  skill: number;
+  /** 0..1: how dangerous a landing zone they'll accept. */
+  nerve: number;
+  /** 0..1: low loyalty means refusals, then desertion. */
+  loyalty: number;
+  /** 0..1: builds per trip; rest brings it down. */
+  fatigue: number;
+  /** Rations a day. */
+  wage: number;
+  /** Candidates turn up among evacuees; only hired pilots are paid and take orders. */
+  hired: boolean;
+  status: PilotStatus;
+  order: Order | null;
+  trip: Trip | null;
+  airframe: number | null;
+  /** Where a stranded pilot is waiting. */
+  district: number;
+  /** Game minute a resting pilot is ready again. */
+  restUntil: number;
+  /** Paydays missed in a row. */
+  unpaid: number;
+  trips: number;
+  /** Last game minute this pilot refused or couldn't fly, to avoid repeating the message. */
+  blockedAt: number;
+  blockedReason: string;
+}
+
+export interface Airframe {
+  id: number;
+  name: string;
+  status: 'ready' | 'flying' | 'lost';
 }
 
 /** A forward refuelling point the player set up in the city. */
@@ -99,6 +174,8 @@ export interface PlayerStats {
   cratesDelivered: number;
   /** People lost when the helicopter went down. */
   lostInCrashes: number;
+  pilotsRecruited: number;
+  aiTrips: number;
 }
 
 export interface HistorySample {
@@ -117,6 +194,8 @@ export interface SimEvent {
   district: number | null;
   severity: Severity;
   text: string;
+  /** Routine news worth hearing on the radio anyway (the player's and pilots' own actions). */
+  radio?: boolean;
 }
 
 export interface CityState {
@@ -136,6 +215,10 @@ export interface CityState {
   cargo: Cargo;
   farps: Farp[];
   farpSeq: number;
+  pilots: Pilot[];
+  airframes: Airframe[];
+  pilotSeq: number;
+  airframeSeq: number;
   /** Research points earned by scientists at the base. */
   research: number;
   stats: PlayerStats;

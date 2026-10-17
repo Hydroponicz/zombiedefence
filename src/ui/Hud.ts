@@ -22,6 +22,7 @@ export const CONTROLS_HTML = `
   <tr><td>Time speed</td><td>D-pad ◀ ▶ (LT / RT on the map)</td><td><kbd>[</kbd> / <kbd>]</kbd></td></tr>
   <tr><td>Map: select district</td><td>D-pad</td><td>Arrow keys or click</td></tr>
   <tr><td>Map: overlay</td><td>LB / RB</td><td><kbd>1</kbd>–<kbd>7</kbd> or <kbd>Tab</kbd></td></tr>
+  <tr><td>Flight command (AI pilots)</td><td>L3, or Y on the map</td><td><kbd>P</kbd></td></tr>
   <tr><td>Pause</td><td>Menu</td><td><kbd>Esc</kbd></td></tr>
   <tr><td>Show / hide controls</td><td></td><td><kbd>H</kbd></td></tr>
   <tr><td>Release slung fuel bladder</td><td>X</td><td><kbd>F</kbd></td></tr>
@@ -137,8 +138,8 @@ export class Hud {
   }
 
   /** Seats, crates and what the player has achieved so far. */
-  updateCargo(cargo: Cargo, stats: PlayerStats, research: number): void {
-    const key = JSON.stringify(cargo) + JSON.stringify(stats) + Math.floor(research);
+  updateCargo(cargo: Cargo, stats: PlayerStats, research: number, pilots: number): void {
+    const key = JSON.stringify(cargo) + JSON.stringify(stats) + Math.floor(research) + pilots;
     if (key === this.lastCargoKey) return;
     this.lastCargoKey = key;
     const seats: string[] = [];
@@ -147,24 +148,27 @@ export class Hud {
     fill(cargo.civilians + cargo.infected, 'civilians');
     fill(cargo.tired, 'tired');
     fill(cargo.scientists, 'scientists');
+    fill(cargo.pilots.length, 'scientists');
     while (seats.length < SEATS) seats.push('');
     const aboard = [
       cargo.troops && `${cargo.troops} troops`,
       cargo.civilians + cargo.infected && `${cargo.civilians + cargo.infected} civilians`,
       cargo.tired && `${cargo.tired} exhausted soldiers`,
       cargo.scientists && `${cargo.scientists} scientists`,
+      cargo.pilots.length && `${cargo.pilots.length} rescued pilot${cargo.pilots.length > 1 ? 's' : ''}`,
     ].filter(Boolean).join(' · ') || 'No passengers';
     const crates = cargo.crates.length ? cargo.crates.map((k) => CRATES[k].label).join(', ') : 'none';
     this.cargo.innerHTML = `<div class="seats">${seats.map((c) => `<div class="seat ${c}"></div>`).join('')}</div>
       <div class="line">${aboard}</div>
       <div class="line">Crates: ${crates}</div>
-      <div class="stats">Saved ${stats.civiliansEvacuated} · Scientists ${stats.scientistsEvacuated} · Research ${Math.floor(research)}</div>`;
+      <div class="stats">Saved ${stats.civiliansEvacuated} · Scientists ${stats.scientistsEvacuated} · Research ${Math.floor(research)}</div>
+      <div class="stats">Pilots ${pilots} · P for flight command</div>`;
   }
 
   addEvents(events: SimEvent[]): void {
     for (const e of events) {
       // The info-level chatter is visible on the map; the radio carries what matters.
-      if (e.severity === 'info' && !e.text.startsWith('Day')) continue;
+      if (e.severity === 'info' && !e.radio && !e.text.startsWith('Day')) continue;
       const li = document.createElement('li');
       li.className = e.severity;
       const time = document.createElement('time');

@@ -57,18 +57,20 @@ export type Action =
   | 'confirm'
   /** Let go of the slung fuel bladder. */
   | 'sling'
+  /** Open or close flight command (the AI pilots). */
+  | 'command'
   | `overlay${number}`;
 
 const KEY_ACTIONS: Record<string, Action> = {
   KeyM: 'map',
   Escape: 'pause',
-  KeyP: 'pause',
   KeyH: 'help',
   KeyL: 'searchlight',
   KeyC: 'camera',
   KeyG: 'padDebug',
   KeyE: 'confirm',
   KeyF: 'sling',
+  KeyP: 'command',
   Enter: 'confirm',
   BracketRight: 'timeFaster',
   BracketLeft: 'timeSlower',
@@ -82,6 +84,7 @@ const PAD_ACTIONS: [number, Action][] = [
   [PAD.MENU, 'pause'],
   [PAD.A, 'confirm'],
   [PAD.X, 'sling'],
+  [PAD.L3, 'command'],
   [PAD.Y, 'searchlight'],
   [PAD.R3, 'camera'],
   [PAD.RB, 'next'],

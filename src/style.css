@@ -190,6 +190,42 @@ kbd {
   font-size: 0.95em;
 }
 
+#command {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  background: rgba(8, 11, 10, 0.88);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 32px 16px;
+}
+#command[hidden] { display: none; }
+.cmd-card { width: min(980px, 100%); }
+.cmd-head h2 { margin: 0 0 6px; }
+.cmd-fleet { display: flex; flex-wrap: wrap; gap: 6px 22px; color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+.cmd-fleet b { color: var(--text); }
+.cmd-row { background: rgba(255,255,255,0.04); border: 1px solid transparent; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; cursor: pointer; }
+.cmd-row.selected { border-color: rgba(255,255,255,0.35); background: rgba(255,255,255,0.08); }
+.cmd-row.gone { opacity: 0.4; }
+.cmd-line { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; }
+.cmd-name { font-weight: 600; }
+.cmd-status, .cmd-order { color: var(--muted); font-size: 13px; }
+.cmd-status .warn { color: var(--warn); }
+.traits { display: flex; gap: 12px; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.trait { display: inline-flex; align-items: center; gap: 5px; }
+.trait i { display: inline-block; width: 46px; height: 5px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden; }
+.trait i b { display: block; height: 100%; }
+.cmd-editor { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.cmd-field, .cmd-button { border: 1px solid rgba(255,255,255,0.15); border-radius: 5px; padding: 4px 10px; font-size: 13px; user-select: none; }
+.cmd-field small { display: block; font-size: 10px; color: var(--muted); }
+.cmd-field span { cursor: pointer; color: var(--muted); padding: 0 3px; }
+.cmd-field.focus, .cmd-button.focus { border-color: var(--held); box-shadow: 0 0 0 1px var(--held); }
+.cmd-field.off { opacity: 0.4; }
+.cmd-button { align-self: center; cursor: pointer; background: rgba(255,255,255,0.08); }
+.cmd-hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+
 #pause {
   position: fixed;
   inset: 0;

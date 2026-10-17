@@ -5,6 +5,7 @@
 import { dayNumber, isDaytime, START_MINUTE } from './clock';
 import { DISTRICT_TEMPLATES, neighborsOf } from './layout';
 import { applyCommand, baseOf, emptyCargo, mergeTroops, type PlayerCommand } from './operations';
+import { initialFleet, payday, updatePilots } from './pilots';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
 
@@ -109,7 +110,12 @@ export function createCity(seed: number | string): CityState {
     farps: [],
     farpSeq: 0,
     research: 0,
-    stats: { civiliansEvacuated: 0, scientistsEvacuated: 0, troopsDeployed: 0, troopsRelieved: 0, cratesDelivered: 0, lostInCrashes: 0 },
+    stats: { civiliansEvacuated: 0, scientistsEvacuated: 0, troopsDeployed: 0, troopsRelieved: 0, cratesDelivered: 0, lostInCrashes: 0,
+      pilotsRecruited: 0, aiTrips: 0 },
+    pilots: [],
+    airframes: [],
+    pilotSeq: 0,
+    airframeSeq: 0,
   };
   const rand = () => nextRandom(state);
   const totalPop = DISTRICT_TEMPLATES.reduce((s, d) => s + d.population, 0);
@@ -143,6 +149,7 @@ export function createCity(seed: number | string): CityState {
       playerNoise: 0,
       burning: 0,
       scientists: tpl.scientists ?? 0,
+      salvage: tpl.salvage ?? 0,
       flags: {},
       cooldowns: {},
     };
@@ -157,6 +164,7 @@ export function createCity(seed: number | string): CityState {
   first.infected = TUNING.outbreakStartInfected;
   first.population -= TUNING.outbreakStartInfected;
 
+  initialFleet(state);
   sampleHistory(state);
   return state;
 }
@@ -169,7 +177,10 @@ function tick(s: CityState, out: SimEvent[]): void {
   const ds = s.districts;
   const emit = makeEmit(s, out);
 
-  if (Math.floor(t) % 1440 === 360) emit(null, 'info', `Day ${day} begins.`);
+  if (Math.floor(t) % 1440 === 360) {
+    emit(null, 'info', `Day ${day} begins.`);
+    payday(s, emit);
+  }
   if (Math.floor(t) % 1440 === TUNING.supplyFlightMinute) supplyFlight(s, emit);
 
   if (hourly) spontaneousOutbreaks(s, day, emit);
@@ -182,6 +193,7 @@ function tick(s: CityState, out: SimEvent[]): void {
   if (hourly) fuelConvoys(s, emit);
   for (const d of ds) updateStatus(d, emit);
   loseFarps(s, emit);
+  updatePilots(s, emit);
 
   const base = baseOf(s);
   s.research += base.scientists * TUNING.researchPerScientist * H;
@@ -195,11 +207,11 @@ function tick(s: CityState, out: SimEvent[]): void {
   if (hourly) sampleHistory(s);
 }
 
-type Emit = (district: number | null, severity: Severity, text: string) => void;
+type Emit = (district: number | null, severity: Severity, text: string, radio?: boolean) => void;
 
 function makeEmit(s: CityState, out: SimEvent[]): Emit {
-  return (district, severity, text) => {
-    const e: SimEvent = { id: ++s.eventSeq, t: s.t, district, severity, text };
+  return (district, severity, text, radio) => {
+    const e: SimEvent = { id: ++s.eventSeq, t: s.t, district, severity, text, ...(radio ? { radio } : {}) };
     out.push(e);
     s.log.push(e);
     if (s.log.length > LOG_LIMIT) s.log.shift();

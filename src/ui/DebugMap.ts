@@ -27,6 +27,8 @@ export interface MapContext {
   heliZ: number;
   heliYaw: number;
   timeScale: number;
+  /** AI pilots in the air. */
+  aiHelis: { x: number; z: number; yaw: number; name: string }[];
 }
 
 export class DebugMap {
@@ -123,7 +125,7 @@ export class DebugMap {
     );
     const tabs = OVERLAYS.map((o, i) => (o === this.overlay ? `[${i + 1} ${o}]` : `${i + 1} ${o}`)).join('   ');
     this.text(tabs, W - pad, 30, 14, '#e8ecdf', 'right');
-    this.text('D-pad/arrows: select   ·   LB/RB or 1–7: overlay   ·   LT/RT or [ ]: time   ·   View/B or M/Esc: close', W - pad, 54, 12, '#a5ad9c', 'right');
+    this.text('D-pad/arrows: select   ·   LB/RB or 1–7: overlay   ·   LT/RT or [ ]: time   ·   Y/P: flight command   ·   View/B or M/Esc: close', W - pad, 54, 12, '#a5ad9c', 'right');
   }
 
   private districtColor(d: DistrictState): string {
@@ -203,6 +205,28 @@ export class DebugMap {
       g.fillRect(fx - 6, fy - 6, 12, 12);
       g.strokeRect(fx - 6, fy - 6, 12, 12);
       this.text(`FARP ${fmt(f.fuel)} L`, fx + 9, fy + 4, 11, '#f3d2a8');
+    }
+
+    // AI helicopters.
+    for (const ai of info.aiHelis) {
+      const ax = mx + (ai.x + CITY_WIDTH / 2) * scale;
+      const ay = my + (ai.z + CITY_DEPTH / 2) * scale;
+      g.save();
+      g.translate(ax, ay);
+      g.rotate(-ai.yaw);
+      g.fillStyle = '#8fd0ff';
+      g.strokeStyle = '#000';
+      g.lineWidth = 1.2;
+      g.beginPath();
+      g.moveTo(0, -7);
+      g.lineTo(5, 6);
+      g.lineTo(0, 3);
+      g.lineTo(-5, 6);
+      g.closePath();
+      g.fill();
+      g.stroke();
+      g.restore();
+      this.text(ai.name.split(' (')[0], ax + 8, ay - 6, 11, '#bfe3ff');
     }
 
     // Helicopter marker.

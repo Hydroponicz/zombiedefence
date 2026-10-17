@@ -220,7 +220,9 @@ throttle, light assists. Deadzones and sensitivity are configurable. Uses the Ga
 
 ## Build order
 
-Status: phases 1–4 are done (see README). Research points accumulate but there is nothing to spend
+Status: phases 1–5 are done (see README). AI helicopters follow their planned routes visually but
+don't fly full physics near the player; their outcomes are resolved in the simulation. The player's
+own replacement helicopters don't yet draw from the limited airframe pool. Research points accumulate but there is nothing to spend
 them on yet (phase 7). The base gets a daily supply flight so the player has troops and stores to
 move. The supply flight deliberately brings no fuel: fuel comes from the city's depots.
 

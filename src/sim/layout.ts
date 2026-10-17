@@ -50,17 +50,19 @@ export interface DistrictTemplate {
   medicine?: number;
   rations?: number;
   scientists?: number;
+  /** Abandoned helicopters that can be salvaged (medevac, news, police). */
+  salvage?: number;
 }
 
 export const DISTRICT_TEMPLATES: DistrictTemplate[] = [
   { name: 'Northside', kind: 'residential', col: 0, row: 0, population: 32000, troops: 30, features: {} },
   { name: 'University Heights', kind: 'university', col: 1, row: 0, population: 18000, troops: 20, features: { lab: true }, scientists: 24 },
   { name: 'Riverside', kind: 'apartments', col: 2, row: 0, population: 45000, troops: 35, features: {} },
-  { name: 'Harbor', kind: 'harbor', col: 3, row: 0, population: 9000, troops: 25, features: { fuelDepot: true }, fuel: 400000 },
+  { name: 'Harbor', kind: 'harbor', col: 3, row: 0, population: 9000, troops: 25, features: { fuelDepot: true }, fuel: 400000, salvage: 1 },
   { name: 'Westfield', kind: 'residential', col: 0, row: 1, population: 34000, troops: 30, features: { substation: true } },
   {
     name: 'Downtown', kind: 'downtown', col: 1, row: 1, population: 52000, troops: 90,
-    features: { substation: true, generator: 200 }, powerThreshold: 0.3, fuel: 4000,
+    features: { substation: true, generator: 200 }, powerThreshold: 0.3, fuel: 4000, salvage: 1,
   },
   { name: 'Market District', kind: 'commercial', col: 2, row: 1, population: 26000, troops: 30, features: { warehouse: true } },
   { name: 'Eastside', kind: 'residential', col: 3, row: 1, population: 38000, troops: 30, features: { substation: true } },
@@ -74,7 +76,7 @@ export const DISTRICT_TEMPLATES: DistrictTemplate[] = [
   {
     name: "St. Mary's", kind: 'hospital', col: 2, row: 2, population: 16000, troops: 40,
     features: { hospital: true, generator: 300 }, powerThreshold: 0.15, fuel: 8000, medicine: 50000,
-    scientists: 6,
+    scientists: 6, salvage: 1,
   },
   { name: 'Southgate', kind: 'residential', col: 3, row: 2, population: 30000, troops: 25, features: {} },
 ];

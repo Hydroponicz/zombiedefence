@@ -297,7 +297,7 @@ export class Operations {
     const c = s.cargo;
     const stairs = ctx.onRoof ? ROOF_SLOWDOWN : 1;
     const full = seatsUsed(c) >= SEATS;
-    const board = (kind: 'civilian' | 'soldier' | 'scientist'): PlayerCommand => ({ type: 'board', district: d.id, kind });
+    const board = (kind: 'civilian' | 'soldier' | 'scientist' | 'pilot'): PlayerCommand => ({ type: 'board', district: d.id, kind });
     const options: Option[] = [
       {
         id: 'deploy',
@@ -347,6 +347,29 @@ export class Operations {
         command: board('scientist'),
         interval: 1.5 * stairs,
         repeat: true,
+      });
+    }
+    const stranded = s.pilots.filter((p) => p.status === 'stranded' && p.district === d.id);
+    if (stranded.length) {
+      options.push({
+        id: 'pilot',
+        label: 'Pick up the downed pilot',
+        detail: full ? 'Seats full' : stranded.map((p) => p.name).join(', '),
+        enabled: canApply(s, board('pilot')),
+        command: board('pilot'),
+        interval: 1.5 * stairs,
+        repeat: true,
+      });
+    }
+    if (d.salvage >= 1) {
+      options.push({
+        id: 'salvage',
+        label: 'Salvage the abandoned helicopter',
+        detail: 'Patched up and ferried to the base',
+        enabled: true,
+        command: { type: 'salvage', district: d.id },
+        interval: 8,
+        repeat: false,
       });
     }
     return [...options, ...this.fuelOptions(s, ctx, false)];

@@ -6,9 +6,11 @@ import { Input, type FrameInput } from './input/Input';
 import { districtAt } from './sim/layout';
 import { baseOf, farpNear, MAX_PAYLOAD_KG, payloadKg } from './sim/operations';
 import { SimClient } from './sim/SimClient';
+import { CommandPanel } from './ui/CommandPanel';
 import { DebugMap } from './ui/DebugMap';
 import { Hud } from './ui/Hud';
 import { Agents } from './world/Agents';
+import { AiFleet } from './world/AiFleet';
 import { City } from './world/City';
 import { Effects } from './world/Effects';
 import { Environment } from './world/Environment';
@@ -50,6 +52,8 @@ const agents = new Agents(seed, effects);
 scene.add(agents.group);
 const farps = new Farps();
 scene.add(farps.group);
+const fleet = new AiFleet(city.helipads);
+scene.add(fleet.group);
 
 const heli = new Helicopter();
 scene.add(heli.object, heli.slingObject);
@@ -61,6 +65,7 @@ const input = new Input(canvas);
 const hud = new Hud();
 const map = new DebugMap(document.getElementById('map') as HTMLCanvasElement);
 const pauseEl = document.getElementById('pause')!;
+const command = new CommandPanel(document.getElementById('command')!, (cmd) => sim.command(cmd));
 
 const sim = new SimClient(seed);
 sim.onEvents = (events) => hud.addEvents(events);
@@ -94,9 +99,20 @@ function setPaused(value: boolean): void {
 
 function handleActions(frame: FrameInput): void {
   const a = frame.actions;
+  if (command.visible) {
+    if (a.has('command') || a.has('back')) command.toggle();
+    else command.handle(a);
+    return;
+  }
   if (map.visible) {
     if (a.has('map') || a.has('back')) {
       map.toggle();
+      return;
+    }
+    // Y on the map opens flight command.
+    if (a.has('searchlight') || a.has('command')) {
+      map.toggle();
+      command.toggle();
       return;
     }
     if (a.has('next')) map.cycleOverlay(1);
@@ -113,6 +129,10 @@ function handleActions(frame: FrameInput): void {
     if (paused) return;
     if (a.has('map')) {
       map.toggle();
+      input.releasePointer();
+    }
+    if (a.has('command')) {
+      command.toggle();
       input.releasePointer();
     }
   }
@@ -165,8 +185,9 @@ function update(dt: number): void {
 
   sim.update(dt);
 
-  // While the map is open the helicopter hovers on its own.
-  const flight = map.visible ? NEUTRAL : frame;
+  // While the map or flight command is open the helicopter hovers on its own.
+  const overlay = map.visible || command.visible;
+  const flight = overlay ? NEUTRAL : frame;
   const cargo = sim.state?.cargo;
   heli.load = cargo ? Math.min(1, payloadKg(cargo) / MAX_PAYLOAD_KG) : 0;
   heli.grabbers = agents.attract.grabbers;
@@ -190,7 +211,7 @@ function update(dt: number): void {
     }
   }
 
-  chase.update(dt, heli, map.visible ? { ...frame, lookX: 0, lookY: 0, mouseX: 0, mouseY: 0, zoom: 0 } : frame, (x, z) => city.surfaceHeight(x, z));
+  chase.update(dt, heli, overlay ? { ...frame, lookX: 0, lookY: 0, mouseX: 0, mouseY: 0, zoom: 0 } : frame, (x, z) => city.surfaceHeight(x, z));
   const night = environment.update(sim.time, heli.position);
   city.setNight(night);
 
@@ -209,6 +230,7 @@ function update(dt: number): void {
   if (!heli.destroyed) agents.doorGunners(dt, heli.position, state?.cargo.troops ?? 0);
   effects.update(dt, night);
   farps.update(dt);
+  fleet.update(dt, state, sim.time);
 
   // Ground operations: loading, deploying, evacuating.
   const atHelipad = city.helipads.some((p) => Math.hypot(p.x - heli.position.x, p.z - heli.position.z) < HELIPAD_RADIUS && Math.abs(p.y - surface) < 1);
@@ -222,9 +244,13 @@ function update(dt: number): void {
     z: heli.position.z,
     fuel: heli.fuel,
     fuelCapacity: FUEL_CAPACITY,
-  }, state, map.visible ? new Set() : frame.actions);
-  hud.updateOps(map.visible ? null : ops.view, frame.usingGamepad);
-  if (state) hud.updateCargo(state.cargo, state.stats, state.research);
+  }, state, overlay ? new Set() : frame.actions);
+  hud.updateOps(overlay ? null : ops.view, frame.usingGamepad);
+  command.render(state);
+  if (state) {
+    const pilots = state.pilots.filter((p) => p.hired && p.status !== 'dead' && p.status !== 'deserted').length;
+    hud.updateCargo(state.cargo, state.stats, state.research, pilots);
+  }
 
   // Hovering low is loud: report it so the simulation draws zombies in from nearby districts.
   noiseTimer -= dt;
@@ -260,7 +286,7 @@ function update(dt: number): void {
     mapTimer -= dt;
     if (mapTimer <= 0) {
       mapTimer = MAP_REFRESH;
-      map.draw(state, { heliX: heli.position.x, heliZ: heli.position.z, heliYaw: heli.yaw, timeScale: sim.timeScale });
+      map.draw(state, { heliX: heli.position.x, heliZ: heli.position.z, heliYaw: heli.yaw, timeScale: sim.timeScale, aiHelis: fleet.markers });
     }
   }
 }
@@ -279,4 +305,4 @@ window.addEventListener('resize', () => {
 });
 
 // Handy for debugging from the console.
-Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops } });
+Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops, command, fleet } });

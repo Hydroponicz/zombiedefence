@@ -185,6 +185,17 @@ export class Helicopter {
     return BURN_HOVER + BURN_LOAD * this.load;
   }
 
+  /** Place and animate without physics: AI helicopters follow routes planned by the simulation. */
+  pose(x: number, y: number, z: number, yaw: number, noseDown: number, bank: number, dt: number): void {
+    this.position.set(x, y + SKID_DEPTH, z);
+    this.yaw = yaw;
+    this.noseDown = noseDown;
+    this.bankRight = bank;
+    this.rotor = 1;
+    this.applyTransform();
+    this.animate(dt);
+  }
+
   get engineOut(): boolean {
     return this.fuel <= 0;
   }
