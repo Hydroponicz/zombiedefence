@@ -194,6 +194,7 @@ export class Hud {
       ? approx(totalZombies(district)) + (district.hordeZombies >= 1 ? ` (horde ${approx(district.hordeZombies)})` : '')
       : '';
     const troops = district ? Math.round(district.troops.strength) : 0;
+    const police = district ? Math.round(district.police.officers + district.police.riot) : 0;
     const count = (status: Site['status']) => sites.filter((x) => x.status === status).length;
     const siteLine = sites.length
       ? [`${count('held')} held`, count('besieged') && `${count('besieged')} under siege`, count('fallen') && `${count('fallen')} fallen`]
@@ -204,7 +205,7 @@ export class Hud {
         (nearby.capacity && nearby.status !== 'fallen' ? ` · ${approx(nearby.sheltered)} sheltered` : '')
       : '';
     const key = district
-      ? `${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${siteLine}|${near}`
+      ? `${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${siteLine}|${near}`
       : 'none';
     if (key !== this.lastDistrictKey) {
       this.lastDistrictKey = key;
@@ -212,7 +213,7 @@ export class Hud {
         ? `<div class="name">${district.name}</div>
            <span class="chip ${district.status}">${district.status}</span>
            <div class="meta">${POWER_LABEL[district.power]} · Order ${Math.round(district.order)}${district.rioting ? ' · Rioting' : ''}</div>
-           <div class="meta">Zombies ${zombies} · Troops ${troops}</div>
+           <div class="meta">Zombies ${zombies} · Troops ${troops}${police ? ` · Police ${police}` : ''}</div>
            ${siteLine ? `<div class="meta">Sites: ${siteLine}</div>` : ''}
            ${near ? `<div class="meta site ${nearby!.status}">${SITE_LABELS[nearby!.kind]}: ${near}</div>` : ''}`
         : `<div class="name">Outside the city</div>`;

@@ -337,6 +337,9 @@ export class DebugMap {
       ['Dead', fmt(d.dead)],
       ['Troops', `${fmt(d.troops.strength)}  ammo ${fmt(d.troops.ammo)}`],
       ['Fatigue / morale', `${(d.troops.fatigue * 100).toFixed(0)}% / ${(d.troops.morale * 100).toFixed(0)}%`],
+      ['Police', d.police.officers + d.police.riot >= 1
+        ? `${fmt(d.police.officers)} + ${fmt(d.police.riot)} riot · ${(d.police.morale * 100).toFixed(0)}%`
+        : 'none'],
       ['Order', d.order.toFixed(0)],
       ['Food & water', `${(d.rations / Math.max(1, people)).toFixed(1)} days`],
       ['Medicine', `${(d.medicine / Math.max(1, people)).toFixed(2)} days`],

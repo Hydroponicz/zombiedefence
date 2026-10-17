@@ -131,6 +131,25 @@ Each runs one person or crate at a time; lift off to leave.
   and use the menu). Crashes and desertions lose them.
 - **Downed pilots** who survive a crash wait in the district: land there to pick them up.
 
+## Police
+
+- **Who:** every city district has police, about one officer per 900 residents, plus riot police at
+  its police station. There are 12 per district and 40 at Central Police HQ downtown, but none in
+  Industrial Park or at the base. Patrol officers wear navy with hi-vis vests; riot police wear black
+  kit with visored helmets and shields.
+- **Against the dead:** police help screen civilians and kill zombies in the early days, but kill only
+  about a quarter as well as soldiers (pistols and batons against rifles). They take heavier losses,
+  and the bitten among them turn.
+- **Against riots:** riot police are what keeps order. A shield line raises the district's order
+  target and restores order faster than soldiers can.
+- **Morale:** police morale wears down every day of the outbreak, and with losses, riots, darkness
+  and fear. Below about a third, officers walk off the job and go home as civilians. Most districts
+  lose their police between days 7 and 10.
+- **Police stations:** the district's police help hold the station, and it is only looted once
+  nobody is left to guard it.
+- **Where to see them:** the HUD shows "Police N" for the district, and the map sidebar shows officers,
+  riot police and morale.
+
 ## Food trucks and trains
 
 - **Freight trains** run every four hours into the rail yard in Industrial Park, on a line from the

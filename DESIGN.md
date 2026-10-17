@@ -91,6 +91,16 @@ troops pulled off the barricade → breach.
 
 **The light dilemma:** lit districts are calmer but draw hordes at night.
 
+**Police** (`DistrictState.police`, in `CitySim.updateDistrict` and `updatePolice`):
+- **Combat:** officers and riot police add to screening (0.3 and 0.45 of a soldier) and coverage
+  (0.35 and 0.25). They kill at 0.25 and 0.15 of a soldier's rate, with effectiveness from their
+  morale, the light and riots.
+- **Losses:** 1.5× a soldier's, split by their share of the people fighting.
+- **Order:** riot police add three times a soldier's weight to security, raise the order target by up to
+  20 in a riot, and speed its recovery.
+- **Morale:** drifts toward 0.85 − 0.08 per day, less losses, fear, riots and darkness. Below 0.35
+  officers desert to the civilian population.
+
 **Food supply** (`src/sim/supply.ts`): trucks and trains have fixed routes and timetables
 (`truckPose`, `trainPose`), so the client draws them at the smooth game time.
 - **Trains:** one every 240 minutes, carrying 60k rations, while the industrial district is free of

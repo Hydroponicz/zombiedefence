@@ -15,6 +15,18 @@ export interface Troops {
   ammo: number;
 }
 
+/**
+ * The district's police: patrol officers with pistols, and riot police with shields and batons.
+ * They hold the line in the first days, kill the dead far less well than soldiers, are what keeps
+ * order in a riot, and go home to their families as the days wear on.
+ */
+export interface Police {
+  officers: number;
+  riot: number;
+  /** 0 broken .. 1 steady. Officers start walking off the job below about a third. */
+  morale: number;
+}
+
 export interface DistrictState {
   id: number;
   name: string;
@@ -29,6 +41,7 @@ export interface DistrictState {
   zombies: number;
   dead: number;
   troops: Troops;
+  police: Police;
 
   /** Food and water, in person-days. */
   rations: number;

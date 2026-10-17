@@ -277,7 +277,9 @@ function siege(s: CityState, d: DistrictState, site: Site, e: number, night: boo
   }
   const fort = site.kind === 'police' ? 1.5 : 1;
   const barricade = site.status === 'fallen' ? 0 : site.integrity * 0.3;
-  const pressure = localZ / (site.guards * e * 15 * fort + barricade + 1);
+  // A police station is also held by a share of the district's own police.
+  const police = site.kind === 'police' ? (d.police.officers * 0.25 + d.police.riot * 0.5) * d.police.morale : 0;
+  const pressure = localZ / ((site.guards * e + police * 0.5) * 15 * fort + barricade + 1);
 
   // Guards fall, and the bitten among them rise.
   if (site.guards > 0 && localZ > 1) {
@@ -364,7 +366,7 @@ function handOut(d: DistrictState, here: Site[], emit: Emit): void {
     if (x.status === 'fallen') continue;
     const stock = x.rations + x.medicine + x.ammo;
     // Police stations have their own officers: only an abandoned one is looted.
-    const exposed = x.kind === 'police' ? x.guards < 1 : x.guards < NEED[x.kind] * 0.5;
+    const exposed = x.kind === 'police' ? x.guards + d.police.officers + d.police.riot < 1 : x.guards < NEED[x.kind] * 0.5;
     if (d.rioting && exposed && stock > 100) {
       x.rations *= 0.85;
       x.medicine *= 0.85;

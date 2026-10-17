@@ -320,4 +320,4 @@ window.addEventListener('resize', () => {
 });
 
 // Handy for debugging from the console.
-Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops, command, fleet, sites, traffic } });
+Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops, command, fleet, sites, traffic, camera } });

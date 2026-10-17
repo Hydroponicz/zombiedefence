@@ -51,6 +51,15 @@ export const TUNING = {
   /** Extra decay per hour from maintenance backlog, from day 3. */
   gridBacklog: 0.0015,
   outbreakStartInfected: 25,
+  /** Police officers per resident, and riot police per district with a police station. */
+  officersPerResident: 1 / 900,
+  riotPolice: 12,
+  riotPoliceDowntown: 40,
+  /** Kills per officer and riot officer relative to a soldier (pistols and batons against rifles). */
+  officerKillShare: 0.25,
+  riotKillShare: 0.15,
+  /** Police morale lost per day of the outbreak (families at home, no relief coming). */
+  policeMoraleDecay: 0.08,
   /** Daily supply flight into the base from outside the city, at 07:00. */
   supplyFlightMinute: 7 * 60,
   supplyFlightTroops: 60,
@@ -142,6 +151,13 @@ export function createCity(seed: number | string): CityState {
       zombies: 0,
       dead: 0,
       troops: { strength: tpl.troops, fatigue: 0, morale: 0.85, ammo: tpl.troops * TUNING.roundsPerSoldier },
+      police: tpl.kind === 'airbase'
+        ? { officers: 0, riot: 0, morale: 0 }
+        : {
+          officers: Math.round(tpl.population * TUNING.officersPerResident),
+          riot: tpl.kind === 'downtown' ? TUNING.riotPoliceDowntown : tpl.kind === 'industrial' ? 0 : TUNING.riotPolice,
+          morale: 0.85,
+        },
       rations: tpl.rations ?? people * TUNING.startingRationDays * (0.75 + rand() * 0.5),
       medicine: tpl.medicine ?? people * 0.05,
       // Districts without a depot still have a little at petrol stations.
@@ -339,6 +355,12 @@ function updatePower(s: CityState, day: number, night: boolean, emit: Emit): voi
   }
 }
 
+/** How well the police fight: morale, light and riots; they have no ammunition problem to speak of. */
+function policeEffectiveness(d: DistrictState, night: boolean): number {
+  const light = night ? (d.power === 'dark' ? 0.6 : 0.85) : 1;
+  return (0.35 + 0.65 * d.police.morale) * light * (d.rioting ? 0.8 : 1);
+}
+
 function effectiveness(d: DistrictState, night: boolean): number {
   const tr = d.troops;
   if (tr.strength < 0.5) return 0;
@@ -356,12 +378,17 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const Z = totalZombies(d);
   const e = effectiveness(d, night);
   const fort = d.features.fortified ? 2 : 1;
+  const pol = d.police;
+  const O = pol.officers;
+  const R = pol.riot;
+  const pe = O + R > 0 ? policeEffectiveness(d, night) : 0;
 
   // --- Outbreak and combat ---
-  // Soldiers only protect the part of the district they can cover.
-  const strength = T * e * TUNING.soldierScreen * fort;
-  const coverage = clamp((T * e * TUNING.soldierCoverage * fort) / Math.max(1, P));
-  const screen = T > 0 ? coverage * (strength / (strength + Z + 1)) : 0;
+  // Soldiers and police only protect the part of the district they can cover. Officers patrol
+  // widely; riot police hold a tight shield line.
+  const strength = (T * e * fort + (O * 0.3 + R * 0.45) * pe) * TUNING.soldierScreen;
+  const coverage = clamp(((T * e * fort + (O * 0.35 + R * 0.25) * pe) * TUNING.soldierCoverage) / Math.max(1, P));
+  const screen = T + O + R > 0 ? coverage * (strength / (strength + Z + 1)) : 0;
   const freeZ = Z * (1 - 0.85 * screen);
   const biteRate = night ? TUNING.biteRateNight : TUNING.biteRateDay;
   const crowd = (d.rioting ? 1.5 : 1) * (d.power === 'dark' ? 1.2 : 1);
@@ -374,11 +401,21 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   let civDeaths = encounters * 0.1;
   const civKills = Math.min(Z, encounters * 0.15);
 
-  const soldierKills = Math.min(
+  // Soldiers kill far better than the police: rifles and training against pistols and batons.
+  const policePower = (O * TUNING.officerKillShare + R * TUNING.riotKillShare) * pe;
+  const killers = T * e + policePower;
+  const fighterKills = Math.min(
     Z - civKills,
-    T * e * TUNING.soldierKillRate * H * (Z / (Z + TUNING.huntHalfSaturation + P * TUNING.huntPerCivilian)),
+    killers * TUNING.soldierKillRate * H * (Z / (Z + TUNING.huntHalfSaturation + P * TUNING.huntPerCivilian)),
   );
+  const soldierKills = killers > 0 ? fighterKills * ((T * e) / killers) : 0;
   const troopLoss = T > 0 ? Math.min(T * 0.2, Z * TUNING.troopLossRate * (1 - 0.7 * e) * H / fort) : 0;
+  // Police take worse losses than soldiers (no armour but the riot squads'), shared by who's out there.
+  const policeLoss = O + R > 0
+    ? Math.min((O + R) * 0.2, Z * TUNING.troopLossRate * 1.5 * (1 - 0.5 * pe) * H * ((O + R) / (T + O + R)))
+    : 0;
+  const officerLoss = policeLoss * (O / (O + 0.6 * R + 1e-9));
+  const riotLoss = Math.min(R, policeLoss - officerLoss);
 
   const medicineShort = d.medicine <= 0;
   if (medicineShort) civDeaths += encounters * 0.1;
@@ -393,9 +430,11 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
     }
   }
   d.population = Math.max(0, P - bitten - civDeaths);
-  d.infected += bitten + troopLoss * 0.5;
-  d.dead += civDeaths + troopLoss * 0.5 + civKills + soldierKills;
-  const kills = civKills + soldierKills;
+  d.infected += bitten + (troopLoss + policeLoss) * 0.5;
+  d.dead += civDeaths + (troopLoss + policeLoss) * 0.5 + civKills + fighterKills;
+  pol.officers = Math.max(0, O - officerLoss);
+  pol.riot = Math.max(0, R - riotLoss);
+  const kills = civKills + fighterKills;
   const residentShare = Z > 0 ? d.zombies / Z : 1;
   const hordeLosses = kills * (1 - residentShare);
   d.zombies = Math.max(0, d.zombies - kills * residentShare);
@@ -468,17 +507,20 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
     neighborThreat = Math.max(neighborThreat, st === 'overrun' ? 0.5 : st === 'contested' ? 0.25 : 0);
   }
   const fearNow = clamp(threat + neighborThreat * 0.6);
-  const security = clamp(tr.strength / Math.max(1, d.population / 400));
+  // Riot police are what keep order: a shield line breaks up a riot far better than rifles do.
+  const security = clamp((tr.strength + pol.officers * 0.8 * pe + pol.riot * 3 * pe) / Math.max(1, d.population / 400));
+  const quell = d.rioting ? Math.min(20, pol.riot * pe * 0.8) : 0;
   const dread = Math.min(15, (day - 1) * 2);
   const dark = d.power === 'dark' ? (night ? 18 : 10) : 0;
   // Guarded police stations, shelters and food points steady people.
   const outposts = Math.min(10, d.outposts * 3);
   const target = clamp(
-    85 - 25 * shortage - 30 * fearNow - dark - dread + 15 * security + outposts - (medicineShort ? 5 : 0),
+    85 - 25 * shortage - 30 * fearNow - dark - dread + 15 * security + outposts + quell - (medicineShort ? 5 : 0),
     0,
     100,
   );
-  const rate = target < d.order ? 4 : 2;
+  // A shield line restores order faster than it would come back on its own.
+  const rate = target < d.order ? 4 : 2 + quell * 0.2;
   d.order += clamp(target - d.order, -rate * H, rate * H);
 
   if (!d.rioting && d.order < 25 && d.population > 500) {
@@ -492,6 +534,9 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
     d.flags.anarchy = true;
     emit(d.id, 'critical', `Civil order has collapsed in ${d.name}. People are fleeing.`);
   }
+
+  // --- Police ---
+  updatePolice(d, day, night, fearNow, policeLoss, emit);
 
   // --- Military ---
   if (tr.strength > 0) {
@@ -514,6 +559,44 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
     if (tr.morale < 0.12 && engaged && s.t - (d.cooldowns.rout ?? -Infinity) > 360) rout(s, d, emit);
   }
   return hordeLosses;
+}
+
+/**
+ * Police morale wears down day by day, with losses, riots and darkness; below about a third
+ * officers start walking off the job, back to their families (they become civilians).
+ */
+function updatePolice(d: DistrictState, day: number, night: boolean, fear: number, lost: number, emit: Emit): void {
+  const pol = d.police;
+  const total = pol.officers + pol.riot;
+  if (total < 0.5) {
+    pol.officers = 0;
+    pol.riot = 0;
+    return;
+  }
+  const lossFrac = lost / H / total;
+  const target = clamp(
+    0.85 - TUNING.policeMoraleDecay * (day - 1) - Math.min(0.3, lossFrac * 6) - 0.25 * fear -
+      (d.rioting ? 0.1 : 0) - (night && d.power === 'dark' ? 0.1 : 0),
+  );
+  pol.morale += clamp(target - pol.morale, -0.1 * H, 0.05 * H);
+  if (pol.morale < 0.35) {
+    const rate = (0.35 - pol.morale) * 0.3 * H;
+    const officers = pol.officers * rate;
+    const riot = pol.riot * rate * 0.5;
+    pol.officers -= officers;
+    pol.riot -= riot;
+    d.population += officers + riot;
+    if (!d.flags.policeLeaving && total >= 5) {
+      d.flags.policeLeaving = true;
+      emit(d.id, 'warn', `Police officers in ${d.name} are walking off the job.`);
+    }
+  }
+  if (!d.flags.policeGone && pol.officers + pol.riot < 1 && total >= 1) {
+    d.flags.policeGone = true;
+    pol.officers = 0;
+    pol.riot = 0;
+    emit(d.id, 'critical', `The police in ${d.name} are gone.`);
+  }
 }
 
 function safety(d: DistrictState): number {
@@ -622,7 +705,8 @@ function migrate(s: CityState, night: boolean): void {
 
 function updateStatus(d: DistrictState, emit: Emit): void {
   const humans = d.population + d.troops.strength;
-  const defense = d.troops.strength * 0.8 * TUNING.soldierScreen * (d.features.fortified ? 2 : 1) + d.population * 0.03;
+  const defense = d.troops.strength * 0.8 * TUNING.soldierScreen * (d.features.fortified ? 2 : 1) +
+    (d.police.officers * 0.3 + d.police.riot * 0.4) * d.police.morale * TUNING.soldierScreen + d.population * 0.03;
   const zombies = totalZombies(d);
   const pressure = zombies / (defense + 1);
   const prev = d.status;

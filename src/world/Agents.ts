@@ -19,7 +19,13 @@ import type { Effects } from './Effects';
 const enum Kind {
   Civilian,
   Soldier,
+  /** Patrol officers with pistols. */
+  Police,
+  /** Riot police with shields and batons. */
+  Riot,
 }
+
+const KINDS = [Kind.Civilian, Kind.Soldier, Kind.Police, Kind.Riot];
 
 const enum Mode {
   Walk,
@@ -58,7 +64,13 @@ export const ACTIVE_RADIUS = RESIDENT_RADIUS;
 const DESPAWN_RADIUS = 470;
 const RECONCILE_SECONDS = 0.5;
 const SPAWNS_PER_RECONCILE = 40;
-const CAPACITY = { [Kind.Civilian]: 320, [Kind.Soldier]: 120 } as const;
+const CAPACITY = { [Kind.Civilian]: 320, [Kind.Soldier]: 120, [Kind.Police]: 80, [Kind.Riot]: 60 } as const;
+/** Police on the street at most per district in view (the rest are elsewhere in the district). */
+const POLICE_VISIBLE = 30;
+const RIOT_VISIBLE = 20;
+const PISTOL_RANGE = 45;
+const BATON_RANGE = 2.2;
+const RIOT_ADVANCE = 30;
 
 const ATTRACT_ALTITUDE = 70;
 const FLEE_RANGE = 26;
@@ -165,7 +177,9 @@ export class Agents {
 
     for (const p of this.people) {
       if (p.kind === Kind.Civilian) this.updateCivilian(p, dt);
-      else this.updateSoldier(p, dt);
+      else if (p.kind === Kind.Soldier) this.updateSoldier(p, dt);
+      else if (p.kind === Kind.Police) this.updateOfficer(p, dt);
+      else this.updateRiot(p, dt);
     }
 
     // Bitten civilians rise as zombies; far-away people go.
@@ -219,16 +233,20 @@ export class Agents {
         if (p.district === district && this.postVisible[i] && Math.hypot(p.x - cx, p.z - cz) < ACTIVE_RADIUS) soldiers += this.postSoldiers[i];
       });
       targets.push([Kind.Soldier, district, soldiers]);
+      if (d.status !== 'overrun') {
+        targets.push([Kind.Police, district, Math.min(d.police.officers * frac, POLICE_VISIBLE)]);
+        targets.push([Kind.Riot, district, Math.min(d.police.riot * frac, RIOT_VISIBLE)]);
+      }
     }
 
     // Respect overall capacity.
-    for (const kind of [Kind.Civilian, Kind.Soldier]) {
+    for (const kind of KINDS) {
       const total = targets.filter((t) => t[0] === kind).reduce((s, t) => s + t[2], 0);
       if (total > CAPACITY[kind]) for (const t of targets) if (t[0] === kind) t[2] *= CAPACITY[kind] / total;
     }
 
     // Each kind gets its own spawn budget so a big crowd can't starve the soldiers.
-    const budget = [SPAWNS_PER_RECONCILE, SPAWNS_PER_RECONCILE];
+    const budget = KINDS.map(() => SPAWNS_PER_RECONCILE);
     for (const [kind, district, want] of targets) {
       const have = counts.get(`${kind}-${district}`) ?? [];
       const target = Math.round(want);
@@ -239,7 +257,7 @@ export class Agents {
         this.people = this.people.filter((p) => !remove.has(p));
       } else {
         for (let n = have.length; n < target && budget[kind] > 0; n++, budget[kind]--) {
-          const p = kind === Kind.Soldier ? this.spawnSoldier(district, cx, cz, have) : this.spawnCivilian(district, cx, cz);
+          const p = kind === Kind.Soldier ? this.spawnSoldier(district, cx, cz, have) : this.spawnCivilian(district, cx, cz, kind);
           if (p) {
             this.people.push(p);
             have.push(p);
@@ -270,7 +288,8 @@ export class Agents {
     return out;
   }
 
-  private spawnCivilian(district: number, cx: number, cz: number): Person | null {
+  /** Someone walking the streets: a civilian, or a police patrol. */
+  private spawnCivilian(district: number, cx: number, cz: number, kind = Kind.Civilian): Person | null {
     for (let attempt = 0; attempt < 20; attempt++) {
       const r = ACTIVE_RADIUS * Math.sqrt(this.rand());
       const ang = this.rand() * Math.PI * 2;
@@ -282,7 +301,7 @@ export class Agents {
       const z = nodeZ(j) + (nodeZ(nj) - nodeZ(j)) * t;
       if (districtAt(x, z) !== district || Math.hypot(x - cx, z - cz) > ACTIVE_RADIUS) continue;
       return {
-        kind: Kind.Civilian, civilian: true, mode: Mode.Walk, district, x, z, heading: 0,
+        kind, civilian: kind === Kind.Civilian, mode: Mode.Walk, district, x, z, heading: 0,
         ni, nj, pi: i, pj: j,
         ox: (this.rand() - 0.5) * 16, oz: (this.rand() - 0.5) * 16,
         speed: 1.2 + this.rand() * 0.5, phase: this.rand() * 10, timer: 0, cooldown: 0, post: -1,
@@ -382,6 +401,59 @@ export class Agents {
       tx + (this.rand() - 0.5) * miss, 1.0 + this.rand() * 0.8, tz + (this.rand() - 0.5) * miss,
     );
     if (hit) this.crowd.kill(target);
+  }
+
+  /** Patrol officers walk their beat and stop to fire their pistols at the dead nearby. */
+  private updateOfficer(p: Person, dt: number): void {
+    p.cooldown -= dt;
+    const target = this.crowd.nearest(p.x, p.z, PISTOL_RANGE);
+    if (target < 0) {
+      p.mode = Mode.Walk;
+      if (this.walkStreets(p, p.speed * 0.8, dt)) this.wander(p);
+      return;
+    }
+    p.mode = Mode.Post;
+    const tx = this.crowd.posX(target);
+    const tz = this.crowd.posZ(target);
+    p.heading = Math.atan2(-(tx - p.x), -(tz - p.z));
+    if (p.cooldown > 0) return;
+    // Slower and less accurate than a soldier's rifle.
+    p.cooldown = 1.2 + this.rand() * 1.6;
+    const hit = this.rand() < 0.18;
+    const miss = hit ? 0 : 4;
+    this.effects.tracer(
+      p.x - Math.sin(p.heading) * 0.5, 1.3, p.z - Math.cos(p.heading) * 0.5,
+      tx + (this.rand() - 0.5) * miss, 1.0 + this.rand() * 0.8, tz + (this.rand() - 0.5) * miss,
+    );
+    if (hit) this.crowd.kill(target);
+  }
+
+  /** Riot police close on the dead behind their shields and club them down. */
+  private updateRiot(p: Person, dt: number): void {
+    p.cooldown -= dt;
+    const target = this.crowd.nearest(p.x, p.z, RIOT_ADVANCE);
+    if (target < 0) {
+      p.mode = Mode.Walk;
+      if (this.walkStreets(p, p.speed * 0.7, dt)) this.wander(p);
+      return;
+    }
+    const tx = this.crowd.posX(target);
+    const tz = this.crowd.posZ(target);
+    const dx = tx - p.x;
+    const dz = tz - p.z;
+    const d = Math.hypot(dx, dz);
+    p.heading = Math.atan2(-dx, -dz);
+    p.mode = Mode.Flee; // leaning in
+    if (d > BATON_RANGE) {
+      const step = Math.min(d - BATON_RANGE * 0.8, 1.6 * dt);
+      p.x += (dx / d) * step;
+      p.z += (dz / d) * step;
+      p.phase += step * 2.4;
+      return;
+    }
+    if (p.cooldown > 0) return;
+    p.cooldown = 1.2 + this.rand() * 0.8;
+    if (this.rand() < 0.35) this.crowd.kill(target);
   }
 
   /**
@@ -544,11 +616,45 @@ export class Agents {
       box(0.2, 0.2, 0.2, 0, 1.6, 0, 0xc49a76),
       box(0.32, 0.15, 0.34, 0, 1.76, 0.01, 0x3b4429),
     ]);
-    const geo = { [Kind.Civilian]: [civilianBody, civilianHead], [Kind.Soldier]: [soldierBody, soldierHead] };
+    // Patrol officers: navy uniform under a hi-vis vest, duty belt, peaked cap with a white band.
+    const NAVY = 0x1d2840;
+    const officerBody = mergeGeometries([
+      box(0.36, 0.86, 0.2, 0, 0.43, 0, NAVY),
+      box(0.38, 0.12, 0.24, 0, 0.06, -0.02, 0x111111),
+      box(0.44, 0.6, 0.25, 0, 1.15, 0, NAVY),
+      box(0.47, 0.42, 0.29, 0, 1.2, 0, 0xc9de3a),
+      box(0.46, 0.08, 0.28, 0, 0.88, 0, 0x111111),
+      box(0.11, 0.6, 0.11, -0.29, 1.12, 0, NAVY),
+      box(0.11, 0.6, 0.11, 0.29, 1.12, 0, NAVY),
+    ]);
+    const officerHead = mergeGeometries([
+      box(0.21, 0.23, 0.21, 0, 1.6, 0, 0xd1a684),
+      box(0.25, 0.1, 0.25, 0, 1.76, 0, NAVY),
+      box(0.26, 0.04, 0.26, 0, 1.72, 0, 0xf2f2f2),
+      box(0.22, 0.02, 0.12, 0, 1.71, -0.17, 0x111111),
+    ]);
+    // Riot police: black kit, a helmet with a visor, and a tall shield carried in front.
+    const RIOT = 0x1c2128;
+    const riotBody = mergeGeometries([
+      box(0.38, 0.86, 0.22, 0, 0.43, 0, RIOT),
+      box(0.48, 0.62, 0.3, 0, 1.15, 0, RIOT),
+      box(0.13, 0.56, 0.13, -0.3, 1.14, 0, RIOT),
+      box(0.13, 0.56, 0.13, 0.3, 1.14, -0.05, RIOT),
+      box(0.62, 1.15, 0.06, -0.08, 0.95, -0.36, 0xa9b6c0),
+      box(0.06, 0.06, 0.6, 0.3, 1.0, -0.25, 0x111111),
+    ]);
+    const riotHead = mergeGeometries([
+      box(0.3, 0.3, 0.32, 0, 1.66, 0, 0x2f343c),
+      box(0.26, 0.14, 0.03, 0, 1.6, -0.17, 0x6f8090),
+    ]);
+    const geo = {
+      [Kind.Civilian]: [civilianBody, civilianHead], [Kind.Soldier]: [soldierBody, soldierHead],
+      [Kind.Police]: [officerBody, officerHead], [Kind.Riot]: [riotBody, riotHead],
+    };
 
-    for (const kind of [Kind.Civilian, Kind.Soldier]) {
+    for (const kind of KINDS) {
       const capacity = CAPACITY[kind];
-      const vertexColors = kind === Kind.Soldier;
+      const vertexColors = kind !== Kind.Civilian;
       const body = new THREE.InstancedMesh(geo[kind][0], new THREE.MeshLambertMaterial({ vertexColors }), capacity);
       const head = new THREE.InstancedMesh(geo[kind][1], new THREE.MeshLambertMaterial({ vertexColors }), capacity);
       if (kind === Kind.Civilian) {
@@ -568,7 +674,7 @@ export class Agents {
   }
 
   private render(): void {
-    const counts = [0, 0];
+    const counts = KINDS.map(() => 0);
     for (const p of this.people) {
       const kind = p.kind;
       const i = counts[kind]++;
@@ -588,7 +694,7 @@ export class Agents {
         this.heads[kind].setColorAt(i, this.c.setHex(SKINS[(p.look >> 3) % SKINS.length]));
       }
     }
-    for (const kind of [Kind.Civilian, Kind.Soldier]) {
+    for (const kind of KINDS) {
       const n = Math.min(counts[kind], CAPACITY[kind]);
       for (const mesh of [this.bodies[kind], this.heads[kind]]) {
         mesh.count = n;
