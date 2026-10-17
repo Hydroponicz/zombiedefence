@@ -20,11 +20,18 @@ export interface Troops {
  * They hold the line in the first days, kill the dead far less well than soldiers, are what keeps
  * order in a riot, and go home to their families as the days wear on.
  */
+/**
+ * How the police are working the outbreak: routine patrols on foot and in cars; checkpoints at
+ * intersections screening for the infected once it spreads; then supporting the military.
+ */
+export type PoliceStage = 'patrol' | 'checkpoints' | 'support';
+
 export interface Police {
   officers: number;
   riot: number;
   /** 0 broken .. 1 steady. Officers start walking off the job below about a third. */
   morale: number;
+  stage: PoliceStage;
 }
 
 export interface DistrictState {
@@ -160,6 +167,8 @@ export interface Cargo {
   sling: number;
   /** Rescued pilots aboard (by id); each takes a seat. */
   pilots: number[];
+  /** The Joint Operations Command staff, on their way from Camp Ridgeway to the airport (four seats). */
+  commandTeam: boolean;
 }
 
 export type JobKind = 'reinforce' | 'resupply' | 'evacuate' | 'relieve' | 'fuel';
@@ -273,6 +282,8 @@ export interface Traffic {
   blockedShare?: number[];
   /** People who have left the city by road. */
   fled: number;
+  /** Capacity factor per district: police checkpoints slow every street. */
+  slow?: number[];
 }
 
 export interface Supply {
@@ -307,6 +318,8 @@ export interface PlayerStats {
   lostInCrashes: number;
   pilotsRecruited: number;
   aiTrips: number;
+  /** Evacuees flown out of the city from the airport (or bussed out from Camp Ridgeway). */
+  flownOut: number;
 }
 
 export interface HistorySample {
@@ -352,6 +365,8 @@ export interface CityState {
   hordeSeq: number;
   sites: Site[];
   supply: Supply;
+  /** Camp Ridgeway: the military's base outside the city (not in `districts`). */
+  army: DistrictState;
   traffic: Traffic;
   pilotSeq: number;
   airframeSeq: number;

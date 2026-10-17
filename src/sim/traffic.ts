@@ -70,7 +70,8 @@ export function capacity(e: number): number {
 
 /** Volume over what the street can carry with its wrecks (1 = at capacity). */
 export function congestion(t: Traffic, e: number): number {
-  return t.load[e] / (capacity(e) * (1 - t.blocked[e]) + 1);
+  const slow = t.slow?.[EDGE_DISTRICT[e]] ?? 1;
+  return t.load[e] / (capacity(e) * slow * (1 - t.blocked[e]) + 1);
 }
 
 /** Share of free-flow speed: the volume-delay curve, and nothing through a street choked with wrecks. */
@@ -299,6 +300,8 @@ export function updateTraffic(s: CityState, night: boolean, emit: Emit): void {
   const t = s.traffic;
   const r = routes(s);
   const load = t.load;
+  // Checkpoints at the intersections hold every car up.
+  t.slow = s.districts.map((d) => (d.police.stage !== 'patrol' && d.police.officers >= 5 ? 0.75 : 1));
   load.fill(0);
   const curve = rush(((s.t % 1440) + 1440) % 1440);
   const total = s.districts.reduce((n, d) => n + (civilian(d) ? d.population : 0), 0) + 1;
@@ -398,6 +401,16 @@ export function roadStatus(t: Traffic, district: number): string {
   const wrecked = t.blockedShare?.[district] ?? 0;
   const flow = jam < 0.5 ? 'flowing' : jam < 0.9 ? 'heavy' : jam < 1.3 ? 'jammed' : 'gridlock';
   return wrecked >= 0.05 ? `${flow} · ${Math.round(wrecked * 100)}% wrecked` : flow;
+}
+
+/**
+ * Where a district's police set up checkpoints: the four avenue intersections three blocks out from
+ * its centre.
+ */
+export function checkpointNodes(d: { col: number; row: number }): [number, number][] {
+  const c = districtCenter(d.col, d.row);
+  const [ci, cj] = nearestNode(c.x, c.z);
+  return [[ci - 3, cj], [ci + 3, cj], [ci, cj - 3], [ci, cj + 3]];
 }
 
 /** The district an edge lies in, for the client. */

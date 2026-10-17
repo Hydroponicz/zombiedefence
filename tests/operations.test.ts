@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { deployed } from './helpers';
 import { Operations, type GroundContext } from '../src/game/Operations';
 import type { Action } from '../src/input/Input';
 import { CitySim } from '../src/sim/CitySim';
@@ -8,7 +9,7 @@ const byName = (sim: CitySim, name: string) => sim.state.districts.find((d) => d
 
 describe('player operations in the simulation', () => {
   it('loads troops at the base and deploys them fresh into a district', () => {
-    const sim = new CitySim('ops');
+    const sim = deployed(new CitySim('ops'));
     const base = baseOf(sim.state);
     const westfield = byName(sim, 'Westfield');
     westfield.troops.fatigue = 0.8;
@@ -26,14 +27,14 @@ describe('player operations in the simulation', () => {
   });
 
   it('keeps a reserve at the base', () => {
-    const sim = new CitySim('reserve');
+    const sim = deployed(new CitySim('reserve'));
     baseOf(sim.state).troops.strength = BASE_RESERVE_TROOPS + 1;
     expect(sim.command({ type: 'loadTroop' })).toBe(true);
     expect(sim.command({ type: 'loadTroop' })).toBe(false);
   });
 
   it('carries relief crates from base stores to a district', () => {
-    const sim = new CitySim('crates');
+    const sim = deployed(new CitySim('crates'));
     const base = baseOf(sim.state);
     const market = byName(sim, 'Market District');
     const stock = base.rations;
@@ -48,7 +49,7 @@ describe('player operations in the simulation', () => {
   });
 
   it('evacuates civilians to the base, where the bitten among them are caught at the gate', () => {
-    const sim = new CitySim('evac');
+    const sim = deployed(new CitySim('evac'));
     const d = byName(sim, 'Northside');
     d.infected = d.population; // half of everyone is bitten
     const base = baseOf(sim.state);
@@ -66,7 +67,7 @@ describe('player operations in the simulation', () => {
   });
 
   it('lets the bitten in once every other district has fallen', () => {
-    const sim = new CitySim('open');
+    const sim = deployed(new CitySim('open'));
     const base = baseOf(sim.state);
     for (const x of sim.state.districts) {
       if (x === base) continue;
@@ -81,7 +82,7 @@ describe('player operations in the simulation', () => {
   });
 
   it('rotates exhausted soldiers out to rest at the base', () => {
-    const sim = new CitySim('relieve');
+    const sim = deployed(new CitySim('relieve'));
     const d = byName(sim, 'Downtown');
     d.troops.fatigue = 0.9;
     const base = baseOf(sim.state);
@@ -98,7 +99,7 @@ describe('player operations in the simulation', () => {
   });
 
   it('turns scientists at the base into research', () => {
-    const sim = new CitySim('science');
+    const sim = deployed(new CitySim('science'));
     const lab = byName(sim, 'University Heights');
     for (let i = 0; i < 5; i++) sim.command({ type: 'board', district: lab.id, kind: 'scientist' });
     sim.command({ type: 'unloadAtBase' });
@@ -108,7 +109,7 @@ describe('player operations in the simulation', () => {
   });
 
   it('loses everyone aboard in a crash', () => {
-    const sim = new CitySim('crash');
+    const sim = deployed(new CitySim('crash'));
     for (let i = 0; i < 3; i++) sim.command({ type: 'loadTroop' });
     sim.command({ type: 'crash', district: 0 });
     expect(seatsUsed(sim.state.cargo)).toBe(0);
@@ -116,7 +117,7 @@ describe('player operations in the simulation', () => {
   });
 
   it('flies in fresh troops and supplies every morning', () => {
-    const sim = new CitySim('flight');
+    const sim = deployed(new CitySim('flight'));
     const base = baseOf(sim.state);
     const troops = base.troops.strength;
     sim.step(70); // 06:00 -> 07:10
@@ -135,6 +136,7 @@ describe('ground operations menu', () => {
     z: 0,
     fuel: 1360,
     fuelCapacity: 1360,
+    base: name === 'Kessler Airport' ? 'airport' : null,
     ...extra,
   });
 
@@ -150,9 +152,9 @@ describe('ground operations menu', () => {
   }
 
   it('loads troops one at a time until the seats are full', () => {
-    const sim = new CitySim('menu');
+    const sim = deployed(new CitySim('menu'));
     const { ops, tick } = harness(sim);
-    const ctx = at(sim, 'Fort Kessler');
+    const ctx = at(sim, 'Kessler Airport');
     tick(ctx, 0);
     expect(ops.view?.options[0].label).toBe('Load fresh troops');
     tick(ctx, 1.1, ['confirm']);
@@ -162,7 +164,7 @@ describe('ground operations menu', () => {
   });
 
   it('pauses boarding while zombies are at the doors', () => {
-    const sim = new CitySim('doors');
+    const sim = deployed(new CitySim('doors'));
     const { tick } = harness(sim);
     const ctx = at(sim, 'Northside');
     tick(ctx, 0, ['dpadDown', 'dpadDown']);
@@ -176,7 +178,7 @@ describe('ground operations menu', () => {
   });
 
   it('boards more slowly from a rooftop', () => {
-    const sim = new CitySim('roof');
+    const sim = deployed(new CitySim('roof'));
     const { tick } = harness(sim);
     const ctx = at(sim, 'Northside', { onRoof: true });
     tick(ctx, 0, ['dpadDown', 'dpadDown']);
@@ -185,10 +187,10 @@ describe('ground operations menu', () => {
   });
 
   it('unloads passengers automatically on touching down at the base', () => {
-    const sim = new CitySim('auto');
+    const sim = deployed(new CitySim('auto'));
     for (let i = 0; i < 4; i++) sim.command({ type: 'board', district: byName(sim, 'Northside').id, kind: 'civilian' });
     const { tick } = harness(sim);
-    tick(at(sim, 'Fort Kessler'), 0.1);
+    tick(at(sim, 'Kessler Airport'), 0.1);
     expect(seatsUsed(sim.state.cargo)).toBe(0);
     expect(sim.state.stats.civiliansEvacuated).toBe(4);
   });

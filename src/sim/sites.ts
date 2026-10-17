@@ -70,6 +70,7 @@ const COUNTS: Record<DistrictKind, Partial<Record<SiteKind, number>>> = {
   industrial: { depot: 1, factory: 1, waterworks: 1, fuelTerminal: 1 },
   hospital: { police: 1, supermarket: 1, shelter: 1, pharmacy: 1 },
   airbase: {},
+  army: {},
 };
 
 /** Landing zone offset from the block centre, by variant (the 3D city builds around it). */

@@ -4,7 +4,7 @@
 
 import type { Action } from '../input/Input';
 import { formatClock } from '../sim/clock';
-import { CRATES, type PlayerCommand } from '../sim/operations';
+import { baseOf, CRATES, type PlayerCommand } from '../sim/operations';
 import { JOB_LABELS, orderSummary, TRIP_FUEL } from '../sim/pilots';
 import type { CityState, CrateKind, JobKind, Pilot } from '../sim/types';
 
@@ -79,7 +79,7 @@ export class CommandPanel {
     this.lastKey = key;
     this.row = Math.min(this.row, Math.max(0, state.pilots.length - 1));
 
-    const base = state.districts.find((d) => d.kind === 'airbase')!;
+    const base = baseOf(state);
     const crew = state.pilots.filter((p) => p.hired && !['dead', 'deserted'].includes(p.status));
     const candidates = state.pilots.filter((p) => !p.hired && !['dead', 'deserted'].includes(p.status)).length;
     const wages = crew.reduce((s, p) => s + p.wage, 0);

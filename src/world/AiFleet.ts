@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { Helicopter } from '../heli/Helicopter';
-import { districtCenter, DISTRICT_TEMPLATES } from '../sim/layout';
+import { ARMY_BASE, districtCenter, DISTRICT_TEMPLATES } from '../sim/layout';
 import type { CityState, Pilot } from '../sim/types';
 import type { Helipad } from './City';
 
@@ -44,7 +44,7 @@ export class AiFleet {
         this.helis.set(p.id, heli);
         this.group.add(heli.object);
       }
-      const pose = this.poseFor(p, time);
+      const pose = this.poseFor(p, time, this.home(p, state!));
       heli.pose(pose.x, pose.y, pose.z, pose.yaw, pose.noseDown, 0, dt);
       this.markers.push({ x: pose.x, z: pose.z, yaw: pose.yaw, name: p.name });
     }
@@ -67,10 +67,16 @@ export class AiFleet {
     return { x: c.x + ((p.id % 3) - 1) * 22, z: c.z };
   }
 
-  private poseFor(p: Pilot, time: number) {
+  /** Home pads: Camp Ridgeway, or the airport once the JOC is there (never pad 1, the player's). */
+  private home(p: Pilot, state: CityState): { x: number; z: number } {
+    const name = state.flags.joc ? DISTRICT_TEMPLATES.find((d) => d.kind === 'airbase')!.name : ARMY_BASE.name;
+    const pads = this.pads.filter((pad) => pad.name.startsWith(name) && !pad.name.endsWith('pad 1'));
+    const pad = pads[p.id % pads.length] ?? this.pads[0];
+    return { x: pad.x, z: pad.z };
+  }
+
+  private poseFor(p: Pilot, time: number, home: { x: number; z: number }) {
     const trip = p.trip!;
-    const base = DISTRICT_TEMPLATES.findIndex((d) => d.kind === 'airbase');
-    const home = this.landingZone(p, base);
     const away = this.landingZone(p, trip.district);
     if (trip.phase === 'ground') {
       return { x: away.x, y: 0, z: away.z, yaw: Math.atan2(-(away.x - home.x), -(away.z - home.z)), noseDown: 0 };

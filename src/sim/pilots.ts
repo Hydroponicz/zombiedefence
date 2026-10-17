@@ -4,6 +4,7 @@
 
 import { districtCenter, DISTRICT_TEMPLATES } from './layout';
 import { BASE_RESERVE_TROOPS, baseOf, BLADDER_LITRES, CRATES, mergeTroops, ROUNDS_PER_TROOP, SEATS, type Emit } from './operations';
+import { hubPosition } from './command';
 import { totalZombies } from './hordes';
 import { screenAtGate } from './quarantine';
 import { nextRandom } from './rng';
@@ -100,10 +101,10 @@ export function willFly(p: Pilot, d: DistrictState): boolean {
   return dangerOf(d) <= 0.1 + p.nerve * 0.6;
 }
 
-function travelMinutes(from: number, to: number): number {
-  const a = DISTRICT_TEMPLATES[from];
+/** Flight time from the hub (Camp Ridgeway or the airport) to a district. */
+function travelMinutes(s: CityState, to: number): number {
+  const pa = hubPosition(s);
   const b = DISTRICT_TEMPLATES[to];
-  const pa = districtCenter(a.col, a.row);
   const pb = districtCenter(b.col, b.row);
   return TAKEOFF_MINUTES + Math.hypot(pa.x - pb.x, pa.z - pb.z) / METRES_PER_GAME_MINUTE;
 }
@@ -112,6 +113,8 @@ export function validOrder(s: CityState, order: Order): boolean {
   const d = s.districts[order.district];
   if (!d) return false;
   if (order.kind === 'fuel') return !!d.features.fuelDepot && d.kind !== 'airbase';
+  // Troops go into the city only once the JOC is running.
+  if ((order.kind === 'reinforce' || order.kind === 'relieve') && !s.flags.joc) return false;
   return d.kind !== 'airbase';
 }
 
@@ -175,7 +178,7 @@ function dispatch(s: CityState, p: Pilot, emit: Emit): void {
   if (base.fuel < TRIP_FUEL) return block(s, p, 'grounded: the base is out of fuel.', emit);
 
   const trip: Trip = {
-    phase: 'outbound', district: d.id, start: s.t, end: s.t + travelMinutes(base.id, d.id),
+    phase: 'outbound', district: d.id, start: s.t, end: s.t + travelMinutes(s, d.id),
     troops: 0, crates: [], civilians: 0, infected: 0, tired: 0, tiredFatigue: 0, fuel: 0, danger: dangerOf(d),
   };
   if (order.kind === 'reinforce' || order.kind === 'relieve') {
@@ -210,7 +213,6 @@ function advanceTrip(s: CityState, p: Pilot, emit: Emit): void {
   const trip = p.trip!;
   if (s.t < trip.end) return;
   const d = s.districts[trip.district];
-  const base = baseOf(s);
   if (trip.phase === 'outbound') {
     // The landing is where it goes wrong.
     const tired = p.fatigue > 0.7 ? 1.8 : 1;
@@ -223,7 +225,7 @@ function advanceTrip(s: CityState, p: Pilot, emit: Emit): void {
   } else if (trip.phase === 'ground') {
     trip.phase = 'return';
     trip.start = s.t;
-    trip.end = s.t + travelMinutes(d.id, base.id);
+    trip.end = s.t + travelMinutes(s, d.id);
   } else {
     homecoming(s, p, emit);
   }

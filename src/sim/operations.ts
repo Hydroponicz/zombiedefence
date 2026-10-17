@@ -2,6 +2,7 @@
 // crates, evacuate people and rotate exhausted soldiers out. Each command moves one person or
 // one crate, so the game can pace them (and a hot landing zone can interrupt them).
 
+import { airportOf, establishJoc, hubOf, mergeTroops } from './command';
 import { addAirframe, maybeRecruit, validOrder } from './pilots';
 import { nextRandom } from './rng';
 import { screenAtGate } from './quarantine';
@@ -36,18 +37,25 @@ export const MAX_PAYLOAD_KG = SEATS * TROOP_KG + CRATE_SLOTS * CRATE_KG;
 
 export type BoardKind = 'civilian' | 'soldier' | 'scientist' | 'pilot';
 
+/** Which base: Camp Ridgeway, or the airport once the JOC is there (omitted: whichever is the hub). */
+export type BaseId = 'army' | 'airport';
+
 export type PlayerCommand =
-  | { type: 'loadTroop' }
-  | { type: 'returnTroop' }
-  /** From the base's stores, or from a site's stock when `site` is given. */
-  | { type: 'loadCrate'; kind: CrateKind; site?: number }
+  | { type: 'loadTroop'; at?: BaseId }
+  | { type: 'returnTroop'; at?: BaseId }
+  /** From a base's stores, or from a site's stock when `site` is given. */
+  | { type: 'loadCrate'; kind: CrateKind; site?: number; at?: BaseId }
+  /** At Camp Ridgeway: take the Joint Operations Command staff aboard. */
+  | { type: 'loadCommandTeam' }
+  /** At the airport, with the command team aboard: set up the JOC. */
+  | { type: 'establishJoc' }
   /** Into the district; with `site`, posted to guard that site. */
   | { type: 'deployTroop'; district: number; site?: number }
   /** Into the district's stocks, or a site's when `site` is given. */
   | { type: 'dropCrate'; district: number; site?: number }
   /** With `site`, civilians come out of that shelter. */
   | { type: 'board'; district: number; kind: BoardKind; site?: number }
-  | { type: 'unloadAtBase' }
+  | { type: 'unloadAtBase'; at?: BaseId }
   /** The helicopter went down: everyone and everything aboard is lost. */
   | { type: 'crash'; district: number }
   /** Pump fuel into the helicopter from a district's stocks or a forward refuelling point. */
@@ -67,11 +75,12 @@ export type PlayerCommand =
   /** Make an abandoned helicopter in the district airworthy; it is ferried to the base. */
   | { type: 'salvage'; district: number };
 
-export type FuelSource = { district: number } | { farp: number };
+export type FuelSource = { district: number } | { farp: number } | { army: true };
 
 /** Litres available from a fuel source. */
 export function fuelStock(s: CityState, source: FuelSource): number {
   if ('farp' in source) return s.farps.find((f) => f.id === source.farp)?.fuel ?? 0;
+  if ('army' in source) return s.army.fuel;
   return s.districts[source.district]?.fuel ?? 0;
 }
 
@@ -82,11 +91,14 @@ export function farpNear(s: CityState, x: number, z: number, radius: number): Fa
 export type Emit = (district: number | null, severity: Severity, text: string, radio?: boolean) => void;
 
 export function emptyCargo(): Cargo {
-  return { troops: 0, troopFatigue: 0, civilians: 0, infected: 0, tired: 0, tiredFatigue: 0, scientists: 0, crates: [], sling: 0, pilots: [] };
+  return { troops: 0, troopFatigue: 0, civilians: 0, infected: 0, tired: 0, tiredFatigue: 0, scientists: 0, crates: [], sling: 0, pilots: [], commandTeam: false };
 }
 
+/** Seats the command team takes. */
+export const COMMAND_TEAM_SEATS = 4;
+
 export function seatsUsed(c: Cargo): number {
-  return c.troops + passengers(c);
+  return c.troops + passengers(c) + (c.commandTeam ? COMMAND_TEAM_SEATS : 0);
 }
 
 export function passengers(c: Cargo): number {
@@ -94,32 +106,34 @@ export function passengers(c: Cargo): number {
 }
 
 export function payloadKg(c: Cargo): number {
-  return (c.troops + c.tired) * TROOP_KG + (c.civilians + c.infected + c.scientists) * PASSENGER_KG +
+  return (c.troops + c.tired + (c.commandTeam ? COMMAND_TEAM_SEATS : 0)) * TROOP_KG + (c.civilians + c.infected + c.scientists) * PASSENGER_KG +
     c.crates.length * CRATE_KG + c.sling * FUEL_KG_PER_LITRE;
 }
 
+/** The military's hub: Camp Ridgeway, then the airport once the JOC is up. */
 export function baseOf(s: CityState): DistrictState {
-  return s.districts.find((d) => d.kind === 'airbase')!;
+  return hubOf(s);
 }
 
-export function mergeTroops(to: DistrictState, strength: number, fatigue: number, morale: number, ammo: number): void {
-  const tr = to.troops;
-  const total = tr.strength + strength;
-  if (total <= 0) return;
-  tr.fatigue = (tr.fatigue * tr.strength + fatigue * strength) / total;
-  tr.morale = (tr.morale * tr.strength + morale * strength) / total;
-  tr.strength = total;
-  tr.ammo += ammo;
+export function baseAt(s: CityState, at: BaseId | undefined): DistrictState {
+  return at === 'army' ? s.army : at === 'airport' ? airportOf(s) : hubOf(s);
 }
+
+export { mergeTroops };
 
 /** Whether a command can run right now (the UI uses this to grey out options). */
 export function canApply(s: CityState, cmd: PlayerCommand): boolean {
   const c = s.cargo;
-  const base = baseOf(s);
+  const base = baseAt(s, 'at' in cmd ? cmd.at : undefined);
   const seatFree = seatsUsed(c) < SEATS;
   switch (cmd.type) {
     case 'loadTroop':
-      return seatFree && base.troops.strength >= BASE_RESERVE_TROOPS + 1;
+      // Command holds the troops back until the JOC is running.
+      return !!s.flags.joc && seatFree && base.troops.strength >= BASE_RESERVE_TROOPS + 1;
+    case 'loadCommandTeam':
+      return !!s.flags.jocAuthorized && !s.flags.joc && !c.commandTeam && seatsUsed(c) + COMMAND_TEAM_SEATS <= SEATS;
+    case 'establishJoc':
+      return c.commandTeam && !s.flags.joc;
     case 'returnTroop':
       return c.troops >= 1;
     case 'loadCrate': {
@@ -183,8 +197,16 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
 export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): boolean {
   if (!canApply(s, cmd)) return false;
   const c = s.cargo;
-  const base = baseOf(s);
+  const base = baseAt(s, 'at' in cmd ? cmd.at : undefined);
   switch (cmd.type) {
+    case 'loadCommandTeam':
+      c.commandTeam = true;
+      emit(null, 'info', 'The Joint Operations Command team is aboard. Fly them to Kessler Airport.', true);
+      return true;
+    case 'establishJoc':
+      c.commandTeam = false;
+      establishJoc(s, emit, false);
+      return true;
     case 'loadTroop': {
       const tr = base.troops;
       const ammo = Math.min(ROUNDS_PER_TROOP, tr.ammo / Math.max(1, tr.strength));
@@ -329,6 +351,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
         }
       }
       const civilians = c.civilians;
+      // From here they're flown (or bussed) out of the city.
       base.population += c.civilians;
       const caught = screenAtGate(s, base, c.infected);
       if (caught > 0) parts.push(`${caught} bitten caught at the quarantine checkpoint`);
@@ -346,6 +369,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
     case 'refuel': {
       const take = Math.min(cmd.litres, fuelStock(s, cmd.source));
       if ('farp' in cmd.source) s.farps.find((f) => f.id === (cmd.source as { farp: number }).farp)!.fuel -= take;
+      else if ('army' in cmd.source) s.army.fuel -= take;
       else s.districts[cmd.source.district].fuel -= take;
       return true;
     }

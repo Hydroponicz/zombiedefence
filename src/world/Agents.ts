@@ -10,6 +10,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { DISTRICT_SIZE, DISTRICT_TEMPLATES, districtAt } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
 import { planSites } from '../sim/sites';
+import { checkpointNodes } from '../sim/traffic';
 import { BLOCKS_PER_DISTRICT, nearestNode, neighbors, nodeX, nodeZ, NODES_X, NODES_Z, stepToward } from '../sim/streets';
 import type { CityState, DistrictState } from '../sim/types';
 import type { WalkGrid } from './City';
@@ -76,6 +77,8 @@ const DESPAWN_RADIUS = 470;
 const RECONCILE_SECONDS = 0.5;
 const SPAWNS_PER_RECONCILE = 40;
 const CAPACITY = { [Kind.Civilian]: 320, [Kind.Soldier]: 120, [Kind.Police]: 80, [Kind.Riot]: 60, [Kind.Bitten]: 60 } as const;
+/** Marks an officer standing at a checkpoint rather than walking a beat. */
+const CHECKPOINT_POST = 1000;
 /** Sensor pips for people (the crowd has its own capacity). */
 const PIP_PEOPLE = 800;
 const PIP_DEAD = 0xff2a1a;
@@ -329,7 +332,12 @@ export class Agents {
         this.people = this.people.filter((p) => !remove.has(p));
       } else {
         for (let n = have.length; n < target && budget[kind] > 0; n++, budget[kind]--) {
-          const p = kind === Kind.Soldier ? this.spawnSoldier(district, cx, cz, have) : this.spawnCivilian(district, cx, cz, kind);
+          const d = state.districts[district];
+          // Once the police run checkpoints, most officers stand at them.
+          const checkpoint = kind === Kind.Police && d.police.stage !== 'patrol' && this.rand() < 0.6 ? this.checkpointNear(d, cx, cz) : null;
+          const p = kind === Kind.Soldier ? this.spawnSoldier(district, cx, cz, have)
+            : checkpoint ? this.spawnAtCheckpoint(district, checkpoint)
+              : this.spawnCivilian(district, cx, cz, kind);
           // The simulation's bitten turn when it says so; on screen they just stagger about.
           if (p && kind === Kind.Bitten) p.timer = Infinity;
           if (p) {
@@ -360,6 +368,24 @@ export class Agents {
       }
     }
     return out;
+  }
+
+  /** A checkpoint of the district's within view, if any. */
+  private checkpointNear(d: DistrictState, cx: number, cz: number): [number, number] | null {
+    const near = checkpointNodes(d).filter(([i, j]) => Math.hypot(nodeX(i) - cx, nodeZ(j) - cz) < ACTIVE_RADIUS);
+    return near.length ? near[Math.floor(this.rand() * near.length)] : null;
+  }
+
+  /** An officer standing at a checkpoint, screening the people and cars coming through. */
+  private spawnAtCheckpoint(district: number, [i, j]: [number, number]): Person {
+    const ang = this.rand() * Math.PI * 2;
+    const r = 4 + this.rand() * 6;
+    return {
+      kind: Kind.Police, civilian: false, mode: Mode.Post, district,
+      x: nodeX(i) + Math.cos(ang) * r, z: nodeZ(j) + Math.sin(ang) * r, heading: ang,
+      ni: i, nj: j, pi: i, pj: j, ox: 0, oz: 0, speed: 0, phase: 0, timer: 0,
+      cooldown: this.rand() * 2, post: CHECKPOINT_POST, look: 0,
+    };
   }
 
   /** Someone walking the streets: a civilian, or a police patrol. */
@@ -495,6 +521,8 @@ export class Agents {
     p.cooldown -= dt;
     const target = this.crowd.nearest(p.x, p.z, PISTOL_RANGE);
     if (target < 0) {
+      // Checkpoint officers hold their post; patrols walk their beat.
+      if (p.post === CHECKPOINT_POST) return;
       p.mode = Mode.Walk;
       if (this.walkStreets(p, p.speed * 0.8, dt)) this.wander(p);
       return;

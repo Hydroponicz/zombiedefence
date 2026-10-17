@@ -2,7 +2,7 @@
 // city-wide history and the event log. Navigable by mouse, keyboard or controller.
 
 import { formatClock, MINUTES_PER_DAY, NIGHT_START, DAY_START } from '../sim/clock';
-import { CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE, DISTRICT_TEMPLATES, GRID_COLS, GRID_ROWS } from '../sim/layout';
+import { ARMY_BASE, CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE, DISTRICT_TEMPLATES, GRID_COLS, GRID_ROWS } from '../sim/layout';
 import { totalZombies } from '../sim/hordes';
 import { guardsNeeded } from '../sim/sites';
 import { RAIL, trainPose, truckPose } from '../sim/supply';
@@ -127,7 +127,8 @@ export class DebugMap {
       troops += d.troops.strength;
       dead += d.dead;
     }
-    this.text(`${formatClock(s.t)}   ·   time ×${info.timeScale}`, pad, 30, 20, '#e8ecdf');
+    const joc = s.flags.joc ? 'JOC at Kessler Airport' : s.flags.jocAuthorized ? 'JOC authorized: fly the team in' : 'Army at Camp Ridgeway';
+    this.text(`${formatClock(s.t)}   ·   time ×${info.timeScale}   ·   ${joc}`, pad, 30, 20, '#e8ecdf');
     const status = s.collapsed ? '   ·   CITY COLLAPSED' : '';
     this.text(
       `Civilians ${fmt(pop)}   Infected ${fmt(inf)}   Zombies ${fmt(z)}   Troops ${fmt(troops)}   Dead ${fmt(dead)}   Grid ${(s.grid * 100).toFixed(0)}%${status}`,
@@ -342,6 +343,12 @@ export class DebugMap {
       this.text(ai.name.split(' (')[0], ax + 8, ay - 6, 11, '#bfe3ff');
     }
 
+    // Camp Ridgeway lies off the map to the west of the airport.
+    {
+      const ay = my + (ARMY_BASE.z + CITY_DEPTH / 2) * scale;
+      this.text(`◀ ${ARMY_BASE.name}`, mx + 6, ay + 4, 11, '#e8ecdf', 'left', true);
+    }
+
     // Helicopter marker.
     const hx = mx + (info.heliX + CITY_WIDTH / 2) * scale;
     const hy = my + (info.heliZ + CITY_DEPTH / 2) * scale;
@@ -377,7 +384,7 @@ export class DebugMap {
       ['Troops', `${fmt(d.troops.strength)}  ammo ${fmt(d.troops.ammo)}`],
       ['Fatigue / morale', `${(d.troops.fatigue * 100).toFixed(0)}% / ${(d.troops.morale * 100).toFixed(0)}%`],
       ['Police', d.police.officers + d.police.riot >= 1
-        ? `${fmt(d.police.officers)} + ${fmt(d.police.riot)} riot · ${(d.police.morale * 100).toFixed(0)}%`
+        ? `${fmt(d.police.officers)} + ${fmt(d.police.riot)} riot · ${d.police.stage} · ${(d.police.morale * 100).toFixed(0)}%`
         : 'none'],
       ['Order', d.order.toFixed(0)],
       ['Food & water', `${(d.rations / Math.max(1, people)).toFixed(1)} days`],

@@ -82,8 +82,9 @@ Streetlights burn at night while a district has grid power.
 Land anywhere (the street, a rooftop or a helipad) and a menu of ground operations appears.
 Each runs one person or crate at a time; lift off to leave.
 
-- **At Fort Kessler:** load fresh troops (the base keeps 50 back), and relief crates of rations,
-  ammunition or medicine from the base stores. Passengers unload automatically when you touch down.
+- **At the base** (Camp Ridgeway, or the JOC at Kessler Airport once it's up): load fresh troops (the
+  base keeps 50 back; none until the JOC exists), and relief crates of rations, ammunition or medicine
+  from the base stores. Passengers unload automatically when you touch down.
   A supply flight brings fresh troops and stores every morning at 07:00.
 - **In the city:** deploy troops, unload crates, evacuate civilians, relieve exhausted soldiers, and
   extract scientists from the University Heights lab and St. Mary's.
@@ -103,7 +104,7 @@ Each runs one person or crate at a time; lift off to leave.
 - **Flameout:** run dry and the engine quits. The rotor windmills you down at a survivable rate if
   you stay level, and throttle up gives one flare to soften the landing. Without fuel you can't take
   off again.
-- **Refuelling:** automatic while landed at Fort Kessler or a forward refuelling point, from their
+- **Refuelling:** automatic while landed at the base or a forward refuelling point, from their
   stocks. Base fuel also runs the base's generators when the grid fails. In the city you can siphon
   petrol stations (slow); stranded with nothing to siphon, you can abandon the helicopter, leaving
   passengers and cargo in the district and taking a replacement at the base.
@@ -166,7 +167,7 @@ narrow windows.
 
 - **Who:** every city district has police, about one officer per 900 residents, plus riot police at
   its police station. There are 12 per district and 40 at Central Police HQ downtown, but none in
-  Industrial Park or at the base. Patrol officers wear navy with hi-vis vests; riot police wear black
+  Industrial Park or at the airport. Patrol officers wear navy with hi-vis vests; riot police wear black
   kit with visored helmets and shields.
 - **Against the dead:** police help screen civilians and kill zombies in the early days, but kill only
   about a quarter as well as soldiers (pistols and batons against rifles). They take heavier losses,
@@ -222,9 +223,42 @@ The whole street grid (about 3,500 street segments) carries simulated traffic:
 
 Keeping Industrial Park clean keeps the trains running, and the trains feed the whole city.
 
-## Fort Kessler is sealed
+## The military and police response
 
-No infection or zombie gets into the base until every other district has been overrun:
+- **The army starts outside the city.** Its base is Camp Ridgeway, about 2 km west of the airport,
+  with about 1,500 troops, the helicopters, a fuel farm and stores. You start there. The city begins
+  with its police alone; no soldiers are posted in the districts.
+- **The Joint Operations Command:**
+  - **Authorization:** once outbreaks are confirmed in two districts, Command declares a state of
+    emergency and authorizes a JOC at Kessler Airport.
+  - **Setting it up:** take the command team aboard at Camp Ridgeway (4 seats), fly them to the
+    airport, and choose "Establish the Joint Operations Command" on the ground. If nobody does within
+    about 12 game hours, Command flies its own team in.
+  - **The airlift:** it lands 400 troops with food and medicine, and a command compound goes up on the
+    apron.
+  - **The hub moves:** the airport becomes the military's hub. Supply flights land there, fuel
+    convoys run there, troops are ferried out from there, and replacement helicopters wait there.
+  - **Platoons:** the army deploys one into a district every hour, those under attack first.
+  - **Troops:** none can be loaded until the JOC exists.
+  - **Last stand:** when the last district falls, Command throws what's left at Camp Ridgeway into
+    the airport.
+- **The airport** is Kessler International: a runway, a glass terminal with airliners at the gates, a
+  control tower and cargo hangars. Its population is its 2,200 staff, and it's closed to refugees.
+  Evacuees brought in are flown out of the city on evacuation flights every three hours (400 seats);
+  those landed at Camp Ridgeway are bussed out.
+- **Police escalate in each district:**
+  1. **Routine patrols** on foot and in cruisers among the traffic.
+  2. **Checkpoints:** once the outbreak there is confirmed and spreading, police set up concrete
+     barriers and cruisers at four avenue intersections. They screen people (the bitten are held in
+     isolation), hold most of the bitten back from fleeing elsewhere, and slow the district's traffic.
+  3. **Support:** once soldiers arrive, police support military operations. They fight better, and
+     their morale holds up longer.
+
+  The HUD shows the stage ("Police 28 (checkpoints)").
+
+## Kessler Airport is sealed
+
+No infection or zombie gets into the airport until every other district has been overrun:
 - **Hordes:** they never target the base and walk around its perimeter.
 - **Resident zombies:** they don't drift in.
 - **The on-screen dead:** they pile up at the edge of the base's ground instead of crossing it.

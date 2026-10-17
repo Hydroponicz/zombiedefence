@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
+import { deployed } from './helpers';
 import { CitySim, createCity } from '../src/sim/CitySim';
 import { districtCenter, DISTRICT_SIZE, DISTRICT_TEMPLATES } from '../src/sim/layout';
 import type { CityState } from '../src/sim/types';
@@ -44,7 +45,7 @@ describe('street scene', () => {
   const centre = districtCenter(DISTRICT_TEMPLATES[index].col, DISTRICT_TEMPLATES[index].row);
 
   function cityWith(zombies: number): CityState {
-    const state = createCity('scene');
+    const state = deployed(createCity('scene'));
     for (const d of state.districts) {
       d.zombies = 0;
       d.infected = 0;

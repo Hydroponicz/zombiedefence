@@ -8,6 +8,7 @@ import { applyCommand, baseOf, emptyCargo, mergeTroops, type PlayerCommand } fro
 import { applyHordeLosses, countHordes, formHordes, moveHordes, totalZombies } from './hordes';
 import { initialFleet, payday, updatePilots } from './pilots';
 import { createSites, siteHolds, updateSites } from './sites';
+import { airportOf, createArmy, lastStand, updateCommand } from './command';
 import { createSupply, updateSupply } from './supply';
 import { createTraffic, roadFlow, updateTraffic } from './traffic';
 import { baseSealed, checkSeal, isBase } from './quarantine';
@@ -124,12 +125,13 @@ export function createCity(seed: number | string): CityState {
     farpSeq: 0,
     research: 0,
     stats: { civiliansEvacuated: 0, scientistsEvacuated: 0, troopsDeployed: 0, troopsRelieved: 0, cratesDelivered: 0, lostInCrashes: 0,
-      pilotsRecruited: 0, aiTrips: 0 },
+      pilotsRecruited: 0, aiTrips: 0, flownOut: 0 },
     pilots: [],
     airframes: [],
     hordes: [],
     hordeSeq: 0,
     sites: [],
+    army: createArmy(),
     supply: createSupply(),
     traffic: createTraffic(),
     pilotSeq: 0,
@@ -147,18 +149,20 @@ export function createCity(seed: number | string): CityState {
       col: tpl.col,
       row: tpl.row,
       neighbors: neighborsOf(id),
-      features: tpl.features,
+      features: { ...tpl.features },
       population: tpl.population,
       infected: 0,
       zombies: 0,
       dead: 0,
-      troops: { strength: tpl.troops, fatigue: 0, morale: 0.85, ammo: tpl.troops * TUNING.roundsPerSoldier },
+      // The army starts at Camp Ridgeway: the city has its police alone until the JOC sends platoons in.
+      troops: { strength: 0, fatigue: 0, morale: 0.85, ammo: 0 },
       police: tpl.kind === 'airbase'
-        ? { officers: 0, riot: 0, morale: 0 }
+        ? { officers: 0, riot: 0, morale: 0, stage: 'patrol' }
         : {
           officers: Math.round(tpl.population * TUNING.officersPerResident),
           riot: tpl.kind === 'downtown' ? TUNING.riotPoliceDowntown : tpl.kind === 'industrial' ? 0 : TUNING.riotPolice,
           morale: 0.85,
+          stage: 'patrol',
         },
       rations: tpl.rations ?? people * TUNING.startingRationDays * (0.75 + rand() * 0.5),
       medicine: tpl.medicine ?? people * 0.05,
@@ -182,7 +186,6 @@ export function createCity(seed: number | string): CityState {
       cooldowns: {},
     };
     if (tpl.features.warehouse) d.rations += totalPop * TUNING.warehouseDays;
-    if (tpl.kind === 'airbase') d.troops.ammo += 500000; // armoury
     return d;
   });
 
@@ -228,19 +231,20 @@ function tick(s: CityState, out: SimEvent[]): void {
   moveHordes(s, night, emit);
   countHordes(s);
   for (const d of ds) updateStatus(d, emit);
+  const airport = airportOf(s);
   if (checkSeal(s)) {
-    const base = baseOf(s);
-    emit(base.id, 'critical', `Every district has fallen. The dead are at the gates of ${base.name}.`);
+    emit(airport.id, 'critical', `Every district has fallen. The dead are at the gates of ${airport.name}.`);
+    lastStand(s, emit);
   }
   loseFarps(s, emit);
+  updateCommand(s, emit);
   updatePilots(s, emit);
 
-  const base = baseOf(s);
-  s.research += base.scientists * TUNING.researchPerScientist * H;
-  if (!s.collapsed && base.status === 'overrun') {
+  s.research += (s.army.scientists + airport.scientists) * TUNING.researchPerScientist * H;
+  if (!s.collapsed && airport.status === 'overrun') {
     s.collapsed = true;
     s.collapsedAt = t;
-    emit(base.id, 'critical', `${base.name} has fallen. The city has collapsed.`);
+    emit(airport.id, 'critical', `${airport.name} has fallen. The city has collapsed.`);
   }
 
   s.t = t + 1;
@@ -260,7 +264,9 @@ function makeEmit(s: CityState, out: SimEvent[]): Emit {
 
 /** Defended depots truck fuel to the base. Convoys stop when a depot riots, falls or loses its guards. */
 function fuelConvoys(s: CityState, emit: Emit): void {
-  const base = baseOf(s);
+  // Convoys feed the JOC at the airport (Camp Ridgeway has its own supply).
+  if (!s.flags.joc) return;
+  const base = airportOf(s);
   if (base.status === 'overrun') return;
   for (const d of s.districts) {
     if (!d.features.fuelDepot || d === base) continue;
@@ -366,7 +372,9 @@ function updatePower(s: CityState, day: number, night: boolean, emit: Emit): voi
 /** How well the police fight: morale, light and riots; they have no ammunition problem to speak of. */
 function policeEffectiveness(d: DistrictState, night: boolean): number {
   const light = night ? (d.power === 'dark' ? 0.6 : 0.85) : 1;
-  return (0.35 + 0.65 * d.police.morale) * light * (d.rioting ? 0.8 : 1);
+  // Working alongside soldiers, they fight better.
+  const support = d.police.stage === 'support' ? 1.2 : 1;
+  return (0.35 + 0.65 * d.police.morale) * light * (d.rioting ? 0.8 : 1) * support;
 }
 
 function effectiveness(d: DistrictState, night: boolean): number {
@@ -549,7 +557,7 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   }
 
   // --- Police ---
-  updatePolice(d, day, night, fearNow, policeLoss, emit);
+  updatePolice(s, d, day, night, fearNow, policeLoss, emit);
 
   // --- Military ---
   if (tr.strength > 0) {
@@ -578,7 +586,7 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
  * Police morale wears down day by day, with losses, riots and darkness; below about a third
  * officers start walking off the job, back to their families (they become civilians).
  */
-function updatePolice(d: DistrictState, day: number, night: boolean, fear: number, lost: number, emit: Emit): void {
+function updatePolice(s: CityState, d: DistrictState, day: number, night: boolean, fear: number, lost: number, emit: Emit): void {
   const pol = d.police;
   const total = pol.officers + pol.riot;
   if (total < 0.5) {
@@ -586,9 +594,32 @@ function updatePolice(d: DistrictState, day: number, night: boolean, fear: numbe
     pol.riot = 0;
     return;
   }
+
+  // Escalation: routine patrols; checkpoints once the outbreak here is confirmed and spreading;
+  // then supporting the army once soldiers arrive (back to checkpoints if they're lost).
+  const spreading = d.flags.outbreak && (totalZombies(d) > 40 || s.districts.filter((x) => x.flags.outbreak).length >= 3);
+  if (pol.stage === 'patrol' && spreading) {
+    pol.stage = 'checkpoints';
+    emit(d.id, 'warn', `Police in ${d.name} have set up checkpoints at intersections to screen for the infected.`);
+  }
+  if (pol.stage === 'checkpoints' && d.troops.strength >= 10) {
+    pol.stage = 'support';
+    emit(d.id, 'info', `Police in ${d.name} are now supporting military operations.`);
+  } else if (pol.stage === 'support' && d.troops.strength < 1) {
+    pol.stage = 'checkpoints';
+  }
+  // Checkpoints catch the bitten: held in isolation, and put down when they turn.
+  if (pol.stage !== 'patrol' && d.infected > 0) {
+    const screened = d.infected * 0.02 * Math.min(1, pol.officers / 40) * pol.morale * H;
+    d.infected -= screened;
+    d.dead += screened;
+  }
+
   const lossFrac = lost / H / total;
+  // With soldiers alongside, they hold together longer.
+  const decay = TUNING.policeMoraleDecay * (pol.stage === 'support' ? 0.5 : 1);
   const target = clamp(
-    0.85 - TUNING.policeMoraleDecay * (day - 1) - Math.min(0.3, lossFrac * 6) - 0.25 * fear -
+    0.85 - decay * (day - 1) - Math.min(0.3, lossFrac * 6) - 0.25 * fear -
       (d.rioting ? 0.1 : 0) - (night && d.power === 'dark' ? 0.1 : 0),
   );
   pol.morale += clamp(target - pol.morale, -0.1 * H, 0.05 * H);
@@ -617,11 +648,12 @@ function safety(d: DistrictState): number {
   return d.order / 100 - clamp(totalZombies(d) / (d.population * 0.01 + d.troops.strength * 2 + 20)) - statusPenalty;
 }
 
-function safestNeighbor(s: CityState, d: DistrictState): DistrictState | null {
+/** Where people (or broken troops) fall back to. The airport is closed to refugees. */
+function safestNeighbor(s: CityState, d: DistrictState, civilians = false): DistrictState | null {
   let best: DistrictState | null = null;
   for (const n of d.neighbors) {
     const c = s.districts[n];
-    if (c.status === 'overrun') continue;
+    if (c.status === 'overrun' || (civilians && c.kind === 'airbase')) continue;
     if (!best || safety(c) > safety(best)) best = c;
   }
   return best;
@@ -685,19 +717,15 @@ function migrate(s: CityState, night: boolean): void {
     if (d.population > 10) {
       const threat = clamp(totalZombies(d) / (d.population * 0.01 + d.troops.strength * 2 + 20));
       let rate = d.status === 'overrun' ? 0.15 : d.order < 10 ? 0.06 : clamp((threat - 0.4) * 0.05, 0, 0.04);
-      const to = rate > 0 ? safestNeighbor(s, d) : null;
+      const to = rate > 0 ? safestNeighbor(s, d, true) : null;
       if (to && safety(to) > safety(d)) {
         const p = d.population * rate * H;
-        const inf = d.infected * rate * H;
+        // Police checkpoints hold most of the bitten back.
+        const inf = d.infected * rate * H * (d.police.stage !== 'patrol' && d.police.officers >= 5 ? 0.4 : 1);
         dp[d.id] -= p;
         dp[to.id] += p * 0.97;
-        if (shut(to)) {
-          // Refugees at the base gate: the healthy are let in, the bitten turned back.
-          dp[to.id] += p * 0.03;
-        } else {
-          di[d.id] -= inf;
-          di[to.id] += inf + p * 0.03;
-        }
+        di[d.id] -= inf;
+        di[to.id] += inf + p * 0.03;
       } else rate = 0;
     }
 

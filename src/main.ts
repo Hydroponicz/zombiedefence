@@ -3,21 +3,22 @@ import { FARP_RADIUS, Operations } from './game/Operations';
 import { ChaseCamera } from './heli/ChaseCamera';
 import { FUEL_CAPACITY, Helicopter } from './heli/Helicopter';
 import { Input, type FrameInput } from './input/Input';
-import { districtAt } from './sim/layout';
-import { baseOf, farpNear, MAX_PAYLOAD_KG, payloadKg } from './sim/operations';
+import { ARMY_BASE, districtAt } from './sim/layout';
+import { baseOf, farpNear, MAX_PAYLOAD_KG, payloadKg, type BaseId } from './sim/operations';
 import { SimClient } from './sim/SimClient';
 import { CommandPanel } from './ui/CommandPanel';
 import { DebugMap } from './ui/DebugMap';
 import { Hud } from './ui/Hud';
 import { Agents } from './world/Agents';
 import { AiFleet } from './world/AiFleet';
-import { City } from './world/City';
+import { City, type Helipad } from './world/City';
 import { Effects } from './world/Effects';
 import { Environment } from './world/Environment';
 import { Farps } from './world/Farps';
 import { Sites } from './world/Sites';
 import { Traffic } from './world/Traffic';
 import { Cars } from './world/Cars';
+import { Joc } from './world/Joc';
 import { siteNear } from './sim/sites';
 
 const params = new URLSearchParams(location.search);
@@ -66,13 +67,20 @@ const traffic = new Traffic();
 scene.add(traffic.group);
 const cars = new Cars();
 scene.add(cars.group);
+const joc = new Joc();
+scene.add(joc.group);
 const fleet = new AiFleet(city.helipads);
 scene.add(fleet.group);
 
 const heli = new Helicopter();
 scene.add(heli.object, heli.slingObject);
-const spawn = city.helipads.find((p) => p.name.startsWith('Fort Kessler')) ?? { x: 0, y: 0, z: 0, name: 'base' };
-heli.reset(spawn.x, spawn.y, spawn.z, 0);
+/** Pad 1 at the hub: Camp Ridgeway, then the airport once the JOC is set up. */
+function spawnPad(base = sim.state ? baseOf(sim.state).name : ARMY_BASE.name): Helipad {
+  return city.helipads.find((p) => p.name.startsWith(base)) ?? { x: ARMY_BASE.x, y: 0, z: ARMY_BASE.z, name: ARMY_BASE.name };
+}
+// The game starts at Camp Ridgeway, before the simulation is up.
+const start = spawnPad(ARMY_BASE.name);
+heli.reset(start.x, start.y, start.z, 0);
 
 const chase = new ChaseCamera(camera);
 const input = new Input(canvas);
@@ -164,12 +172,27 @@ function handleActions(frame: FrameInput): void {
   if (a.has('timeSlower') || (!map.visible && a.has('dpadLeft'))) sim.changeTimeScale(-1);
 }
 
+function nearCamp(): boolean {
+  return Math.hypot(heli.position.x - ARMY_BASE.x, heli.position.z - ARMY_BASE.z) < 900;
+}
+
+/** Which base the helicopter is at: Camp Ridgeway, or the airport once it's the JOC. */
+function baseHere(): BaseId | null {
+  const p = heli.position;
+  if (Math.abs(p.x - ARMY_BASE.x) < 460 && Math.abs(p.z - ARMY_BASE.z) < 360) return 'army';
+  const d = districtAt(p.x, p.z);
+  return d >= 0 && sim.state?.flags.joc && sim.state.districts[d].kind === 'airbase' ? 'airport' : null;
+}
+
 /** A fresh helicopter at the base, fuelled from the base's stores. */
 function respawn(): void {
   const stores = sim.state ? baseOf(sim.state).fuel : FUEL_CAPACITY;
   const fuel = Math.min(FUEL_CAPACITY, stores);
-  heli.reset(spawn.x, spawn.y, spawn.z, 0, fuel);
-  if (sim.state && fuel > 0) sim.command({ type: 'refuel', source: { district: baseOf(sim.state).id }, litres: fuel });
+  const pad = spawnPad();
+  heli.reset(pad.x, pad.y, pad.z, 0, fuel);
+  if (sim.state && fuel > 0) {
+    sim.command({ type: 'refuel', source: sim.state.flags.joc ? { district: baseOf(sim.state).id } : { army: true }, litres: fuel });
+  }
   if (fuel < FUEL_CAPACITY) hud.toast(`Base fuel is low: only ${Math.floor(fuel)} L for the replacement`, 4);
 }
 
@@ -225,7 +248,7 @@ function update(dt: number): void {
     if (respawnTimer > RESPAWN_SECONDS) {
       respawnTimer = 0;
       respawn();
-      hud.toast(`Replacement helicopter ready at ${spawn.name}`, 3);
+      hud.toast(`Replacement helicopter ready at ${spawnPad().name}`, 3);
     }
   }
 
@@ -240,6 +263,7 @@ function update(dt: number): void {
     effects.syncWithSim(state);
     farps.sync(state.farps);
     sites.sync(state.sites);
+    joc.sync(state);
   }
 
   const surface = city.surfaceHeight(heli.position.x, heli.position.z);
@@ -259,6 +283,7 @@ function update(dt: number): void {
   ops.update(dt, {
     landed: heli.landed && heli.speed < PARKED_SPEED && !heli.destroyed,
     district: districtAt(heli.position.x, heli.position.z),
+    base: baseHere(),
     onRoof: surface > 3 && !atHelipad,
     threat: agents.attract.threat,
     grabbers: agents.attract.grabbers,
@@ -285,7 +310,9 @@ function update(dt: number): void {
 
   const districtIndex = districtAt(heli.position.x, heli.position.z);
   const forward = (-heli.yaw * 180) / Math.PI;
-  hud.update(dt, sim.time, sim.timeScale, state && districtIndex >= 0 ? state.districts[districtIndex] : null, {
+  // Over Camp Ridgeway the panel shows the base.
+  const here = state ? (districtIndex >= 0 ? state.districts[districtIndex] : baseHere() === 'army' || nearCamp() ? state.army : null) : null;
+  hud.update(dt, sim.time, sim.timeScale, here, {
     altitude,
     drawn: agents.attract.active ? agents.attract.drawn : 0,
     grabbers: agents.attract.grabbers,

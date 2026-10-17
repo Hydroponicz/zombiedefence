@@ -6,7 +6,6 @@
 import type { Action } from '../input/Input';
 import {
   BASE_RESERVE_TROOPS,
-  baseOf,
   BLADDER_LITRES,
   canApply,
   CRATES,
@@ -18,6 +17,9 @@ import {
   SEATS,
   seatsUsed,
   siteStock,
+  baseAt,
+  COMMAND_TEAM_SEATS,
+  type BaseId,
   type FuelSource,
   type PlayerCommand,
 } from '../sim/operations';
@@ -33,6 +35,8 @@ export interface GroundContext {
   /** Zombies close to the doors, and hanging off the skids. */
   threat: number;
   grabbers: number;
+  /** Landed at a base: Camp Ridgeway, or the airport once the JOC is there (null elsewhere). */
+  base: BaseId | null;
   /** Where the helicopter is, for forward refuelling points. */
   x: number;
   z: number;
@@ -107,16 +111,16 @@ export class Operations {
   ) {}
 
   update(dt: number, ctx: GroundContext, state: CityState | null, actions: Set<Action>): void {
-    if (!ctx.landed || !state || ctx.district < 0) {
+    if (!ctx.landed || !state || (ctx.district < 0 && !ctx.base)) {
       this.active = null;
       this.view = null;
       this.wasLanded = false;
       return;
     }
-    const atBase = state.districts[ctx.district].kind === 'airbase';
+    const atBase = ctx.base !== null;
     const site = atBase ? undefined : siteNear(state, ctx.x, ctx.z, SITE_RADIUS);
     // A new landing site has a different menu: start from the top.
-    const place = `${ctx.district}:${site?.id ?? ''}`;
+    const place = `${ctx.base ?? ctx.district}:${site?.id ?? ''}`;
     if (place !== this.lastPlace || !this.wasLanded) {
       this.selected = 0;
       this.active = null;
@@ -131,14 +135,14 @@ export class Operations {
         c.tired && `${c.tired} soldiers`,
         c.scientists && `${c.scientists} scientists`,
       ].filter(Boolean);
-      this.send({ type: 'unloadAtBase' });
+      this.send({ type: 'unloadAtBase', at: ctx.base! });
       this.onToast(`Unloaded ${parts.join(', ')}`);
     }
     this.wasLanded = true;
 
     // Pumps at the base and at forward refuelling points fill the tank on their own.
     const farp = farpNear(state, ctx.x, ctx.z, FARP_RADIUS);
-    const pump: FuelSource | null = atBase ? { district: ctx.district } : farp ? { farp: farp.id } : null;
+    const pump: FuelSource | null = ctx.base === 'army' ? { army: true } : atBase ? { district: ctx.district } : farp ? { farp: farp.id } : null;
     let pumping = '';
     if (pump && ctx.fuel < ctx.fuelCapacity - 0.5) {
       this.pumpTimer += dt;
@@ -155,7 +159,8 @@ export class Operations {
       }
     }
 
-    const options = atBase ? this.baseOptions(state, ctx) : [...(site ? this.siteOptions(state, ctx, site) : []), ...this.districtOptions(state, ctx)];
+    const options = atBase ? this.baseOptions(state, ctx)
+      : [...this.jocOptions(state, ctx), ...(site ? this.siteOptions(state, ctx, site) : []), ...this.districtOptions(state, ctx)];
     if (actions.has('dpadUp') || actions.has('arrowUp')) this.selected--;
     if (actions.has('dpadDown') || actions.has('arrowDown')) this.selected++;
     this.selected = (this.selected + options.length) % options.length;
@@ -189,7 +194,8 @@ export class Operations {
     const c = state.cargo;
     const where = site
       ? `${site.name}: ${site.status}`
-      : `${state.districts[ctx.district].name}: on the ground${farp ? ' at the refuelling point' : ctx.onRoof ? ' (rooftop)' : ''}`;
+      : atBase ? `${baseAt(state, ctx.base!).name}${ctx.base === 'airport' ? ' (Joint Operations Command)' : ''}`
+        : `${state.districts[ctx.district].name}: on the ground${farp ? ' at the refuelling point' : ctx.onRoof ? ' (rooftop)' : ''}`;
     const siteInfo = site
       ? `${Math.round(site.guards)}/${Math.ceil(guardsNeeded(site))} guards${site.capacity ? ` · ${fmt(site.sheltered)} sheltered` : ''}`
       : '';
@@ -211,6 +217,8 @@ export class Operations {
   /** Fuel work available here: bladders, refuelling points, siphoning, and abandoning when stranded. */
   private fuelOptions(s: CityState, ctx: GroundContext, atBase: boolean): Option[] {
     const d = s.districts[ctx.district];
+    // Camp Ridgeway pumps its own fuel; the rest of this is work in the city.
+    if (!d) return [];
     const c = s.cargo;
     const options: Option[] = [];
     const farp = farpNear(s, ctx.x, ctx.z, FARP_RADIUS);
@@ -261,11 +269,22 @@ export class Operations {
     return options;
   }
 
+  /** At the airport with the command team aboard: set up the JOC. */
+  private jocOptions(s: CityState, ctx: GroundContext): Option[] {
+    if (s.districts[ctx.district]?.kind !== 'airbase' || !s.cargo.commandTeam) return [];
+    const command: PlayerCommand = { type: 'establishJoc' };
+    return [{
+      id: 'joc', label: 'Establish the Joint Operations Command',
+      detail: 'The command team sets up here; the airlift follows', enabled: canApply(s, command), command, interval: 6, repeat: false,
+    }];
+  }
+
   private baseOptions(s: CityState, ctx: GroundContext): Option[] {
-    const base = baseOf(s);
+    const at = ctx.base!;
+    const base = baseAt(s, at);
     const c = s.cargo;
     const crate = (kind: CrateKind, stock: number): Option => {
-      const command: PlayerCommand = { type: 'loadCrate', kind };
+      const command: PlayerCommand = { type: 'loadCrate', kind, at };
       return {
         id: `crate-${kind}`,
         label: `Load ${CRATES[kind].label} crate`,
@@ -276,27 +295,37 @@ export class Operations {
         repeat: false,
       };
     };
-    const options: Option[] = [
+    const options: Option[] = [];
+    if (at === 'army' && s.flags.jocAuthorized && !s.flags.joc) {
+      const team: PlayerCommand = { type: 'loadCommandTeam' };
+      options.push({
+        id: 'command-team', label: 'Take the JOC command team aboard',
+        detail: c.commandTeam ? 'Aboard: fly them to Kessler Airport' : `${COMMAND_TEAM_SEATS} seats · they set up at the airport`,
+        enabled: canApply(s, team), command: team, interval: 3, repeat: false,
+      });
+    }
+    options.push(
       {
         id: 'load-troops',
         label: 'Load fresh troops',
-        detail: seatsUsed(c) >= SEATS ? 'Seats full' : `${fmt(Math.max(0, base.troops.strength - BASE_RESERVE_TROOPS))} available`,
-        enabled: canApply(s, { type: 'loadTroop' }),
-        command: { type: 'loadTroop' },
+        detail: !s.flags.joc ? 'Held here until the JOC is set up in the city'
+          : seatsUsed(c) >= SEATS ? 'Seats full' : `${fmt(Math.max(0, base.troops.strength - BASE_RESERVE_TROOPS))} available`,
+        enabled: canApply(s, { type: 'loadTroop', at }),
+        command: { type: 'loadTroop', at },
         interval: 0.5,
         repeat: true,
       },
       crate('rations', base.rations),
       crate('ammo', base.troops.ammo),
       crate('medicine', base.medicine),
-    ];
+    );
     if (c.troops > 0) {
       options.push({
         id: 'return-troops',
         label: 'Send troops back to barracks',
         detail: `${c.troops} aboard`,
         enabled: true,
-        command: { type: 'returnTroop' },
+        command: { type: 'returnTroop', at },
         interval: 0.4,
         repeat: true,
       });

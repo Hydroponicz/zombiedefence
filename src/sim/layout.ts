@@ -8,8 +8,21 @@ export const GRID_ROWS = 3;
 export const CITY_WIDTH = DISTRICT_SIZE * GRID_COLS;
 export const CITY_DEPTH = DISTRICT_SIZE * GRID_ROWS;
 
+/** People who work at the airport (it isn't a place anyone lives). */
+export const AIRPORT_STAFF = 2200;
+
+/**
+ * Camp Ridgeway, the army base on the outskirts west of the city, where the military starts. It
+ * isn't a district: the dead don't reach it.
+ */
+export const ARMY_BASE = { name: 'Camp Ridgeway', x: -CITY_WIDTH / 2 - 2300, z: CITY_DEPTH / 2 - 860 };
+
+
 export type DistrictKind =
+  /** The city's airport: the military's Joint Operations Command once it's set up. */
   | 'airbase'
+  /** Camp Ridgeway, outside the city (not one of the districts). */
+  | 'army'
   | 'downtown'
   | 'residential'
   | 'apartments'
@@ -42,6 +55,10 @@ export interface DistrictTemplate {
   col: number;
   row: number;
   population: number;
+  /**
+   * Soldiers the army deploys here once the Joint Operations Command is running (the military
+   * starts outside the city, at Camp Ridgeway; districts begin with their police alone).
+   */
   troops: number;
   features: DistrictFeatures;
   /** Fixed grid power threshold. Omitted means a seeded random value. */
@@ -67,10 +84,11 @@ export const DISTRICT_TEMPLATES: DistrictTemplate[] = [
   { name: 'Market District', kind: 'commercial', col: 2, row: 1, population: 26000, troops: 30, features: { warehouse: true } },
   { name: 'Eastside', kind: 'residential', col: 3, row: 1, population: 38000, troops: 30, features: { substation: true } },
   {
-    name: 'Fort Kessler', kind: 'airbase', col: 0, row: 2, population: 1500, troops: 600,
-    features: { generator: 250, fortified: true, fuelDepot: true }, powerThreshold: 0.2, fuel: 120000,
-    // Military stores the player loads relief crates from.
-    rations: 60000, medicine: 20000,
+    // Kessler International: staff for an airport this size, its fuel farm and its own generators.
+    // Closed to the public once the outbreak starts; the JOC is set up here.
+    name: 'Kessler Airport', kind: 'airbase', col: 0, row: 2, population: AIRPORT_STAFF, troops: 0,
+    features: { generator: 250, fuelDepot: true }, powerThreshold: 0.2, fuel: 120000,
+    rations: AIRPORT_STAFF * 3, medicine: 600,
   },
   { name: 'Industrial Park', kind: 'industrial', col: 1, row: 2, population: 7000, troops: 25, features: { powerPlant: true, fuelDepot: true }, fuel: 250000 },
   {

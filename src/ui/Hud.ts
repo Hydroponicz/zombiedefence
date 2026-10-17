@@ -7,6 +7,8 @@ import { totalZombies } from '../sim/hordes';
 import { CRATES, SEATS } from '../sim/operations';
 import { SITE_LABELS } from '../sim/sites';
 import { roadStatus } from '../sim/traffic';
+
+const POLICE_STAGE = { patrol: 'patrols', checkpoints: 'checkpoints', support: 'with the army' } as const;
 import type { Cargo, DistrictState, PlayerStats, SimEvent, Site, Traffic } from '../sim/types';
 
 const RADIO_LIMIT = 6;
@@ -208,9 +210,9 @@ export class Hud {
       ? `${nearby.name} · ${nearby.status === 'besieged' ? 'under siege' : nearby.status} · ${Math.round(nearby.guards)} guards` +
         (nearby.capacity && nearby.status !== 'fallen' ? ` · ${approx(nearby.sheltered)} sheltered` : '')
       : '';
-    const roads = district && traffic && district.kind !== 'airbase' ? roadStatus(traffic, district.id) : '';
+    const roads = district && traffic && district.kind !== 'airbase' && district.kind !== 'army' ? roadStatus(traffic, district.id) : '';
     const key = district
-      ? `${roads}|${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${siteLine}|${near}`
+      ? `${roads}|${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${district?.police.stage}|${siteLine}|${near}`
       : 'none';
     if (key !== this.lastDistrictKey) {
       this.lastDistrictKey = key;
@@ -218,7 +220,7 @@ export class Hud {
         ? `<div class="name">${district.name}</div>
            <span class="chip ${district.status}">${district.status}</span>
            <div class="meta">${POWER_LABEL[district.power]} · Order ${Math.round(district.order)}${district.rioting ? ' · Rioting' : ''}</div>
-           <div class="meta">Zombies ${zombies} · Troops ${troops}${police ? ` · Police ${police}` : ''}</div>
+           <div class="meta">Zombies ${zombies} · Troops ${troops}${police ? ` · Police ${police} (${POLICE_STAGE[district.police.stage]})` : ''}</div>
            ${siteLine ? `<div class="meta">Sites: ${siteLine}</div>` : ''}
            ${roads ? `<div class="meta">Roads: ${roads}</div>` : ''}
            ${near ? `<div class="meta site ${nearby!.status}">${SITE_LABELS[nearby!.kind]}: ${near}</div>` : ''}`

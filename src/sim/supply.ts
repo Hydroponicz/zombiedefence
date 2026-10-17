@@ -216,7 +216,9 @@ function dispatch(s: CityState, emit: Emit): void {
     if (!isClean && !(d.status === 'held' || (d.status === 'contested' && d.order > 30 && !d.rioting))) continue;
     let need = people(d) * TARGET_DAYS - d.rations - (inbound.get(d.id) ?? 0);
     const dest = nearestNode(districtCenter(d.col, d.row).x, districtCenter(d.col, d.row).z);
-    for (let n = 0; n < TRUCKS_PER_HOUR && need > TRUCK_RATIONS * 0.5; n++) {
+    // Small places (the airport) call for a truck before they're half a truckload short.
+    const order = Math.min(TRUCK_RATIONS * 0.5, people(d) * 0.5);
+    for (let n = 0; n < TRUCKS_PER_HOUR && need > order; n++) {
       const depot = sources
         .filter((x) => x.stock() >= TRUCK_RATIONS)
         .sort((a, b) => dist(a.node, dest) - dist(b.node, dest))[0];

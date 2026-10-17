@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { deployed } from './helpers';
 import { CitySim } from '../src/sim/CitySim';
 import { baseOf, seatsUsed } from '../src/sim/operations';
 import { createPilot, dangerOf, payday, TRIP_FUEL, willFly } from '../src/sim/pilots';
@@ -14,14 +15,14 @@ const steady = (sim: CitySim) => Object.assign(reyes(sim), { skill: 1, nerve: 1,
 
 describe('AI pilots', () => {
   it('start with one pilot and one spare helicopter', () => {
-    const sim = new CitySim('fleet');
+    const sim = deployed(new CitySim('fleet'));
     expect(sim.state.pilots).toHaveLength(1);
     expect(sim.state.pilots[0].name).toBe('Lt. Ana Reyes');
     expect(sim.state.airframes.filter((a) => a.status === 'ready')).toHaveLength(1);
   });
 
   it('fly a reinforcement run there and back, using base troops and fuel', () => {
-    const sim = new CitySim('reinforce');
+    const sim = deployed(new CitySim('reinforce'));
     steady(sim);
     const base = baseOf(sim.state);
     const westfield = byName(sim, 'Westfield');
@@ -43,7 +44,7 @@ describe('AI pilots', () => {
   });
 
   it('keep flying a standing route', () => {
-    const sim = new CitySim('route');
+    const sim = deployed(new CitySim('route'));
     steady(sim);
     sim.command({ type: 'setOrder', pilot: reyes(sim).id, order: order(sim, 'resupply', 'Market District', true) });
     sim.step(60 * 8);
@@ -53,17 +54,18 @@ describe('AI pilots', () => {
   });
 
   it('bring evacuees back to the base', () => {
-    const sim = new CitySim('ai-evac');
+    const sim = deployed(new CitySim('ai-evac'));
     steady(sim);
     const base = baseOf(sim.state);
-    const people = base.population + base.infected;
+    // Evacuees at the airport are flown out of the city in turn.
+    const people = base.population + base.infected + sim.state.stats.flownOut;
     sim.command({ type: 'setOrder', pilot: reyes(sim).id, order: order(sim, 'evacuate', 'Southgate') });
     sim.step(200);
-    expect(base.population + base.infected).toBeGreaterThanOrEqual(people + 8);
+    expect(base.population + base.infected + sim.state.stats.flownOut).toBeGreaterThanOrEqual(people + 8);
   });
 
   it('refuse landing zones beyond their nerve', () => {
-    const sim = new CitySim('nerve');
+    const sim = deployed(new CitySim('nerve'));
     const p = reyes(sim);
     p.nerve = 0.1;
     const d = byName(sim, 'Northside');
@@ -78,7 +80,7 @@ describe('AI pilots', () => {
   });
 
   it('are paid at dawn, and desert with a helicopter when they go unpaid', () => {
-    const sim = new CitySim('payday');
+    const sim = deployed(new CitySim('payday'));
     const base = baseOf(sim.state);
     const p = reyes(sim);
     const rations = base.rations;
@@ -93,7 +95,7 @@ describe('AI pilots', () => {
   });
 
   it('can be rescued when stranded after a crash', () => {
-    const sim = new CitySim('rescue');
+    const sim = deployed(new CitySim('rescue'));
     const p = reyes(sim);
     const d = byName(sim, 'Eastside');
     p.status = 'stranded';
@@ -105,7 +107,7 @@ describe('AI pilots', () => {
   });
 
   it('gain helicopters from salvage', () => {
-    const sim = new CitySim('salvage');
+    const sim = deployed(new CitySim('salvage'));
     const hospital = byName(sim, "St. Mary's");
     expect(sim.command({ type: 'salvage', district: hospital.id })).toBe(true);
     expect(sim.command({ type: 'salvage', district: hospital.id })).toBe(false);
@@ -113,7 +115,7 @@ describe('AI pilots', () => {
   });
 
   it('must be hired before they are paid or take orders', () => {
-    const sim = new CitySim('hire');
+    const sim = deployed(new CitySim('hire'));
     const recruit = createPilot(sim.state);
     sim.state.pilots.push(recruit);
     const base = baseOf(sim.state);
@@ -126,7 +128,7 @@ describe('AI pilots', () => {
   });
 
   it('turn up among evacuees', () => {
-    const sim = new CitySim('recruit');
+    const sim = deployed(new CitySim('recruit'));
     const before = sim.state.pilots.length;
     for (let trip = 0; trip < 20; trip++) {
       for (let i = 0; i < 8; i++) sim.command({ type: 'board', district: byName(sim, 'Riverside').id, kind: 'civilian' });
@@ -137,13 +139,13 @@ describe('AI pilots', () => {
   });
 
   it('only take fuel runs to depots', () => {
-    const sim = new CitySim('fuel-run');
+    const sim = deployed(new CitySim('fuel-run'));
     expect(sim.command({ type: 'setOrder', pilot: reyes(sim).id, order: order(sim, 'fuel', 'Northside') })).toBe(false);
     expect(sim.command({ type: 'setOrder', pilot: reyes(sim).id, order: order(sim, 'fuel', 'Harbor') })).toBe(true);
   });
 
   it('have varied traits and wages', () => {
-    const sim = new CitySim('traits');
+    const sim = deployed(new CitySim('traits'));
     const crew = Array.from({ length: 10 }, () => createPilot(sim.state));
     expect(new Set(crew.map((p) => p.wage)).size).toBeGreaterThan(2);
     for (const p of crew) {

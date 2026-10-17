@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
+  ARMY_BASE,
   CITY_DEPTH,
   CITY_WIDTH,
   DISTRICT_SIZE,
@@ -163,6 +164,7 @@ export class City {
     for (const p of planSites(seed)) this.sitePlans.set(`${p.i},${p.j}`, p);
     DISTRICT_TEMPLATES.forEach((tpl, i) => this.buildDistrict(i, tpl.kind, rand));
     this.buildWaterfront(rand);
+    this.buildArmyBase();
     this.buildRailLine();
     this.placeStreetFurniture(rand);
     this.buildGround();
@@ -885,31 +887,90 @@ export class City {
     }
   }
 
+  /**
+   * Kessler International: runway and taxiways, a glass terminal with piers and airliners at the
+   * gates, a control tower, cargo hangars, a fuel farm and a general-aviation apron with the
+   * helicopter pads (where the JOC sets up).
+   */
   private buildAirbase(district: number): void {
     const tpl = DISTRICT_TEMPLATES[district];
     const { x: cx, z: cz } = districtCenter(tpl.col, tpl.row);
     const name = tpl.name;
     const half = DISTRICT_SIZE / 2;
     this.boxes.push({ x: cx, z: cz, w: DISTRICT_SIZE - 40, d: DISTRICT_SIZE - 40, h: 0.15, color: 0x5d6a4e, district });
-    // A 1,400 m runway, a parallel taxiway and the apron.
+    // A 1,400 m runway, a parallel taxiway, links and the apron.
     this.boxes.push({ x: cx, z: cz + 420, w: 1360, d: 45, h: 0.3, color: 0x3a3a3c, district });
+    for (let k = 0; k < 20; k++) this.boxes.push({ x: cx - 620 + k * 65, z: cz + 420, w: 30, d: 1, h: 0.32, color: 0xe8e8e2, district });
     this.boxes.push({ x: cx, z: cz + 330, w: 1100, d: 23, h: 0.3, color: 0x46464a, district });
     for (const dx of [-450, 0, 450]) this.boxes.push({ x: cx + dx, z: cz + 375, w: 23, d: 90, h: 0.3, color: 0x46464a, district });
     this.boxes.push({ x: cx - 80, z: cz + 60, w: 720, d: 260, h: 0.3, color: 0x6c6c6c, district });
-    for (let i = 0; i < 6; i++) this.building(district, cx - 380 + i * 90, cz - 160, 64, 46, 18, 0x6e7562, false);
-    for (let i = 0; i < 4; i++) this.building(district, cx + 420, cz - 300 + i * 40, 70, 16, 10, 0x8a8576);
+    // The terminal: a long glass hall with three piers out to the gates.
+    this.building(district, cx - 170, cz - 175, 520, 60, 18, 0x8a99a6, 2);
+    this.building(district, cx - 170, cz - 175, 528, 66, 2, 0xd6d9dc, false, 18);
+    for (const dx of [-370, -170, 30]) this.building(district, cx + dx, cz - 125, 16, 40, 8, 0x8a99a6, 2);
+    // Airliners at the gates: fuselage, wings, tailplane and fin.
+    for (const dx of [-410, -330, -210, -130, -10, 70]) {
+      const x = cx + dx;
+      const z = cz - 70;
+      this.boxes.push({ x, z, w: 4, d: 38, h: 4, y: 2.5, color: 0xf0f0ec, district, solid: true });
+      this.boxes.push({ x, z: z + 1, w: 34, d: 6, h: 0.6, y: 3.5, color: 0xd8d8d2, district });
+      this.boxes.push({ x, z: z + 16, w: 12, d: 3, h: 0.4, y: 5.5, color: 0xd8d8d2, district });
+      this.boxes.push({ x, z: z + 16, w: 0.5, d: 5, h: 7, y: 6, color: 0x2a4f8a, district });
+      for (const ex of [-8, 8]) this.cylinders.push({ x: x + ex, z: z - 1, r: 1.3, h: 2.6, y: 1.5, color: 0xb8bcc0 });
+    }
+    // Car park in front of the terminal and its access road.
+    this.boxes.push({ x: cx - 170, z: cz - 280, w: 500, d: 110, h: 0.3, color: 0x45474a, district });
+    this.building(district, cx + 160, cz - 270, 90, 60, 14, 0x8f8f8a, false);
     // Control tower and its cab.
-    this.building(district, cx + 340, cz + 80, 9, 9, 36, 0xb8b2a4);
-    this.building(district, cx + 340, cz + 80, 15, 15, 6, 0x2f3d44, true, 36);
+    this.building(district, cx + 300, cz - 40, 10, 10, 52, 0xb8b2a4);
+    this.building(district, cx + 300, cz - 40, 17, 17, 7, 0x2f3d44, 2, 52);
+    // Cargo hangars.
+    for (let i = 0; i < 3; i++) {
+      this.building(district, cx + 450, cz - 260 + i * 80, 70, 56, 18, 0x9a9c98, false);
+      this.roofs.push({ x: cx + 450, z: cz - 260 + i * 80, w: 70, d: 56, h: 6, y: 18, yaw: Math.PI / 2, color: 0x7d8084 });
+    }
     // Fuel farm.
-    for (let i = 0; i < 3; i++) this.cylinders.push({ x: cx + 520, z: cz - 40 + i * 30, r: 11, h: 13, color: 0xcfcbc2 });
-    this.fuelSites.push({ district, x: cx + 520, z: cz - 10 });
+    for (let i = 0; i < 3; i++) this.cylinders.push({ x: cx + 560, z: cz + 60 + i * 30, r: 11, h: 13, color: 0xcfcbc2 });
+    this.fuelSites.push({ district, x: cx + 560, z: cz + 90 });
     // Perimeter fence.
     for (const [w, d, dx, dz] of [[DISTRICT_SIZE - 40, 0.4, 0, -half + 20], [DISTRICT_SIZE - 40, 0.4, 0, half - 20], [0.4, DISTRICT_SIZE - 40, -half + 20, 0], [0.4, DISTRICT_SIZE - 40, half - 20, 0]]) {
       this.boxes.push({ x: cx + dx, z: cz + dz, w, d, h: 3, color: 0x55584f, district, solid: true });
     }
-    // Helicopter pads along the apron: pad 1 is the player's.
-    for (let i = 0; i < 6; i++) this.addHelipad(cx - 360 + i * 60, cz + 20, 0.3, `${name} pad ${i + 1}`);
+    // Helicopter pads on the general-aviation apron, where the JOC sets up.
+    for (let i = 0; i < 6; i++) this.addHelipad(cx - 360 + i * 60, cz + 40, 0.3, `${name} pad ${i + 1}`);
+  }
+
+  /**
+   * Camp Ridgeway, the army base on the outskirts west of the city: a fenced compound with
+   * helicopter pads, hangars, barracks, headquarters, a motor pool and a fuel farm, and the road
+   * into the city.
+   */
+  private buildArmyBase(): void {
+    const district = DISTRICT_TEMPLATES.findIndex((d) => d.kind === 'airbase');
+    const { x: cx, z: cz } = ARMY_BASE;
+    const ground = (x: number, z: number, w: number, d: number, color: number) =>
+      this.boxes.push({ x, z, w, d, h: 0.75, y: -0.6, color, district });
+    ground(cx, cz, 900, 700, 0x6b6a52);
+    ground(cx - 120, cz - 160, 520, 140, 0x8a8a84);
+    // The road east to the city's edge.
+    ground((cx + 450 + (-CITY_WIDTH / 2)) / 2, cz, -CITY_WIDTH / 2 - cx - 450, 14, 0x3a3a3c);
+    for (const [w, d, dx, dz] of [[900, 0.4, 0, -350], [900, 0.4, 0, 350], [0.4, 700, -450, 0], [0.4, 280, 450, -210], [0.4, 280, 450, 210]]) {
+      this.boxes.push({ x: cx + dx, z: cz + dz, w, d, h: 3, color: 0x55584f, district, solid: true });
+    }
+    for (let i = 0; i < 6; i++) this.addHelipad(cx - 320 + i * 70, cz - 160, 0.3, `${ARMY_BASE.name} pad ${i + 1}`);
+    for (let i = 0; i < 3; i++) {
+      this.building(district, cx - 300 + i * 120, cz - 10, 80, 60, 16, 0x5f6650, false);
+      this.roofs.push({ x: cx - 300 + i * 120, z: cz - 10, w: 80, d: 60, h: 7, y: 16, yaw: Math.PI / 2, color: 0x4d5342 });
+    }
+    for (let r = 0; r < 2; r++) {
+      for (let i = 0; i < 6; i++) this.building(district, cx - 330 + i * 60, cz + 150 + r * 50, 44, 14, 7, 0xa79a7a, 1);
+    }
+    this.building(district, cx + 220, cz - 220, 60, 26, 12, 0x8a8576, 4);
+    this.cylinders.push({ x: cx + 220, z: cz - 245, r: 0.25, h: 14, color: 0xd8d8d8 });
+    for (let i = 0; i < 24; i++) {
+      this.building(district, cx + 160 + (i % 8) * 8, cz + 60 + Math.floor(i / 8) * 16, 2.6, 8, 3, 0x4b5232, false);
+    }
+    for (let i = 0; i < 3; i++) this.cylinders.push({ x: cx + 360, z: cz + 40 + i * 30, r: 10, h: 12, color: 0xcfcbc2 });
   }
 
   /** Quay, piers and gantry cranes along the harbour's sea edge. */

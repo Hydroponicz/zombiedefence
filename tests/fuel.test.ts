@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
+import { deployed } from './helpers';
 import { Operations, type GroundContext } from '../src/game/Operations';
 import { FUEL_CAPACITY, Helicopter, type CollisionWorld } from '../src/heli/Helicopter';
 import type { FlightInput } from '../src/input/Input';
@@ -10,7 +11,7 @@ const byName = (sim: CitySim, name: string) => sim.state.districts.find((d) => d
 
 describe('fuel in the simulation', () => {
   it('draws refuelling from the source stock', () => {
-    const sim = new CitySim('pump');
+    const sim = deployed(new CitySim('pump'));
     const base = baseOf(sim.state);
     const before = base.fuel;
     sim.command({ type: 'refuel', source: { district: base.id }, litres: 500 });
@@ -18,7 +19,7 @@ describe('fuel in the simulation', () => {
   });
 
   it('carries a bladder from a depot and sets it down elsewhere', () => {
-    const sim = new CitySim('bladder');
+    const sim = deployed(new CitySim('bladder'));
     const harbor = byName(sim, 'Harbor');
     const hospital = byName(sim, "St. Mary's");
     expect(sim.command({ type: 'hookBladder', district: byName(sim, 'Northside').id })).toBe(false);
@@ -33,14 +34,14 @@ describe('fuel in the simulation', () => {
   });
 
   it('loses a bladder dropped from height', () => {
-    const sim = new CitySim('burst');
+    const sim = deployed(new CitySim('burst'));
     sim.command({ type: 'hookBladder', district: byName(sim, 'Harbor').id });
     sim.command({ type: 'burstBladder', district: 0 });
     expect(sim.state.cargo.sling).toBe(0);
   });
 
   it('sets up a guarded forward refuelling point that can be refilled and is lost when overrun', () => {
-    const sim = new CitySim('farp');
+    const sim = deployed(new CitySim('farp'));
     const d = byName(sim, 'Eastside');
     const setup: PlayerCommand = { type: 'setupFarp', district: d.id, x: 100, z: 0 };
     sim.command({ type: 'hookBladder', district: baseOf(sim.state).id });
@@ -72,7 +73,7 @@ describe('fuel in the simulation', () => {
   });
 
   it('trucks fuel from defended depots to the base, and stops when a depot falls', () => {
-    const sim = new CitySim('convoy');
+    const sim = deployed(new CitySim('convoy'));
     const base = baseOf(sim.state);
     const harbor = byName(sim, 'Harbor');
     const fuel = base.fuel;
@@ -84,7 +85,7 @@ describe('fuel in the simulation', () => {
   });
 
   it('leaves passengers and cargo in the district when the helicopter is abandoned', () => {
-    const sim = new CitySim('abandon');
+    const sim = deployed(new CitySim('abandon'));
     const d = byName(sim, 'Southgate');
     for (let i = 0; i < 3; i++) sim.command({ type: 'board', district: d.id, kind: 'civilian' });
     const people = d.population + d.infected;
@@ -145,21 +146,21 @@ describe('flying on fuel', () => {
 describe('fuel on the ground menu', () => {
   const ctx = (sim: CitySim, name: string, extra: Partial<GroundContext> = {}): GroundContext => ({
     landed: true, district: byName(sim, name).id, onRoof: false, threat: 0, grabbers: 0,
-    x: 0, z: 0, fuel: FUEL_CAPACITY, fuelCapacity: FUEL_CAPACITY, ...extra,
+    x: 0, z: 0, fuel: FUEL_CAPACITY, fuelCapacity: FUEL_CAPACITY, base: name === 'Kessler Airport' ? 'airport' : null, ...extra,
   });
 
   it('refuels automatically at the base from its stores', () => {
-    const sim = new CitySim('auto-fuel');
+    const sim = deployed(new CitySim('auto-fuel'));
     let fuel = 200;
     const ops = new Operations((c) => sim.command(c), (l) => (fuel += l));
     const stores = baseOf(sim.state).fuel;
-    for (let t = 0; t < 5; t += 1 / 30) ops.update(1 / 30, ctx(sim, 'Fort Kessler', { fuel }), sim.state, new Set());
+    for (let t = 0; t < 5; t += 1 / 30) ops.update(1 / 30, ctx(sim, 'Kessler Airport', { fuel }), sim.state, new Set());
     expect(fuel).toBeGreaterThan(200 + 300);
     expect(baseOf(sim.state).fuel).toBeCloseTo(stores - (fuel - 200), 0);
   });
 
   it('offers a bladder at depots and abandonment only when stranded', () => {
-    const sim = new CitySim('menu-fuel');
+    const sim = deployed(new CitySim('menu-fuel'));
     const ops = new Operations((c) => sim.command(c));
     ops.update(1 / 30, ctx(sim, 'Harbor'), sim.state, new Set());
     expect(ops.view!.options.some((o) => o.label === 'Hook up a fuel bladder')).toBe(true);
