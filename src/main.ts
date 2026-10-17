@@ -153,6 +153,10 @@ function handleActions(frame: FrameInput): void {
   if (a.has('camera')) chase.cycleDistance();
   if (a.has('searchlight')) hud.toast(heli.toggleSearchlight() ? 'Searchlight on' : 'Searchlight off', 1.2);
   if (a.has('sling')) releaseSling();
+  // B closes menus; in flight it toggles the sensor overlay.
+  if (a.has('sensor') || (!map.visible && a.has('back'))) {
+    hud.toast(agents.toggleSensor() ? 'Sensor: zombies red · bitten amber · civilians green · troops and police blue' : 'Sensor off', 2.5);
+  }
   if (a.has('timeFaster') || (!map.visible && a.has('dpadRight'))) sim.changeTimeScale(1);
   if (a.has('timeSlower') || (!map.visible && a.has('dpadLeft'))) sim.changeTimeScale(-1);
 }

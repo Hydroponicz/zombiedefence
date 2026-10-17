@@ -131,6 +131,20 @@ Each runs one person or crate at a time; lift off to leave.
   and use the menu). Crashes and desertions lose them.
 - **Downed pilots** who survive a crash wait in the district: land there to pick them up.
 
+## Telling the living, the bitten and the dead apart
+
+- **Zombies** have grey dead skin, blood down the shirt and round the mouth, ragged dark clothes, a
+  hunched shamble and arms reaching forward.
+- **The bitten** stagger along hunched and swaying, with a bloody bandaged forearm, blood at the
+  neck and grey-green skin. A civilian bitten in front of you staggers on for a few seconds, then
+  collapses and rises. Some of a district's hidden infected walk among the crowds this way too, and
+  the dead leave them be.
+- **Civilians** walk upright in bright everyday clothes; soldiers wear olive and tan, patrol police
+  hi-vis vests over navy, and riot police black.
+- **Sensor overlay** (**T**, or **B** on a controller in flight): the helicopter's sensor paints
+  everyone by what they are, with a fixed-size dot over each that reads at any altitude and at night.
+  Zombies show red, the bitten amber, civilians green, and soldiers and police blue.
+
 ## Police
 
 - **Who:** every city district has police, about one officer per 900 residents, plus riot police at

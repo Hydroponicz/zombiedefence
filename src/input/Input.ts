@@ -59,6 +59,8 @@ export type Action =
   | 'sling'
   /** Open or close flight command (the AI pilots). */
   | 'command'
+  /** Toggle the helicopter's sensor overlay that marks zombies, the bitten and the living. */
+  | 'sensor'
   | `overlay${number}`;
 
 const KEY_ACTIONS: Record<string, Action> = {
@@ -71,6 +73,7 @@ const KEY_ACTIONS: Record<string, Action> = {
   KeyE: 'confirm',
   KeyF: 'sling',
   KeyP: 'command',
+  KeyT: 'sensor',
   Enter: 'confirm',
   BracketRight: 'timeFaster',
   BracketLeft: 'timeSlower',

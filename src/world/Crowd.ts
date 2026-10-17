@@ -201,6 +201,12 @@ export class Crowd {
     this.mesh.frustumCulled = false;
   }
 
+  /** The helicopter's sensor overlay: the dead glow red so they read at any range and in the dark. */
+  setSensor(on: boolean): void {
+    sensor.value = on ? 1 : 0;
+    (this.mesh.material as THREE.MeshLambertMaterial).emissive.setRGB(on ? 0.55 : 0, on ? 0.04 : 0, on ? 0.03 : 0);
+  }
+
   // --- Queries used by soldiers, civilians and door gunners --------------------------------
 
   posX(i: number): number {
@@ -236,6 +242,10 @@ export class Crowd {
       }
     }
     return best;
+  }
+
+  isLive(i: number): boolean {
+    return this.live[i] === 1;
   }
 
   kill(i: number): void {
@@ -810,8 +820,13 @@ const dist2 = (x: number, z: number, cx: number, cz: number) => (x - cx) * (x - 
  *   aPose = (x, z, heading, walk phase)
  *   aLook = (pose code, lean, clothing tint, stride)
  */
-function buildFigure(): { geometry: THREE.InstancedBufferGeometry; material: THREE.Material } {
-  const SKIN = new THREE.Color(0xa3a894);
+/** Shared by the crowd's material: 1 while the helicopter's sensor overlay is on. */
+const sensor = { value: 0 };
+
+function buildFigure(): { geometry: THREE.InstancedBufferGeometry; material: THREE.MeshLambertMaterial } {
+  // Grey, dead skin: nothing like the living's.
+  const SKIN = new THREE.Color(0x9aa08a);
+  const BLOOD = new THREE.Color(0x5e0d0b);
   const WHITE = new THREE.Color(1, 1, 1);
   const part = (w: number, h: number, d: number, x: number, y: number, z: number, id: number, skin: boolean) => {
     const g = new THREE.BoxGeometry(w, h, d);
@@ -822,6 +837,15 @@ function buildFigure(): { geometry: THREE.InstancedBufferGeometry; material: THR
     g.setAttribute('color', new THREE.Float32BufferAttribute(Array.from({ length: n }, () => [c.r, c.g, c.b]).flat(), 3));
     return g;
   };
+  /** A blood stain riding on a part: 0.3 on the torso, 5.3 on the head. */
+  const stain = (w: number, h: number, d: number, x: number, y: number, z: number, id: number) => {
+    const g = new THREE.BoxGeometry(w, h, d);
+    g.translate(x, y, z);
+    const n = g.getAttribute('position').count;
+    g.setAttribute('aPart', new THREE.Float32BufferAttribute(new Float32Array(n).fill(id), 1));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(Array.from({ length: n }, () => [BLOOD.r, BLOOD.g, BLOOD.b]).flat(), 3));
+    return g;
+  };
   // Parts: 0 torso, 1-2 legs (hip pivot 0.88 m), 3-4 arms (shoulder pivot 1.42 m), 5 head.
   const merged = mergeGeometries([
     part(0.42, 0.6, 0.24, 0, 1.15, 0, 0, false),
@@ -830,6 +854,9 @@ function buildFigure(): { geometry: THREE.InstancedBufferGeometry; material: THR
     part(0.1, 0.6, 0.1, -0.28, 1.12, 0, 3, false),
     part(0.1, 0.6, 0.1, 0.28, 1.12, 0, 4, false),
     part(0.22, 0.25, 0.22, 0, 1.6, 0, 5, true),
+    // Blood down the shirt front and round the mouth (never tinted: see the colour step below).
+    stain(0.3, 0.32, 0.02, 0, 1.2, -0.13, 0.3),
+    stain(0.14, 0.07, 0.02, 0, 1.53, -0.115, 5.3),
   ]);
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.index = merged.index;
@@ -840,6 +867,7 @@ function buildFigure(): { geometry: THREE.InstancedBufferGeometry; material: THR
   const material = new THREE.MeshLambertMaterial({ vertexColors: true });
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTints = { value: tints };
+    shader.uniforms.uSensor = sensor;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -848,6 +876,7 @@ function buildFigure(): { geometry: THREE.InstancedBufferGeometry; material: THR
         attribute vec4 aPose;
         attribute vec4 aLook;
         uniform vec3 uTints[8];
+        uniform float uSensor;
         mat3 rotX(float a) { float c = cos(a), s = sin(a); return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c); }
         mat3 rotY(float a) { float c = cos(a), s = sin(a); return mat3(c, 0.0, -s, 0.0, 1.0, 0.0, s, 0.0, c); }`,
       )
@@ -880,7 +909,10 @@ function buildFigure(): { geometry: THREE.InstancedBufferGeometry; material: THR
       .replace(
         '#include <color_vertex>',
         `#include <color_vertex>
-        if (aPart < 4.5) vColor.rgb *= uTints[int(aLook.z + 0.5)];`,
+        bool blood = abs(aPart - 0.3) < 0.05 || aPart > 5.2;
+        if (aPart < 4.5 && !blood) vColor.rgb *= uTints[int(aLook.z + 0.5)];
+        // Sensor overlay: the dead show red.
+        vColor.rgb = mix(vColor.rgb, vec3(1.0, 0.12, 0.08), uSensor * 0.85);`,
       );
   };
   return { geometry, material };

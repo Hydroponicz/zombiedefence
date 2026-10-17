@@ -20,6 +20,7 @@ export const CONTROLS_HTML = `
   <tr><td>Camera</td><td>Right stick</td><td>Mouse (click to capture), wheel zooms</td></tr>
   <tr><td>Camera distance</td><td>R3</td><td><kbd>C</kbd></td></tr>
   <tr><td>Searchlight</td><td>Y</td><td><kbd>L</kbd></td></tr>
+  <tr><td>Sensor overlay (who is who)</td><td>B</td><td><kbd>T</kbd></td></tr>
   <tr><td>City map (debug)</td><td>View</td><td><kbd>M</kbd></td></tr>
   <tr><td>Time speed</td><td>D-pad ◀ ▶ (LT / RT on the map)</td><td><kbd>[</kbd> / <kbd>]</kbd></td></tr>
   <tr><td>Map: select district</td><td>D-pad</td><td>Arrow keys or click</td></tr>

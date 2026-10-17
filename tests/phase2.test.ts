@@ -70,6 +70,25 @@ describe('street scene', () => {
     expect(census.soldiers).toBeGreaterThan(0);
   });
 
+  it('shows some of the district\'s bitten among the people on the street', () => {
+    const agents = new Agents('scene', effects);
+    const state = cityWith(0);
+    const d = state.districts[index];
+    d.infected = d.population * 0.2;
+    run(agents, state, 4, 200);
+    const census = agents.census();
+    expect(census.bitten).toBeGreaterThan(0);
+    expect(census.bitten).toBeLessThan(census.civilians);
+  });
+
+  it('toggles the sensor overlay that paints the dead, the bitten and the living', () => {
+    const agents = new Agents('scene', effects);
+    expect(agents.toggleSensor()).toBe(true);
+    expect((agents.crowd.mesh.material as THREE.MeshLambertMaterial).emissive.r).toBeGreaterThan(0.3);
+    expect(agents.toggleSensor()).toBe(false);
+    expect((agents.crowd.mesh.material as THREE.MeshLambertMaterial).emissive.r).toBe(0);
+  });
+
   it('shows no zombies where the simulation has none', () => {
     const agents = new Agents('scene', effects);
     run(agents, cityWith(0), 3, 200);

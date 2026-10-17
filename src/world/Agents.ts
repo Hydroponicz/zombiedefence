@@ -13,7 +13,7 @@ import { planSites } from '../sim/sites';
 import { BLOCKS_PER_DISTRICT, nearestNode, neighbors, nodeX, nodeZ, NODES_X, NODES_Z, stepToward } from '../sim/streets';
 import type { CityState, DistrictState } from '../sim/types';
 import type { WalkGrid } from './City';
-import { Crowd, RESIDENT_RADIUS, type HumanRef } from './Crowd';
+import { Crowd, CROWD_CAPACITY, RESIDENT_RADIUS, type HumanRef } from './Crowd';
 import type { Effects } from './Effects';
 
 const enum Kind {
@@ -23,9 +23,20 @@ const enum Kind {
   Police,
   /** Riot police with shields and batons. */
   Riot,
+  /** Bitten civilians: staggering, bandaged and greying, ignored by the dead, until they turn. */
+  Bitten,
 }
 
-const KINDS = [Kind.Civilian, Kind.Soldier, Kind.Police, Kind.Riot];
+const KINDS = [Kind.Civilian, Kind.Soldier, Kind.Police, Kind.Riot, Kind.Bitten];
+
+/** What the sensor overlay paints each kind: the living green, the law and the army blue, the bitten amber. */
+const SENSOR: Record<Kind, number> = {
+  [Kind.Civilian]: 0x3ad35a,
+  [Kind.Soldier]: 0x3f8cff,
+  [Kind.Police]: 0x3f8cff,
+  [Kind.Riot]: 0x3f8cff,
+  [Kind.Bitten]: 0xffb21e,
+};
 
 const enum Mode {
   Walk,
@@ -64,7 +75,14 @@ export const ACTIVE_RADIUS = RESIDENT_RADIUS;
 const DESPAWN_RADIUS = 470;
 const RECONCILE_SECONDS = 0.5;
 const SPAWNS_PER_RECONCILE = 40;
-const CAPACITY = { [Kind.Civilian]: 320, [Kind.Soldier]: 120, [Kind.Police]: 80, [Kind.Riot]: 60 } as const;
+const CAPACITY = { [Kind.Civilian]: 320, [Kind.Soldier]: 120, [Kind.Police]: 80, [Kind.Riot]: 60, [Kind.Bitten]: 60 } as const;
+/** Sensor pips for people (the crowd has its own capacity). */
+const PIP_PEOPLE = 800;
+const PIP_DEAD = 0xff2a1a;
+/** Bitten people seen among the living on the street, at most per district in view. */
+const BITTEN_VISIBLE = 14;
+/** A civilian bitten on screen staggers this long, then collapses and rises. */
+const BITTEN_SECONDS = 18;
 /** Police on the street at most per district in view (the rest are elsewhere in the district). */
 const POLICE_VISIBLE = 30;
 const RIOT_VISIBLE = 20;
@@ -125,6 +143,11 @@ export class Agents {
   private v = new THREE.Vector3();
   private s = new THREE.Vector3(1, 1, 1);
   private c = new THREE.Color();
+  private sensor = false;
+  /** Sensor pips: a fixed-size dot over every figure, coloured by what it is. */
+  private pips: THREE.Points;
+  private pipPos = new Float32Array((CROWD_CAPACITY + PIP_PEOPLE) * 3);
+  private pipColor = new Float32Array((CROWD_CAPACITY + PIP_PEOPLE) * 3);
 
   constructor(seed: number | string, private effects: Effects, walk: WalkGrid | null = null) {
     this.rand = makeRandom(`agents-${seed}`);
@@ -133,6 +156,16 @@ export class Agents {
     this.buildPosts(seed);
     this.sandbags = this.buildSandbags();
     this.buildMeshes();
+    const pipGeo = new THREE.BufferGeometry();
+    pipGeo.setAttribute('position', new THREE.BufferAttribute(this.pipPos, 3).setUsage(THREE.DynamicDrawUsage));
+    pipGeo.setAttribute('color', new THREE.BufferAttribute(this.pipColor, 3).setUsage(THREE.DynamicDrawUsage));
+    this.pips = new THREE.Points(pipGeo, new THREE.PointsMaterial({
+      size: 5, sizeAttenuation: false, vertexColors: true, fog: false, depthWrite: false, transparent: true, opacity: 0.95,
+    }));
+    this.pips.frustumCulled = false;
+    this.pips.visible = false;
+    this.pips.renderOrder = 4;
+    this.group.add(this.pips);
   }
 
   /**
@@ -167,8 +200,11 @@ export class Agents {
       bite: (h) => {
         const p = h as Person;
         if (p.mode === Mode.Turning || p.kind !== Kind.Civilian) return;
-        p.mode = Mode.Turning;
-        p.timer = TURN_SECONDS;
+        // Bitten: they stagger on for a while (the dead leave them be), then collapse and rise.
+        p.kind = Kind.Bitten;
+        p.civilian = false;
+        p.mode = Mode.Walk;
+        p.timer = BITTEN_SECONDS;
       },
     }, time);
     this.attract.drawn = this.crowd.drawn;
@@ -179,7 +215,8 @@ export class Agents {
       if (p.kind === Kind.Civilian) this.updateCivilian(p, dt);
       else if (p.kind === Kind.Soldier) this.updateSoldier(p, dt);
       else if (p.kind === Kind.Police) this.updateOfficer(p, dt);
-      else this.updateRiot(p, dt);
+      else if (p.kind === Kind.Riot) this.updateRiot(p, dt);
+      else this.updateBitten(p, dt);
     }
 
     // Bitten civilians rise as zombies; far-away people go.
@@ -192,6 +229,36 @@ export class Agents {
     });
 
     this.render();
+    if (this.sensor) this.renderPips();
+  }
+
+  /** One dot per figure, above its head: the dead red, the bitten amber, the living green, the armed blue. */
+  private renderPips(): void {
+    let n = 0;
+    const put = (x: number, z: number, hex: number) => {
+      this.c.setHex(hex);
+      this.pipPos[n * 3] = x;
+      this.pipPos[n * 3 + 1] = 2.6;
+      this.pipPos[n * 3 + 2] = z;
+      this.pipColor[n * 3] = this.c.r;
+      this.pipColor[n * 3 + 1] = this.c.g;
+      this.pipColor[n * 3 + 2] = this.c.b;
+      n++;
+    };
+    const crowd = this.crowd;
+    for (let i = 0; i < crowd.count; i++) if (crowd.isLive(i)) put(crowd.posX(i), crowd.posZ(i), PIP_DEAD);
+    for (const p of this.people) {
+      if (n >= this.pipPos.length / 3) break;
+      put(p.x, p.z, p.mode === Mode.Turning ? SENSOR[Kind.Bitten] : SENSOR[p.kind]);
+    }
+    const geo = this.pips.geometry;
+    geo.setDrawRange(0, n);
+    for (const name of ['position', 'color']) {
+      const attr = geo.getAttribute(name) as THREE.BufferAttribute;
+      attr.clearUpdateRanges();
+      attr.addUpdateRange(0, n * 3);
+      attr.needsUpdate = true;
+    }
   }
 
   // --- Reconciliation with the simulation -----------------------------------------------
@@ -199,7 +266,8 @@ export class Agents {
   private reconcile(state: CityState, cx: number, cz: number, night: boolean, share: Map<number, number>): void {
     const counts = new Map<string, Person[]>();
     for (const p of this.people) {
-      if (p.mode === Mode.Turning) continue;
+      // Those turning on screen play out their story whatever the counts say.
+      if (p.mode === Mode.Turning || (p.kind === Kind.Bitten && Number.isFinite(p.timer))) continue;
       const key = `${p.kind}-${p.district}`;
       const list = counts.get(key);
       if (list) list.push(p);
@@ -227,7 +295,11 @@ export class Agents {
     const targets: [Kind, number, number][] = [];
     for (const [district, frac] of share) {
       const d = state.districts[district];
-      targets.push([Kind.Civilian, district, visibleCivilians(d, night) * frac]);
+      // Some of those on the street are the district's hidden bitten.
+      const living = visibleCivilians(d, night) * frac;
+      const bitten = Math.min(living * (d.infected / Math.max(1, d.population + d.infected)), BITTEN_VISIBLE);
+      targets.push([Kind.Civilian, district, living - bitten]);
+      targets.push([Kind.Bitten, district, bitten]);
       let soldiers = 0;
       this.posts.forEach((p, i) => {
         if (p.district === district && this.postVisible[i] && Math.hypot(p.x - cx, p.z - cz) < ACTIVE_RADIUS) soldiers += this.postSoldiers[i];
@@ -258,6 +330,8 @@ export class Agents {
       } else {
         for (let n = have.length; n < target && budget[kind] > 0; n++, budget[kind]--) {
           const p = kind === Kind.Soldier ? this.spawnSoldier(district, cx, cz, have) : this.spawnCivilian(district, cx, cz, kind);
+          // The simulation's bitten turn when it says so; on screen they just stagger about.
+          if (p && kind === Kind.Bitten) p.timer = Infinity;
           if (p) {
             this.people.push(p);
             have.push(p);
@@ -334,7 +408,8 @@ export class Agents {
   private rebuildGrid(): void {
     this.humans.clear();
     for (const p of this.people) {
-      if (p.mode === Mode.Turning) continue;
+      // The dead pass over the turning and the bitten.
+      if (p.mode === Mode.Turning || p.kind === Kind.Bitten) continue;
       const k = gridKey(p.x, p.z);
       const list = this.humans.get(k);
       if (list) list.push(p);
@@ -401,6 +476,18 @@ export class Agents {
       tx + (this.rand() - 0.5) * miss, 1.0 + this.rand() * 0.8, tz + (this.rand() - 0.5) * miss,
     );
     if (hit) this.crowd.kill(target);
+  }
+
+  /** The bitten stagger along, dazed, until they collapse and turn. */
+  private updateBitten(p: Person, dt: number): void {
+    p.timer -= dt;
+    if (p.mode === Mode.Turning) return;
+    if (p.timer <= 0) {
+      p.mode = Mode.Turning;
+      p.timer = TURN_SECONDS;
+      return;
+    }
+    if (this.walkStreets(p, p.speed * 0.45, dt)) this.wander(p);
   }
 
   /** Patrol officers walk their beat and stop to fire their pistols at the dead nearby. */
@@ -647,9 +734,22 @@ export class Agents {
       box(0.3, 0.3, 0.32, 0, 1.66, 0, 0x2f343c),
       box(0.26, 0.14, 0.03, 0, 1.6, -0.17, 0x6f8090),
     ]);
+    // The bitten: grimy clothes, blood at the neck, a bandaged forearm, grey-green skin.
+    const STAINED = 0x8a8474;
+    const bittenBody = mergeGeometries([
+      box(0.36, 0.86, 0.2, 0, 0.43, 0, 0x4e4b45),
+      box(0.44, 0.6, 0.25, 0, 1.15, 0, STAINED),
+      box(0.22, 0.2, 0.27, 0.1, 1.35, 0, 0x6a1010),
+      box(0.11, 0.6, 0.11, -0.29, 1.12, 0, STAINED),
+      box(0.11, 0.6, 0.11, 0.29, 1.12, 0, STAINED),
+      box(0.135, 0.2, 0.135, -0.29, 0.95, 0, 0xeae6dc),
+      box(0.14, 0.06, 0.14, -0.29, 0.95, 0, 0x8a1a14),
+    ]);
+    const bittenHead = box(0.22, 0.25, 0.22, 0, 1.6, 0, 0xb2b693);
     const geo = {
       [Kind.Civilian]: [civilianBody, civilianHead], [Kind.Soldier]: [soldierBody, soldierHead],
       [Kind.Police]: [officerBody, officerHead], [Kind.Riot]: [riotBody, riotHead],
+      [Kind.Bitten]: [bittenBody, bittenHead],
     };
 
     for (const kind of KINDS) {
@@ -682,8 +782,11 @@ export class Agents {
       const lying = p.mode === Mode.Turning;
       const moving = p.mode !== Mode.Post && !lying;
       const bob = moving ? Math.abs(Math.sin(p.phase)) * 0.06 : 0;
-      const lean = p.mode === Mode.Flee ? 0.25 : 0;
-      this.e.set(lying ? -Math.PI / 2 : -lean, p.heading, 0, 'YXZ');
+      const bitten = kind === Kind.Bitten;
+      const lean = p.mode === Mode.Flee ? 0.25 : bitten ? 0.3 : 0;
+      // The bitten sway as they stagger.
+      const sway = bitten && !lying ? Math.sin(p.phase * 0.8) * 0.18 : 0;
+      this.e.set(lying ? -Math.PI / 2 : -lean, p.heading + sway, sway, 'YXZ');
       this.q.setFromEuler(this.e);
       this.m.compose(this.v.set(p.x, lying ? 0.2 : bob, p.z), this.q, this.s.set(1, 1, 1));
       this.bodies[kind].setMatrixAt(i, this.m);
@@ -704,10 +807,29 @@ export class Agents {
     }
   }
 
+  /**
+   * The helicopter's sensor overlay: every figure painted by what it is (the dead red, the bitten
+   * amber, civilians green, soldiers and police blue), glowing so it reads at range and at night.
+   * Returns whether it's now on.
+   */
+  toggleSensor(): boolean {
+    this.sensor = !this.sensor;
+    for (const kind of KINDS) {
+      for (const mesh of [this.bodies[kind], this.heads[kind]]) {
+        const material = mesh.material as THREE.MeshLambertMaterial;
+        material.color.setHex(this.sensor ? SENSOR[kind] : 0xffffff);
+        material.emissive.setHex(this.sensor ? SENSOR[kind] : 0x000000).multiplyScalar(0.6);
+      }
+    }
+    this.crowd.setSensor(this.sensor);
+    this.pips.visible = this.sensor;
+    return this.sensor;
+  }
+
   /** Counts of living figures on screen, for the HUD and tests. */
-  census(): { zombies: number; civilians: number; soldiers: number } {
+  census(): { zombies: number; civilians: number; soldiers: number; bitten: number } {
     const live = (k: Kind) => this.people.filter((p) => p.kind === k && p.mode !== Mode.Turning).length;
-    return { zombies: this.crowd.living(), civilians: live(Kind.Civilian), soldiers: live(Kind.Soldier) };
+    return { zombies: this.crowd.living(), civilians: live(Kind.Civilian), soldiers: live(Kind.Soldier), bitten: live(Kind.Bitten) };
   }
 }
 
