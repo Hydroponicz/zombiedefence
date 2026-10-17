@@ -4,6 +4,7 @@
 
 import { districtCenter, DISTRICT_TEMPLATES } from './layout';
 import { BASE_RESERVE_TROOPS, baseOf, BLADDER_LITRES, CRATES, mergeTroops, ROUNDS_PER_TROOP, SEATS, type Emit } from './operations';
+import { totalZombies } from './hordes';
 import { nextRandom } from './rng';
 import type { CityState, CrateKind, DistrictState, JobKind, Order, Pilot, Trip } from './types';
 
@@ -89,7 +90,7 @@ export function initialFleet(s: CityState): void {
 /** How dangerous a landing zone is: 0 quiet .. ~0.7 overrun. */
 export function dangerOf(d: DistrictState): number {
   const status = d.status === 'overrun' ? 0.6 : d.status === 'contested' ? 0.25 : 0.03;
-  const crowd = Math.min(0.15, d.zombies / (d.population * 0.02 + d.troops.strength * 5 + 200) * 0.1);
+  const crowd = Math.min(0.15, totalZombies(d) / (d.population * 0.02 + d.troops.strength * 5 + 200) * 0.1);
   return status + crowd;
 }
 

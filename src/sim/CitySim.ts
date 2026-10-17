@@ -5,6 +5,7 @@
 import { dayNumber, isDaytime, START_MINUTE } from './clock';
 import { DISTRICT_TEMPLATES, neighborsOf } from './layout';
 import { applyCommand, baseOf, emptyCargo, mergeTroops, type PlayerCommand } from './operations';
+import { applyHordeLosses, countHordes, formHordes, moveHordes, totalZombies } from './hordes';
 import { initialFleet, payday, updatePilots } from './pilots';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
@@ -37,7 +38,6 @@ export const TUNING = {
   roundsPerKill: 6,
   roundsPerSoldier: 300,
   zombieWanderRate: 0.01,
-  hordeWanderRate: 0.2,
   /** Rations each district starts with, in days. */
   startingRationDays: 2,
   warehouseDays: 1.5,
@@ -114,6 +114,8 @@ export function createCity(seed: number | string): CityState {
       pilotsRecruited: 0, aiTrips: 0 },
     pilots: [],
     airframes: [],
+    hordes: [],
+    hordeSeq: 0,
     pilotSeq: 0,
     airframeSeq: 0,
   };
@@ -150,6 +152,7 @@ export function createCity(seed: number | string): CityState {
       burning: 0,
       scientists: tpl.scientists ?? 0,
       salvage: tpl.salvage ?? 0,
+      hordeZombies: 0,
       flags: {},
       cooldowns: {},
     };
@@ -186,11 +189,15 @@ function tick(s: CityState, out: SimEvent[]): void {
   if (hourly) spontaneousOutbreaks(s, day, emit);
   updatePower(s, day, night, emit);
 
-  for (const d of ds) updateDistrict(s, d, day, night, emit);
+  countHordes(s);
+  for (const d of ds) applyHordeLosses(s, d.id, updateDistrict(s, d, day, night, emit));
 
   migrate(s, night);
   if (hourly) distributeRations(s, emit);
   if (hourly) fuelConvoys(s, emit);
+  if (hourly) formHordes(s, emit);
+  moveHordes(s, night, emit);
+  countHordes(s);
   for (const d of ds) updateStatus(d, emit);
   loseFarps(s, emit);
   updatePilots(s, emit);
@@ -327,11 +334,13 @@ function effectiveness(d: DistrictState, night: boolean): number {
   return ammoF * (1 - 0.6 * tr.fatigue) * (0.35 + 0.65 * tr.morale) * light * (d.rioting ? 0.6 : 1);
 }
 
-function updateDistrict(s: CityState, d: DistrictState, day: number, night: boolean, emit: Emit): void {
+/** Returns the zombies killed out of hordes in the district, for applyHordeLosses. */
+function updateDistrict(s: CityState, d: DistrictState, day: number, night: boolean, emit: Emit): number {
   const tr = d.troops;
   const P = d.population;
   const T = tr.strength;
-  const Z = d.zombies;
+  // Residents and any hordes passing through fight as one.
+  const Z = totalZombies(d);
   const e = effectiveness(d, night);
   const fort = d.features.fortified ? 2 : 1;
 
@@ -371,7 +380,10 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   d.population = Math.max(0, P - bitten - civDeaths);
   d.infected += bitten + troopLoss * 0.5;
   d.dead += civDeaths + troopLoss * 0.5 + civKills + soldierKills;
-  d.zombies = Math.max(0, Z - civKills - soldierKills);
+  const kills = civKills + soldierKills;
+  const residentShare = Z > 0 ? d.zombies / Z : 1;
+  const hordeLosses = kills * (1 - residentShare);
+  d.zombies = Math.max(0, d.zombies - kills * residentShare);
   tr.strength = Math.max(0, T - troopLoss);
   tr.ammo = Math.max(0, tr.ammo - soldierKills * TUNING.roundsPerKill);
   if (tr.strength < 0.5) {
@@ -382,13 +394,12 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   d.infected -= turned;
   d.zombies += turned;
 
-  const kills = civKills + soldierKills;
   d.killRate = d.killRate * 0.95 + (kills / H) * 0.05;
   d.noise = d.noise * 0.9 + clamp(d.killRate / 50, 0, 2) * 0.1;
   d.playerNoise *= 0.97;
   d.burning = Math.max(0, d.burning - 1);
 
-  if (!d.flags.outbreak && d.zombies > 15) {
+  if (!d.flags.outbreak && totalZombies(d) > 15) {
     d.flags.outbreak = true;
     emit(d.id, 'warn', `Outbreak confirmed in ${d.name}.`);
   }
@@ -436,7 +447,7 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   }
 
   // --- Social order ---
-  const threat = clamp(d.zombies / (d.population * 0.01 + tr.strength * 2 + 20));
+  const threat = clamp(totalZombies(d) / (d.population * 0.01 + tr.strength * 2 + 20));
   let neighborThreat = 0;
   for (const n of d.neighbors) {
     const st = s.districts[n].status;
@@ -468,9 +479,9 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
 
   // --- Military ---
   if (tr.strength > 0) {
-    const engaged = d.zombies > 5;
+    const engaged = totalZombies(d) > 5;
     // Heavy fighting exhausts troops in about a day; patrolling an infected district takes about two weeks.
-    const intensity = clamp(d.zombies / (tr.strength * 8 + 200));
+    const intensity = clamp(totalZombies(d) / (tr.strength * 8 + 200));
     const strain = (0.04 * intensity + (d.flags.outbreak ? 0.003 : 0)) * (night ? 1.3 : 1);
     tr.fatigue = clamp(tr.fatigue + (intensity < 0.05 ? -0.01 : strain) * H);
     const lossFrac = troopLoss / H / tr.strength;
@@ -486,11 +497,12 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
     }
     if (tr.morale < 0.12 && engaged && s.t - (d.cooldowns.rout ?? -Infinity) > 360) rout(s, d, emit);
   }
+  return hordeLosses;
 }
 
 function safety(d: DistrictState): number {
   const statusPenalty = d.status === 'overrun' ? 2 : d.status === 'contested' ? 0.5 : 0;
-  return d.order / 100 - clamp(d.zombies / (d.population * 0.01 + d.troops.strength * 2 + 20)) - statusPenalty;
+  return d.order / 100 - clamp(totalZombies(d) / (d.population * 0.01 + d.troops.strength * 2 + 20)) - statusPenalty;
 }
 
 function safestNeighbor(s: CityState, d: DistrictState): DistrictState | null {
@@ -532,9 +544,9 @@ function migrate(s: CityState, night: boolean): void {
     // Zombies wander toward people, light and noise. Hordes move on once prey runs out.
     const humans = d.population + d.troops.strength;
     if (d.zombies > 1) {
-      const horde = d.zombies > 300 && humans < d.zombies * 0.05;
-      let rate = horde ? TUNING.hordeWanderRate : TUNING.zombieWanderRate;
-      if (!horde && humans / (d.zombies + 1) > 0.2) rate *= 0.3;
+      // Residents drift; the big movements are hordes (see hordes.ts).
+      let rate = TUNING.zombieWanderRate;
+      if (humans / (d.zombies + 1) > 0.2) rate *= 0.3;
       // A helicopter hovering low keeps the local dead busy.
       rate /= 1 + d.playerNoise;
       const outflow = d.zombies * rate * H;
@@ -553,7 +565,7 @@ function migrate(s: CityState, night: boolean): void {
 
     // Civilians flee from danger or collapse. The bitten hide among them.
     if (d.population > 10) {
-      const threat = clamp(d.zombies / (d.population * 0.01 + d.troops.strength * 2 + 20));
+      const threat = clamp(totalZombies(d) / (d.population * 0.01 + d.troops.strength * 2 + 20));
       let rate = d.status === 'overrun' ? 0.15 : d.order < 10 ? 0.06 : clamp((threat - 0.4) * 0.05, 0, 0.04);
       const to = rate > 0 ? safestNeighbor(s, d) : null;
       if (to && safety(to) > safety(d)) {
@@ -609,14 +621,15 @@ function distributeRations(s: CityState, emit: Emit): void {
 function updateStatus(d: DistrictState, emit: Emit): void {
   const humans = d.population + d.troops.strength;
   const defense = d.troops.strength * 0.8 * TUNING.soldierScreen * (d.features.fortified ? 2 : 1) + d.population * 0.03;
-  const pressure = d.zombies / (defense + 1);
+  const zombies = totalZombies(d);
+  const pressure = zombies / (defense + 1);
   const prev = d.status;
   if (prev === 'held') {
-    if (humans < 50 && d.zombies > 20) d.status = 'overrun';
-    else if (d.zombies > 30 && pressure > 0.2) d.status = 'contested';
+    if (humans < 50 && zombies > 20) d.status = 'overrun';
+    else if (zombies > 30 && pressure > 0.2) d.status = 'contested';
   } else if (prev === 'contested') {
-    if (pressure > 3 || (humans < 100 && d.zombies > 20)) d.status = 'overrun';
-    else if (d.zombies < 15 || pressure < 0.05) d.status = 'held';
+    if (pressure > 3 || (humans < 100 && zombies > 20)) d.status = 'overrun';
+    else if (zombies < 15 || pressure < 0.05) d.status = 'held';
   } else if (humans > 200 && pressure < 1.5) {
     d.status = 'contested';
   }
@@ -632,7 +645,7 @@ function sampleHistory(s: CityState): void {
   for (const d of s.districts) {
     population += d.population;
     infected += d.infected;
-    zombies += d.zombies;
+    zombies += totalZombies(d);
     troops += d.troops.strength;
     dead += d.dead;
   }

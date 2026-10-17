@@ -131,12 +131,37 @@ Each runs one person or crate at a time; lift off to leave.
   and use the menu). Crashes and desertions lose them.
 - **Downed pilots** who survive a crash wait in the district: land there to pick them up.
 
+## Hordes
+
+- **Hordes form on their own.** Once a district runs short of prey (or falls), part of its dead set
+  off as a horde, usually from day 6–8 onward. Hordes walk the street grid at a shamble, toward
+  whatever draws them hardest: people, lit districts at night, gunfire and your rotors. They pick up the
+  dead of districts they pass through, merge when they meet, and settle on a district to attack it. By
+  day 10 or so expect a handful of masses tens of thousands strong. The radio announces big ones, the
+  map shows them (red discs, dashed line to their target), and the district panel shows how much of
+  its count is horde.
+- **Thousands on screen.** Up to 9,000 zombies are drawn at once: residents around you plus the
+  hordes within about 1.2 km, laid out as a column along the streets they walked, or a dense disc
+  when they've settled. Hover low and the whole mass pours toward you through the streets.
+- **How it stays fast:**
+  - **One draw call.** The crowd is a single instanced mesh. Each zombie is four floats of position
+    and pose, and the vertex shader animates the limbs (walk, feed, claw, dead), so the CPU never
+    touches a bone.
+  - **Flat arrays.** Agent data lives in typed arrays, with a counting-sort spatial hash rebuilt each
+    frame and no per-agent objects.
+  - **Shared paths.** One flow field (a breadth-first search over a 4 m walk grid, every 0.5 s) steers
+    the whole crowd around buildings toward the helicopter, and horde members follow slots along a
+    shared path instead of pathfinding.
+  - **Distance tiers.** Zombies within 120 m of the helicopter update every frame, those within 350 m
+    every 2nd frame and the rest every 4th. Crowd separation runs at half rate.
+  - Measured: about 4–5 ms of CPU per frame for 9,000 zombies, on a slow cloud CPU.
+
 ## Project layout
 
 ```
 src/sim/      City simulation (no browser dependencies), clock, layout, worker bridge
 src/game/     Ground operations menu (loading, deploying, evacuating, fuel, salvage, rescues)
-src/world/    City generation and collision, street grid, people on the streets, effects,
+src/world/    City generation and collision, walk grid, the zombie crowd, people on the streets, effects,
               refuelling points, sky
 src/heli/     Helicopter flight model and chase camera
 src/input/    Keyboard, mouse and gamepad input

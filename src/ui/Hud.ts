@@ -3,6 +3,7 @@
 import { formatClock, isDaytime } from '../sim/clock';
 import type { OperationsView } from '../game/Operations';
 import type { PadReading } from '../input/Input';
+import { totalZombies } from '../sim/hordes';
 import { CRATES, SEATS } from '../sim/operations';
 import type { Cargo, DistrictState, PlayerStats, SimEvent } from '../sim/types';
 
@@ -184,7 +185,9 @@ export class Hud {
     const scale = timeScale > 1 ? ` <small>Time ×${timeScale}</small>` : '';
     this.clock.innerHTML = `${isDaytime(t) ? '☀' : '☾'} ${formatClock(t)}${scale}`;
 
-    const zombies = district ? approx(district.zombies) : '';
+    const zombies = district
+      ? approx(totalZombies(district)) + (district.hordeZombies >= 1 ? ` (horde ${approx(district.hordeZombies)})` : '')
+      : '';
     const troops = district ? Math.round(district.troops.strength) : 0;
     const key = district
       ? `${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}`

@@ -17,7 +17,7 @@ import {
   type DistrictKind,
 } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
-import { BLOCKS_PER_DISTRICT, NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, SIDEWALK, STREET_SPACING } from './streets';
+import { BLOCKS_PER_DISTRICT, NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, SIDEWALK, STREET_SPACING } from '../sim/streets';
 
 interface Box {
   x: number;
@@ -75,6 +75,25 @@ interface Collider {
   floor: boolean;
 }
 
+/** Where people and zombies can walk: a 4 m raster of the city, 0 inside buildings. */
+export interface WalkGrid {
+  cell: number;
+  x0: number;
+  z0: number;
+  cols: number;
+  rows: number;
+  data: Uint8Array;
+}
+
+/** True if (x, z) is open ground (streets, sidewalks, lawns, outside the city). */
+export function walkable(grid: WalkGrid | null, x: number, z: number): boolean {
+  if (!grid) return true;
+  const c = Math.floor((x - grid.x0) / grid.cell);
+  const r = Math.floor((z - grid.z0) / grid.cell);
+  if (c < 0 || r < 0 || c >= grid.cols || r >= grid.rows) return true;
+  return grid.data[r * grid.cols + c] === 1;
+}
+
 export interface Helipad {
   x: number;
   z: number;
@@ -110,6 +129,7 @@ export class City {
   readonly helipads: Helipad[] = [];
   /** Fuel tank farms, where depot fires burn. */
   readonly fuelSites: { district: number; x: number; z: number }[] = [];
+  readonly walk: WalkGrid;
   private boxes: Box[] = [];
   private cylinders: Cylinder[] = [];
   private roofs: Roof[] = [];
@@ -137,6 +157,7 @@ export class City {
     this.buildInstances();
     this.buildRoadMarkings();
     this.buildColliders();
+    this.walk = this.buildWalkGrid();
   }
 
   /** 0 = day, 1 = full night. */
@@ -897,6 +918,30 @@ export class City {
     // Roofs count to their ridge so a helicopter rests on top, not inside.
     for (const r of this.roofs) add(r.x - r.w / 2, r.x + r.w / 2, r.z - r.d / 2, r.z + r.d / 2, r.y + r.h);
     for (const c of this.cylinders) add(c.x - c.r, c.x + c.r, c.z - c.r, c.z + c.r, (c.y ?? 0) + c.h);
+  }
+
+  /** Rasterise every solid footprint taller than a kerb into the walk grid. */
+  private buildWalkGrid(): WalkGrid {
+    const cell = 4;
+    const margin = 200;
+    const x0 = -CITY_WIDTH / 2 - margin;
+    const z0 = -CITY_DEPTH / 2 - margin;
+    const cols = Math.ceil((CITY_WIDTH + margin * 2) / cell);
+    const rows = Math.ceil((CITY_DEPTH + margin * 2) / cell);
+    const data = new Uint8Array(cols * rows).fill(1);
+    for (const c of this.colliders) {
+      if (c.floor || c.top < 1.5) continue;
+      // Inset slightly so a footprint only blocks the cells it really covers.
+      const ca = Math.max(0, Math.floor((c.minX + 0.5 - x0) / cell));
+      const cb = Math.min(cols - 1, Math.floor((c.maxX - 0.5 - x0) / cell));
+      const ra = Math.max(0, Math.floor((c.minZ + 0.5 - z0) / cell));
+      const rb = Math.min(rows - 1, Math.floor((c.maxZ - 0.5 - z0) / cell));
+      for (let r = ra; r <= rb; r++) data.fill(0, r * cols + ca, r * cols + cb + 1);
+    }
+    // The sea north of the city isn't walkable either.
+    const shore = Math.floor((-CITY_DEPTH / 2 - 60 - z0) / cell);
+    for (let r = 0; r < shore; r++) data.fill(0, r * cols, (r + 1) * cols);
+    return { cell, x0, z0, cols, rows, data };
   }
 
   private key(gx: number, gz: number): number {

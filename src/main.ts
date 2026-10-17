@@ -48,7 +48,7 @@ const city = new City(seed);
 scene.add(city.group);
 const effects = new Effects(seed, city.fuelSites);
 scene.add(effects.group);
-const agents = new Agents(seed, effects);
+const agents = new Agents(seed, effects, city.walk);
 scene.add(agents.group);
 const farps = new Farps();
 scene.add(farps.group);
@@ -226,7 +226,7 @@ function update(dt: number): void {
   const surface = city.surfaceHeight(heli.position.x, heli.position.z);
   const altitude = heli.position.y - SKID_DEPTH - surface;
   const clearance = heli.position.y - SKID_DEPTH;
-  agents.update(dt, heli.position, altitude, heli.destroyed ? 0 : heli.rotor, state, night, clearance);
+  agents.update(dt, heli.position, altitude, heli.destroyed ? 0 : heli.rotor, state, night, clearance, sim.time);
   if (!heli.destroyed) agents.doorGunners(dt, heli.position, state?.cargo.troops ?? 0);
   effects.update(dt, night);
   farps.update(dt);

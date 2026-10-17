@@ -3,6 +3,7 @@
 
 import { formatClock, MINUTES_PER_DAY, NIGHT_START, DAY_START } from '../sim/clock';
 import { CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE, DISTRICT_TEMPLATES, GRID_COLS, GRID_ROWS } from '../sim/layout';
+import { totalZombies } from '../sim/hordes';
 import type { CityState, DistrictState } from '../sim/types';
 
 const OVERLAYS = ['Status', 'Infection', 'Power', 'Order', 'Supplies', 'Troops', 'Fuel'] as const;
@@ -113,7 +114,7 @@ export class DebugMap {
     for (const d of s.districts) {
       pop += d.population;
       inf += d.infected;
-      z += d.zombies;
+      z += totalZombies(d);
       troops += d.troops.strength;
       dead += d.dead;
     }
@@ -134,7 +135,7 @@ export class DebugMap {
       case 'Status':
         return STATUS_COLOR[d.status];
       case 'Infection':
-        return ramp(1 - Math.min(1, (d.zombies + d.infected) / Math.max(1, d.population * 0.05 + d.zombies)));
+        return ramp(1 - Math.min(1, (totalZombies(d) + d.infected) / Math.max(1, d.population * 0.05 + totalZombies(d))));
       case 'Power':
         return POWER_COLOR[d.power];
       case 'Order':
@@ -155,7 +156,7 @@ export class DebugMap {
       case 'Status':
         return `${d.status}${d.rioting ? ' · riot' : ''}`;
       case 'Infection':
-        return `Z ${fmt(d.zombies)} · inf ${fmt(d.infected)}`;
+        return `Z ${fmt(totalZombies(d))} · inf ${fmt(d.infected)}`;
       case 'Power':
         return d.power === 'backup' ? `generators · ${fmt(d.fuel)} L` : d.power;
       case 'Order':
@@ -205,6 +206,34 @@ export class DebugMap {
       g.fillRect(fx - 6, fy - 6, 12, 12);
       g.strokeRect(fx - 6, fy - 6, 12, 12);
       this.text(`FARP ${fmt(f.fuel)} L`, fx + 9, fy + 4, 11, '#f3d2a8');
+    }
+
+    // Hordes: a disc sized by the crowd, with a line toward where they're heading.
+    for (const h of s.hordes) {
+      const hx = mx + (h.x + CITY_WIDTH / 2) * scale;
+      const hy = my + (h.z + CITY_DEPTH / 2) * scale;
+      const r = Math.max(4, Math.min(cell * 0.3, Math.sqrt(h.size) * 0.18));
+      if (h.settle <= 0) {
+        const t = s.districts[h.target];
+        const tx = mx + (t.col + 0.5) * cell;
+        const ty = my + (t.row + 0.5) * cell;
+        g.strokeStyle = 'rgba(160,20,20,0.7)';
+        g.lineWidth = 2;
+        g.setLineDash([5, 4]);
+        g.beginPath();
+        g.moveTo(hx, hy);
+        g.lineTo(tx, ty);
+        g.stroke();
+        g.setLineDash([]);
+      }
+      g.fillStyle = 'rgba(120,10,10,0.75)';
+      g.strokeStyle = '#000';
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.arc(hx, hy, r, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      this.text(`horde ${fmt(h.size)}`, hx + r + 4, hy + 4, 11, '#ffb3ab');
     }
 
     // AI helicopters.
@@ -259,7 +288,7 @@ export class DebugMap {
       ['Power', d.power === 'backup' ? `generators (${fmt(d.fuel)} L fuel)` : d.power],
       ['Civilians', fmt(d.population)],
       ['Infected', fmt(d.infected)],
-      ['Zombies', fmt(d.zombies)],
+      ['Zombies', d.hordeZombies >= 1 ? `${fmt(totalZombies(d))} (horde ${fmt(d.hordeZombies)})` : fmt(d.zombies)],
       ['Dead', fmt(d.dead)],
       ['Troops', `${fmt(d.troops.strength)}  ammo ${fmt(d.troops.ammo)}`],
       ['Fatigue / morale', `${(d.troops.fatigue * 100).toFixed(0)}% / ${(d.troops.morale * 100).toFixed(0)}%`],

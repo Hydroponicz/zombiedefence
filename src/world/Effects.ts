@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { DISTRICT_TEMPLATES } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
 import type { CityState } from '../sim/types';
-import { BLOCKS_PER_DISTRICT, nodeX, nodeZ, NODES_X, NODES_Z } from './streets';
+import { BLOCKS_PER_DISTRICT, nodeX, nodeZ, NODES_X, NODES_Z } from '../sim/streets';
 
 const WIND = new THREE.Vector3(0.7, 0, 0.35).normalize();
 

@@ -91,6 +91,14 @@ troops pulled off the barricade → breach.
 
 **The light dilemma:** lit districts are calmer but draw hordes at night.
 
+**Hordes** (`src/sim/hordes.ts`): a district whose zombies outnumber its prey (or that has fallen)
+sheds 30% of them as a horde. Hordes move along the street lattice at about 2.5 m/s (twice that
+when hunting noise). They pick the district with the strongest draw: √(people) × light at night ×
+noise, divided by distance, and switch only for a 30% stronger draw. Each hour they absorb 15% of
+the resident dead where they stand, merge within 220 m, settle for three hours on arrival, and
+scatter back into the district below 40. Horde zombies count toward a district's combat and
+status (`totalZombies`). Without a player they snowball into a few masses of 50–100k by day 14.
+
 ### Expected arc (emergent, varies per seed)
 
 - **Days 1–2 (confusion):** scattered outbreaks, grid up, traffic jams block road evacuation.
@@ -214,7 +222,15 @@ throttle, light assists. Deadzones and sensitivity are configurable. Uses the Ga
 
 - **Vite + TypeScript + Three.js**, low-poly stylised art.
 - City generated from a block grid with district boundaries.
-- Zombies and crowds drawn as one batched mesh (`InstancedMesh`) with simple flocking movement.
+- **Zombie crowd** (`src/world/Crowd.ts`): up to 9,000 agents in typed arrays, drawn in one
+  instanced draw call. Poses are animated in the vertex shader. Spatial hashes use counting sort.
+  A BFS flow field on a 4 m walk grid drives attraction. Horde members take slots along a shared
+  path. Updates are tiered by distance (every frame within 120 m, every 2nd frame within 350 m,
+  every 4th frame beyond). Civilians and soldiers stay as plain objects (`Agents.ts`).
+- **Next steps for bigger hordes:**
+  - Move the crowd update to a worker over a SharedArrayBuffer (needs COOP/COEP headers).
+  - Use a cheaper far LOD: impostor quads beyond about 300 m.
+  - Pile zombies up into climbing pyramids against buildings with the helicopter on the roof.
 - Custom arcade heli physics. Add Rapier only if collisions need it.
 - City sim in a Web Worker, deterministic and seeded, with a headless runner for balancing.
 

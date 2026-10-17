@@ -57,11 +57,34 @@ export interface DistrictState {
   scientists: number;
   /** Abandoned helicopters here that the player can salvage. */
   salvage: number;
+  /** Zombies in hordes currently inside the district (recounted every tick). */
+  hordeZombies: number;
 
   /** One-shot event flags. */
   flags: Record<string, boolean>;
   /** Game minute something last happened, for rate-limiting. */
   cooldowns: Record<string, number>;
+}
+
+/** A roaming mass of the dead. Positions are world metres; it walks the street grid. */
+export interface Horde {
+  id: number;
+  x: number;
+  z: number;
+  size: number;
+  /** Direction of travel, radians (0 faces -Z, like the helicopter). */
+  heading: number;
+  /** District it is making for. */
+  target: number;
+  /** Next street corner. */
+  ni: number;
+  nj: number;
+  /** Game minutes left attacking where it has arrived. */
+  settle: number;
+  /** Drawn by noise: moves twice as fast. */
+  hunting: boolean;
+  /** Game minute it was last announced on the radio. */
+  announcedAt: number;
 }
 
 export type CrateKind = 'rations' | 'ammo' | 'medicine';
@@ -217,6 +240,8 @@ export interface CityState {
   farpSeq: number;
   pilots: Pilot[];
   airframes: Airframe[];
+  hordes: Horde[];
+  hordeSeq: number;
   pilotSeq: number;
   airframeSeq: number;
   /** Research points earned by scientists at the base. */

@@ -2,7 +2,7 @@
 // a lattice. Every third line (including every district boundary) is a wider avenue. People and
 // zombies walk this lattice, which keeps them on the streets.
 
-import { CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE } from '../sim/layout';
+import { CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE } from './layout';
 
 export const BLOCKS_PER_DISTRICT = 12;
 export const STREET_SPACING = DISTRICT_SIZE / BLOCKS_PER_DISTRICT;
