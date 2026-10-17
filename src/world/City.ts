@@ -31,8 +31,8 @@ interface Box {
   /** Rotation about the vertical axis. Only used for decoration (colliders ignore it). */
   yaw?: number;
   color: number;
-  /** Lit windows at night. */
-  windows?: boolean;
+  /** Windows: true for punched windows, or a WINDOW style; none if omitted. */
+  windows?: boolean | number;
   district: number;
   /** Solid for collision (flat pads and lawns are not). */
   solid?: boolean;
@@ -117,6 +117,9 @@ interface Lot {
   ox: number;
   oz: number;
 }
+
+/** Facade styles the window shader draws. */
+const WINDOW = { punched: 1, glass: 2, residential: 3, stone: 4 } as const;
 
 const COLLISION_CELL = 40;
 const LAMP_SPACING = 32;
@@ -280,7 +283,7 @@ export class City {
     this.boxes.push({ x: lot.cx, z: lot.cz, w: lot.w - inset * 2, d: lot.d - inset * 2, h, color, district });
   }
 
-  private building(district: number, x: number, z: number, w: number, d: number, h: number, color: number, windows = true, y = 0): void {
+  private building(district: number, x: number, z: number, w: number, d: number, h: number, color: number, windows: boolean | number = true, y = 0): void {
     this.boxes.push({ x, z, w, d, h, y, color, windows, district, solid: true });
   }
 
@@ -453,6 +456,193 @@ export class City {
     }
   }
 
+  /**
+   * Downtown, block by block. A lumpy height field (the main financial core, a second business
+   * cluster, and block-to-block noise) picks what goes up: glass office towers with crowns and
+   * spires, stone corporate headquarters, slender apartment towers, mid-rise apartment blocks over
+   * shops, retail streets, department stores, parking garages and plazas.
+   */
+  private buildDowntownBlock(district: number, lot: Lot, inner: { x0: number; z0: number; x1: number; z1: number }, rand: () => number): void {
+    const pick = <T>(list: T[]): T => list[Math.floor(rand() * list.length)];
+    const iw = inner.x1 - inner.x0;
+    const id = inner.z1 - inner.z0;
+    const core = Math.exp(-((lot.ox * lot.ox + lot.oz * lot.oz) / (430 * 430)));
+    const second = 0.75 * Math.exp(-(((lot.ox - 420) ** 2 + (lot.oz + 300) ** 2) / (240 * 240)));
+    const noise = Math.sin(lot.ox * 0.013 + 1.7) * Math.cos(lot.oz * 0.011 - 0.6) * 0.18 + (rand() - 0.5) * 0.2;
+    const intensity = Math.max(0, Math.min(1, Math.max(core, second) + noise));
+
+    const GLASS = [0x3f5f78, 0x2f4a5c, 0x5b7488, 0x6d7f8c, 0x3c6a6e, 0x8a99a6, 0x2b3440, 0x6b5a45, 0x4a6b8a];
+    const STONE = [0xb9b2a3, 0x8e8a83, 0xa58f74, 0x6f6a66, 0xc9c1b0, 0x7d7368];
+    const HOMES = [0xd8cfc0, 0xc4b19a, 0xa88f7d, 0xe2e0d8, 0x9fa6a8, 0xb7a48c, 0x8f6f5c];
+    const SHOPS = [0xb0a58f, 0x9e9a90, 0xc2b8a3, 0x8d8679, 0xa59a86, 0xd0c4ae];
+    const AWNINGS = [0xa83a32, 0x2f5f9a, 0x3d6b45, 0xc98f2b, 0x2c2c2c, 0x7a4f8c];
+
+    /** Plant, ventilation and a water tank on a roof. */
+    const rooftop = (x: number, z: number, w: number, d: number, top: number, tank: boolean) => {
+      this.building(district, x + (rand() - 0.5) * w * 0.3, z + (rand() - 0.5) * d * 0.3, w * 0.35, d * 0.3, 3 + rand() * 3, 0x8c8c88, false, top);
+      if (tank) this.cylinders.push({ x: x + w * 0.25, z: z - d * 0.25, r: 2.2, h: 4, y: top + 2, color: 0x6b5644 });
+    };
+
+    /** A glass office tower on a podium, with one of several tops. */
+    const officeTower = (x: number, z: number, w: number, d: number, h: number) => {
+      const podium = 8 + rand() * 10;
+      this.building(district, x, z, w * 0.98, d * 0.98, podium, pick(STONE), WINDOW.stone);
+      const color = pick(GLASS);
+      const tw = Math.min(w * (0.6 + rand() * 0.3), 60);
+      const td = Math.min(d * (0.6 + rand() * 0.3), 60);
+      const top = podium + h;
+      switch (Math.floor(rand() * 4)) {
+        case 0: {
+          // Wedding cake: three setbacks.
+          this.building(district, x, z, tw, td, h * 0.55, color, WINDOW.glass, podium);
+          this.building(district, x, z, tw * 0.8, td * 0.8, h * 0.28, color, WINDOW.glass, podium + h * 0.55);
+          this.building(district, x, z, tw * 0.58, td * 0.58, h * 0.17, color, WINDOW.glass, podium + h * 0.83);
+          break;
+        }
+        case 1: {
+          // Slim shaft with a spire.
+          this.building(district, x, z, tw, td, h, color, WINDOW.glass, podium);
+          this.building(district, x, z, tw * 0.5, td * 0.5, 8, 0xb8bcc0, false, top);
+          this.cylinders.push({ x, z, r: 0.9, h: 25 + h * 0.2, y: top + 8, color: 0xc4c8cc });
+          break;
+        }
+        case 2: {
+          // Offset twin slabs, like a split tower.
+          const off = tw * 0.22;
+          this.building(district, x - off, z, tw * 0.56, td, h, color, WINDOW.glass, podium);
+          this.building(district, x + off, z, tw * 0.56, td * 0.8, h * (0.7 + rand() * 0.2), pick(GLASS), WINDOW.glass, podium);
+          break;
+        }
+        default: {
+          // Box tower with a lit crown band and roof plant.
+          this.building(district, x, z, tw, td, h, color, WINDOW.glass, podium);
+          this.building(district, x, z, tw * 1.02, td * 1.02, 4, 0xd6d9dc, false, top - 6);
+          rooftop(x, z, tw, td, top, false);
+        }
+      }
+    };
+
+    /** A stone headquarters or law firm: a solid slab with a setback top. */
+    const stoneOffice = (x: number, z: number, w: number, d: number, h: number) => {
+      const color = pick(STONE);
+      this.building(district, x, z, w * 0.95, d * 0.95, h * 0.75, color, WINDOW.stone);
+      this.building(district, x, z, w * 0.75, d * 0.75, h * 0.25, color, WINDOW.stone, h * 0.75);
+      rooftop(x, z, w * 0.7, d * 0.7, h, false);
+    };
+
+    /** A slender apartment tower (sometimes a pair) over a podium of shops. */
+    const apartmentTower = (x: number, z: number, w: number, d: number, h: number) => {
+      const podium = 6 + rand() * 6;
+      shopsAt(x, z, w, d, podium);
+      const color = pick(HOMES);
+      const size = Math.min(w, d);
+      if (rand() < 0.35 && Math.max(w, d) > 60) {
+        const along = w > d;
+        const off = (along ? w : d) * 0.24;
+        for (const sgn of [-1, 1]) {
+          const tx = x + (along ? sgn * off : 0);
+          const tz = z + (along ? 0 : sgn * off);
+          const th = h * (0.8 + rand() * 0.3);
+          this.building(district, tx, tz, size * 0.42, size * 0.42, th, color, WINDOW.residential, podium);
+          rooftop(tx, tz, size * 0.42, size * 0.42, podium + th, true);
+        }
+      } else {
+        const tw = Math.min(size * 0.55, 32);
+        this.building(district, x, z, tw, tw * (0.8 + rand() * 0.4), h, color, WINDOW.residential, podium);
+        rooftop(x, z, tw, tw, podium + h, true);
+      }
+    };
+
+    /** A mid-rise apartment block around a courtyard, shops on the street. */
+    const apartmentBlock = (x: number, z: number, w: number, d: number) => {
+      const h = 18 + rand() * 30;
+      const color = pick(HOMES);
+      const depth = 14;
+      shopsAt(x, z - d / 2 + depth / 2, w, depth, 5);
+      this.building(district, x, z - d / 2 + depth / 2, w, depth, h, color, WINDOW.residential, 5);
+      this.building(district, x, z + d / 2 - depth / 2, w, depth, h * (0.8 + rand() * 0.3), color, WINDOW.residential);
+      this.building(district, x - w / 2 + depth / 2, z, depth, d - depth * 2, h * 0.9, color, WINDOW.residential);
+    };
+
+    /** A row of shops: storefronts with awnings and signs. */
+    const shopsAt = (x: number, z: number, w: number, d: number, h: number) => {
+      this.building(district, x, z, w, d, h, pick(SHOPS), WINDOW.punched);
+      // Awnings along the long sides.
+      const n = Math.max(1, Math.floor(w / 12));
+      for (let k = 0; k < n; k++) {
+        const ax = x - w / 2 + (k + 0.5) * (w / n);
+        this.boxes.push({ x: ax, z: z + d / 2 + 0.8, w: (w / n) * 0.8, d: 1.6, h: 0.4, y: 3.2, color: pick(AWNINGS), district });
+      }
+    };
+
+    const retail = (x: number, z: number, w: number, d: number) => {
+      if (rand() < 0.3) {
+        // A department store: a big box with a sign.
+        const h = 14 + rand() * 12;
+        this.building(district, x, z, w * 0.95, d * 0.95, h, pick(SHOPS), false);
+        this.boxes.push({ x, z: z + d * 0.475 + 0.4, w: w * 0.4, d: 0.6, h: 3, y: h - 5, color: pick(AWNINGS), district });
+        return;
+      }
+      const shops = 2 + Math.floor(rand() * 3);
+      for (let k = 0; k < shops; k++) {
+        const sw = w / shops;
+        shopsAt(x - w / 2 + (k + 0.5) * sw, z, sw * 0.95, d * 0.9, 8 + rand() * 14);
+      }
+    };
+
+    const garage = (x: number, z: number, w: number, d: number) => {
+      const levels = 4 + Math.floor(rand() * 4);
+      const h = levels * 3.2;
+      this.building(district, x, z, w * 0.9, d * 0.9, h, 0x8f8f8a, false);
+      // Dark open floors between the slabs.
+      for (let k = 0; k < levels; k++) {
+        this.boxes.push({ x, z, w: w * 0.91, d: d * 0.91, h: 1.4, y: k * 3.2 + 1.2, color: 0x2e2f31, district });
+      }
+    };
+
+    const plaza = () => {
+      this.pad(lot, 0xb9b6ac, district, 0.24, SIDEWALK);
+      for (let k = 0; k < 10; k++) {
+        this.trees.push({ x: lot.cx + (rand() - 0.5) * (iw - 12), z: lot.cz + (rand() - 0.5) * (id - 12), s: 0.9 + rand() * 0.5 });
+      }
+      this.building(district, lot.cx, lot.cz, 14, 14, 5, 0x7f8a92, WINDOW.glass);
+    };
+
+    /** Split the block into n x m parcels. */
+    const parcels = (n: number, m: number, gap: number, fn: (x: number, z: number, w: number, d: number) => void) => {
+      const w = (iw - gap * (n - 1)) / n;
+      const d = (id - gap * (m - 1)) / m;
+      for (let a = 0; a < n; a++) {
+        for (let b = 0; b < m; b++) fn(inner.x0 + a * (w + gap) + w / 2, inner.z0 + b * (d + gap) + d / 2, w, d);
+      }
+    };
+
+    const r = rand();
+    if (intensity > 0.62) {
+      // The financial core: office towers, the odd stone HQ and luxury apartments.
+      const tall = () => 140 + intensity * 230 * (0.55 + rand() * 0.45);
+      if (r < 0.45) officeTower(lot.cx, lot.cz, iw, id, tall());
+      else if (r < 0.65) parcels(2, 1, 6, (x, z, w, d) => (rand() < 0.6 ? officeTower(x, z, w, d, tall() * 0.6) : stoneOffice(x, z, w, d, 60 + rand() * 80)));
+      else if (r < 0.82) stoneOffice(lot.cx, lot.cz, iw, id, 80 + rand() * 90);
+      else apartmentTower(lot.cx, lot.cz, iw, id, 120 + rand() * 120);
+    } else if (intensity > 0.3) {
+      // The mixed middle: offices and apartment towers, shops, garages and the odd plaza.
+      if (r < 0.28) parcels(2, 1, 6, (x, z, w, d) => officeTower(x, z, w, d, 60 + intensity * 160 * rand()));
+      else if (r < 0.55) apartmentTower(lot.cx, lot.cz, iw, id, 70 + rand() * 110);
+      else if (r < 0.7) parcels(2, 2, 6, (x, z, w, d) => stoneOffice(x, z, w, d, 30 + rand() * 50));
+      else if (r < 0.82) parcels(1, 2, 6, retail);
+      else if (r < 0.92) garage(lot.cx, lot.cz, iw, id);
+      else plaza();
+    } else {
+      // The edges: apartment blocks over shops, retail streets, garages, small offices.
+      if (r < 0.4) apartmentBlock(lot.cx, lot.cz, iw, id);
+      else if (r < 0.55) apartmentTower(lot.cx, lot.cz, iw, id, 45 + rand() * 60);
+      else if (r < 0.8) parcels(1, 2, 6, retail);
+      else if (r < 0.9) parcels(2, 2, 6, (x, z, w, d) => stoneOffice(x, z, w, d, 20 + rand() * 30));
+      else garage(lot.cx, lot.cz, iw, id);
+    }
+  }
+
   private fillBlock(district: number, kind: DistrictKind, lot: Lot, rand: () => number): void {
     const pick = (colors: number[]) => colors[Math.floor(rand() * colors.length)];
     const inner = { x0: lot.x0 + SIDEWALK, z0: lot.z0 + SIDEWALK, x1: lot.x1 - SIDEWALK, z1: lot.z1 - SIDEWALK };
@@ -468,31 +658,9 @@ export class City {
     };
 
     switch (kind) {
-      case 'downtown': {
-        // Taller toward the centre: a few supertalls, a forest of towers, midrise at the edges.
-        const f = Math.min(1, Math.hypot(lot.ox, lot.oz) / (DISTRICT_SIZE * 0.55));
-        const towerness = Math.pow(1 - f, 1.6);
-        const glass = [0x4f6476, 0x5d6c7a, 0x6b7884, 0x3f5566, 0x7f8a92, 0x55707f, 0x8c96a0];
-        const tower = (x: number, z: number, w: number, d: number) => {
-          const podium = 10 + rand() * 14;
-          this.building(district, x, z, w * 0.96, d * 0.96, podium, pick([0x8a8478, 0x6f6c66, 0x7a7f84]));
-          const h = 50 + towerness * (0.45 + rand() * 0.55) * 360 + rand() * 30;
-          const tw = w * (0.55 + rand() * 0.25);
-          const td = d * (0.55 + rand() * 0.25);
-          const color = pick(glass);
-          if (h > 160 && rand() < 0.5) {
-            // Setback: the top third steps in.
-            this.building(district, x, z, tw, td, h * 0.68, color, true, podium);
-            this.building(district, x, z, tw * 0.72, td * 0.72, h * 0.32, color, true, podium + h * 0.68);
-          } else {
-            this.building(district, x, z, tw, td, h, color, true, podium);
-          }
-          if (h > 240) this.cylinders.push({ x, z, r: 0.8, h: 25 + rand() * 40, y: podium + h, color: 0xb0b4b8 });
-        };
-        if (towerness > 0.45 && rand() < 0.45) tower(lot.cx, lot.cz, iw, id);
-        else parcels(2, 2, 6, tower);
+      case 'downtown':
+        this.buildDowntownBlock(district, lot, inner, rand);
         break;
-      }
       case 'commercial': {
         if (rand() < 0.12) {
           // Big-box store with a car park.
@@ -812,7 +980,7 @@ export class City {
       m.compose(v.set(b.x, b.y ?? 0, b.z), q.setFromAxisAngle(up, b.yaw ?? 0), s.set(b.w, b.h, b.d));
       mesh.setMatrixAt(i, m);
       mesh.setColorAt(i, color.setHex(b.color));
-      lit[i] = b.windows ? 1 : 0;
+      lit[i] = b.windows === true ? WINDOW.punched : typeof b.windows === 'number' ? b.windows : 0;
       districtIds[i] = b.district;
     });
     geometry.setAttribute('aLit', new THREE.InstancedBufferAttribute(lit, 1));
@@ -976,7 +1144,7 @@ export class City {
           vWinPos = (modelMatrix * winPos).xyz;
           vWinNormal = normalize(mat3(modelMatrix) * winNormal);
           vWinLit = aLit;
-          vWinLight = aLit * uDistrictLight[int(aDistrict + 0.5)];`,
+          vWinLight = step(0.5, aLit) * uDistrictLight[int(aDistrict + 0.5)];`,
         );
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -993,24 +1161,47 @@ export class City {
           '#include <emissivemap_fragment>',
           `#include <emissivemap_fragment>
           // Windows are always drawn; only their night glow depends on the district's power.
-          // Real storeys are about 3.5 m; windows about 1.5 m wide on a 3 m rhythm.
+          // Styles: 1 punched windows, 2 glass curtain wall, 3 apartments with balconies, 4 stone offices.
           if (vWinLit > 0.5 && abs(vWinNormal.y) < 0.5 && vWinPos.y > 1.2) {
+            float style = floor(vWinLit + 0.5);
+            // Bay width, storey height, pane extents (x0, x1, y0, y1), how dark panes are by day,
+            // how many are lit at night, and how warm the light is.
+            vec2 bay = vec2(3.0, 3.5);
+            vec4 pane4 = vec4(0.22, 0.78, 0.28, 0.78);
+            float dark = 0.35;
+            float rate = 0.55;
+            float warmth = 0.8;
+            if (style > 1.5 && style < 2.5) { bay = vec2(1.5, 4.0); pane4 = vec4(0.04, 0.96, 0.1, 0.94); dark = 0.5; rate = 0.42; warmth = 0.15; }
+            else if (style > 2.5 && style < 3.5) { bay = vec2(2.6, 3.0); pane4 = vec4(0.25, 0.75, 0.3, 0.78); dark = 0.4; rate = 0.65; warmth = 0.95; }
+            else if (style > 3.5) { bay = vec2(1.8, 3.8); pane4 = vec4(0.3, 0.7, 0.18, 0.85); dark = 0.45; rate = 0.45; warmth = 0.5; }
             float along = abs(vWinNormal.x) > 0.5 ? vWinPos.z : vWinPos.x;
-            vec2 uv = vec2(along / 3.0, vWinPos.y / 3.5);
+            vec2 uv = vec2(along / bay.x, vWinPos.y / bay.y);
             vec2 cell = floor(uv);
             vec2 f = fract(uv);
             // Soft pane edges a pixel wide, fading to the average once a window is only a few
             // pixels across, so distant facades don't shimmer as the camera moves.
             vec2 px = max(fwidth(uv), vec2(1e-4));
             float far = smoothstep(0.15, 0.4, max(px.x, px.y));
-            float pane = (smoothstep(0.22 - px.x, 0.22 + px.x, f.x) - smoothstep(0.78 - px.x, 0.78 + px.x, f.x)) *
-              (smoothstep(0.28 - px.y, 0.28 + px.y, f.y) - smoothstep(0.78 - px.y, 0.78 + px.y, f.y));
-            pane = mix(pane, 0.56 * 0.5, far);
-            float h = winHash(cell + floor(vWinPos.xz / 97.0));
-            float on = mix(step(1.0 - 0.55 * vWinLight, h), 0.55 * vWinLight, far);
-            vec3 warm = mix(vec3(1.0, 0.78, 0.45), vec3(0.75, 0.85, 1.0), step(0.8, h));
-            totalEmissiveRadiance += warm * pane * on * uNight * 1.1;
-            diffuseColor.rgb *= 1.0 - pane * 0.35;
+            float pane = (smoothstep(pane4.x - px.x, pane4.x + px.x, f.x) - smoothstep(pane4.y - px.x, pane4.y + px.x, f.x)) *
+              (smoothstep(pane4.z - px.y, pane4.z + px.y, f.y) - smoothstep(pane4.w - px.y, pane4.w + px.y, f.y));
+            pane = mix(pane, (pane4.y - pane4.x) * (pane4.w - pane4.z), far);
+            // Offices light whole stretches of a floor; homes window by window.
+            vec2 lightCell = style > 1.5 && style < 2.5 ? vec2(floor(along / 12.0), cell.y) : cell;
+            float h = winHash(lightCell + floor(vWinPos.xz / 97.0));
+            float on = mix(step(1.0 - rate * vWinLight, h), rate * vWinLight, far);
+            vec3 cool = mix(vec3(0.85, 0.92, 1.0), vec3(0.75, 0.85, 1.0), step(0.85, h));
+            vec3 glow = mix(cool, vec3(1.0, 0.78, 0.45), warmth);
+            // In the distance, the averaged glow is dimmed so a lit tower doesn't read as a lamp.
+            totalEmissiveRadiance += glow * pane * on * uNight * 1.1 * mix(1.0, 0.45, far);
+            diffuseColor.rgb *= 1.0 - pane * dark;
+            if (style > 1.5 && style < 2.5) {
+              // Glass reflects the sky by day.
+              diffuseColor.rgb += vec3(0.05, 0.08, 0.12) * pane * (1.0 - uNight);
+            } else if (style > 2.5 && style < 3.5) {
+              // Balcony slab edges along every floor.
+              float slab = 1.0 - smoothstep(0.08, 0.08 + px.y, f.y);
+              diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.3 + 0.05, slab * (1.0 - far));
+            }
           }`,
         );
     };

@@ -131,6 +131,23 @@ Each runs one person or crate at a time; lift off to leave.
   and use the menu). Crashes and desertions lose them.
 - **Downed pilots** who survive a crash wait in the district: land there to pick them up.
 
+## Downtown
+
+Downtown is built block by block from a lumpy height field: the main financial core, a second
+business cluster to the north-east, and block-to-block variation. That height field decides what goes
+up:
+- **Financial core:** glass office towers in several shapes: wedding-cake setbacks, slim shafts with
+  spires, split twin slabs, and box towers with lit crown bands. Stone corporate headquarters and
+  luxury apartment towers stand among them.
+- **Mixed middle:** mid-height offices, slender apartment towers (some in pairs) over shop podiums,
+  stone firms, retail, parking garages and plazas.
+- **Edges:** mid-rise apartment blocks over shops around courtyards, retail streets with awnings,
+  department stores, small offices and garages.
+
+Facades come in four styles: punched windows, glass curtain walls that reflect the sky (whole office
+floors light up at night), apartments with balcony slabs and warm light, and stone offices with tall
+narrow windows.
+
 ## Telling the living, the bitten and the dead apart
 
 - **Zombies** have grey dead skin, blood down the shirt and round the mouth, ragged dark clothes, a

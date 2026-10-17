@@ -72,7 +72,8 @@ export class Environment {
     (this.scene.fog as THREE.Fog).color.copy(this.sky);
     (this.scene.fog as THREE.Fog).far = 9000 - night * 4500;
 
-    this.sun.intensity = sun ? 0.4 + 1.8 * light : 0.4;
+    // Moonlight stays faint: beyond the shadow map's reach it would light every facade evenly.
+    this.sun.intensity = sun ? 0.4 + 1.8 * light : 0.12;
     this.sun.color.setHex(sun ? 0xfff2dd : 0x8fa6d6).lerp(new THREE.Color(0xffb27a), duskness * 0.7);
     this.hemi.intensity = 0.4 + 0.7 * light;
     this.hemi.color.setHex(0xbfd8ff).lerp(new THREE.Color(0x24324f), night);
