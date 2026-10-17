@@ -17,7 +17,9 @@ export const CONTROLS_HTML = `
   <tr><td>Camera distance</td><td>R3</td><td><kbd>C</kbd></td></tr>
   <tr><td>Searchlight</td><td>Y</td><td><kbd>L</kbd></td></tr>
   <tr><td>City map (debug)</td><td>View</td><td><kbd>M</kbd></td></tr>
-  <tr><td>Time speed</td><td>D-pad ◀ ▶</td><td><kbd>[</kbd> / <kbd>]</kbd></td></tr>
+  <tr><td>Time speed</td><td>D-pad ◀ ▶ (LT / RT on the map)</td><td><kbd>[</kbd> / <kbd>]</kbd></td></tr>
+  <tr><td>Map: select district</td><td>D-pad</td><td>Arrow keys or click</td></tr>
+  <tr><td>Map: overlay</td><td>LB / RB</td><td><kbd>1</kbd>–<kbd>6</kbd> or <kbd>Tab</kbd></td></tr>
   <tr><td>Pause</td><td>Menu</td><td><kbd>Esc</kbd></td></tr>
   <tr><td>Show / hide controls</td><td></td><td><kbd>H</kbd></td></tr>
   <tr><td>Controller readout</td><td></td><td><kbd>G</kbd></td></tr>

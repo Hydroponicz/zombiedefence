@@ -30,7 +30,9 @@ Add `?seed=1234` to the URL to replay a specific city and outbreak.
 | Camera distance | R3 | C |
 | Searchlight | Y | L |
 | City map (debug) | View | M |
-| Time speed | D-pad left / right | [ / ] |
+| Time speed | D-pad left / right (LT / RT on the map) | [ / ] |
+| Map: select district | D-pad | Arrow keys or click |
+| Map: overlay | LB / RB | 1–6 or Tab |
 | Pause | Menu | Esc |
 | Show / hide controls | | H |
 

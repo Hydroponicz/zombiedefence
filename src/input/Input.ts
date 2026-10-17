@@ -40,8 +40,17 @@ export type Action =
   | 'timeSlower'
   | 'next'
   | 'prev'
-  | 'up'
-  | 'down'
+  // Arrow keys and the d-pad report separately: arrows also fly, the d-pad also sets time speed.
+  | 'arrowUp'
+  | 'arrowDown'
+  | 'arrowLeft'
+  | 'arrowRight'
+  | 'dpadUp'
+  | 'dpadDown'
+  | 'dpadLeft'
+  | 'dpadRight'
+  | 'ltPress'
+  | 'rtPress'
   | 'back'
   | 'padDebug'
   | `overlay${number}`;
@@ -66,12 +75,14 @@ const PAD_ACTIONS: [number, Action][] = [
   [PAD.MENU, 'pause'],
   [PAD.Y, 'searchlight'],
   [PAD.R3, 'camera'],
-  [PAD.RIGHT, 'timeFaster'],
-  [PAD.LEFT, 'timeSlower'],
   [PAD.RB, 'next'],
   [PAD.LB, 'prev'],
-  [PAD.UP, 'up'],
-  [PAD.DOWN, 'down'],
+  [PAD.UP, 'dpadUp'],
+  [PAD.DOWN, 'dpadDown'],
+  [PAD.LEFT, 'dpadLeft'],
+  [PAD.RIGHT, 'dpadRight'],
+  [PAD.LT, 'ltPress'],
+  [PAD.RT, 'rtPress'],
   [PAD.B, 'back'],
 ];
 
@@ -146,10 +157,10 @@ export class Input {
       if (!e.repeat) {
         const action = KEY_ACTIONS[e.code];
         if (action) this.pressed.add(action);
-        if (e.code === 'ArrowUp') this.pressed.add('up');
-        if (e.code === 'ArrowDown') this.pressed.add('down');
-        if (e.code === 'ArrowLeft') this.pressed.add('prev');
-        if (e.code === 'ArrowRight') this.pressed.add('next');
+        if (e.code === 'ArrowUp') this.pressed.add('arrowUp');
+        if (e.code === 'ArrowDown') this.pressed.add('arrowDown');
+        if (e.code === 'ArrowLeft') this.pressed.add('arrowLeft');
+        if (e.code === 'ArrowRight') this.pressed.add('arrowRight');
         if (e.code === 'Escape') this.pressed.add('back');
         if (/^Digit[1-9]$/.test(e.code)) this.pressed.add(`overlay${Number(e.code.slice(5))}`);
       }

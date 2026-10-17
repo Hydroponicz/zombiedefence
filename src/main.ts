@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { ChaseCamera } from './heli/ChaseCamera';
 import { Helicopter } from './heli/Helicopter';
 import { Input, type FrameInput } from './input/Input';
-import { districtAt, GRID_COLS } from './sim/layout';
+import { districtAt } from './sim/layout';
 import { SimClient } from './sim/SimClient';
 import { DebugMap } from './ui/DebugMap';
 import { Hud } from './ui/Hud';
@@ -70,8 +70,12 @@ function handleActions(frame: FrameInput): void {
     }
     if (a.has('next')) map.cycleOverlay(1);
     if (a.has('prev')) map.cycleOverlay(-1);
-    if (a.has('up')) map.moveSelection(-GRID_COLS);
-    if (a.has('down')) map.moveSelection(GRID_COLS);
+    if (a.has('dpadLeft') || a.has('arrowLeft')) map.moveSelection(-1, 0);
+    if (a.has('dpadRight') || a.has('arrowRight')) map.moveSelection(1, 0);
+    if (a.has('dpadUp') || a.has('arrowUp')) map.moveSelection(0, -1);
+    if (a.has('dpadDown') || a.has('arrowDown')) map.moveSelection(0, 1);
+    if (a.has('rtPress')) sim.changeTimeScale(1);
+    if (a.has('ltPress')) sim.changeTimeScale(-1);
     for (let i = 1; i <= 6; i++) if (a.has(`overlay${i}`)) map.setOverlay(i - 1);
   } else {
     if (a.has('pause')) setPaused(!paused);
@@ -86,8 +90,8 @@ function handleActions(frame: FrameInput): void {
   if (a.has('padDebug')) hud.togglePadReadout();
   if (a.has('camera')) chase.cycleDistance();
   if (a.has('searchlight')) hud.toast(heli.toggleSearchlight() ? 'Searchlight on' : 'Searchlight off', 1.2);
-  if (a.has('timeFaster')) sim.changeTimeScale(1);
-  if (a.has('timeSlower')) sim.changeTimeScale(-1);
+  if (a.has('timeFaster') || (!map.visible && a.has('dpadRight'))) sim.changeTimeScale(1);
+  if (a.has('timeSlower') || (!map.visible && a.has('dpadLeft'))) sim.changeTimeScale(-1);
 }
 
 function update(dt: number): void {
@@ -167,4 +171,4 @@ window.addEventListener('resize', () => {
 });
 
 // Handy for debugging from the console.
-Object.assign(window, { game: { sim, heli, city, seed, input } });
+Object.assign(window, { game: { sim, heli, city, seed, input, map } });

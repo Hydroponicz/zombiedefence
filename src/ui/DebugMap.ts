@@ -64,10 +64,13 @@ export class DebugMap {
     if (OVERLAYS[index]) this.overlay = OVERLAYS[index];
   }
 
-  /** Step the selection through the grid: +1 next district, ±GRID_COLS a row. */
-  moveSelection(delta: number): void {
-    const n = GRID_COLS * GRID_ROWS;
-    this.selected = (this.selected + delta + n) % n;
+  /** Move the selection around the district grid, wrapping at the edges. */
+  moveSelection(dCol: number, dRow: number): void {
+    const current = DISTRICT_TEMPLATES[this.selected];
+    const col = (current.col + dCol + GRID_COLS) % GRID_COLS;
+    const row = (current.row + dRow + GRID_ROWS) % GRID_ROWS;
+    const index = DISTRICT_TEMPLATES.findIndex((d) => d.col === col && d.row === row);
+    if (index >= 0) this.selected = index;
   }
 
   draw(state: CityState | null, info: MapContext): void {
@@ -120,7 +123,7 @@ export class DebugMap {
     );
     const tabs = OVERLAYS.map((o, i) => (o === this.overlay ? `[${i + 1} ${o}]` : `${i + 1} ${o}`)).join('   ');
     this.text(tabs, W - pad, 30, 14, '#e8ecdf', 'right');
-    this.text('LB/RB or 1–6: overlay   ·   D-pad/arrows: select   ·   [ ]: time   ·   M / View: close', W - pad, 54, 12, '#a5ad9c', 'right');
+    this.text('D-pad/arrows: select   ·   LB/RB or 1–6: overlay   ·   LT/RT or [ ]: time   ·   View/B or M/Esc: close', W - pad, 54, 12, '#a5ad9c', 'right');
   }
 
   private districtColor(d: DistrictState): string {
