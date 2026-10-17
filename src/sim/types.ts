@@ -53,11 +53,40 @@ export interface DistrictState {
   playerNoise: number;
   /** Game minutes a depot fire has left to burn. */
   burning: number;
+  /** Researchers in the district (the lab, the hospital, and at base once evacuated). */
+  scientists: number;
 
   /** One-shot event flags. */
   flags: Record<string, boolean>;
   /** Game minute something last happened, for rate-limiting. */
   cooldowns: Record<string, number>;
+}
+
+export type CrateKind = 'rations' | 'ammo' | 'medicine';
+
+/** What the player's helicopter is carrying. Lives in the simulation so it is the one source of truth. */
+export interface Cargo {
+  /** Fresh troops on their way to a district. */
+  troops: number;
+  troopFatigue: number;
+  /** Evacuated civilians, and the bitten hiding among them (the player can't tell them apart). */
+  civilians: number;
+  infected: number;
+  /** Exhausted soldiers being rotated out. */
+  tired: number;
+  tiredFatigue: number;
+  scientists: number;
+  crates: CrateKind[];
+}
+
+export interface PlayerStats {
+  civiliansEvacuated: number;
+  scientistsEvacuated: number;
+  troopsDeployed: number;
+  troopsRelieved: number;
+  cratesDelivered: number;
+  /** People lost when the helicopter went down. */
+  lostInCrashes: number;
 }
 
 export interface HistorySample {
@@ -92,5 +121,9 @@ export interface CityState {
   eventSeq: number;
   collapsed: boolean;
   collapsedAt: number | null;
+  cargo: Cargo;
+  /** Research points earned by scientists at the base. */
+  research: number;
+  stats: PlayerStats;
   flags: Record<string, boolean>;
 }

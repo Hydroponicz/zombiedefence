@@ -12,6 +12,12 @@ self.onmessage = (e: MessageEvent<SimRequest>) => {
     sim?.addPlayerNoise(msg.district, msg.amount);
     return;
   }
+  if (msg.type === 'command') {
+    if (!sim) return;
+    sim.command(msg.command);
+    post({ type: 'ack', state: sim.state, events: sim.takeEvents() });
+    return;
+  }
   if (msg.type === 'init') {
     sim = new CitySim(msg.seed);
   } else if (msg.type === 'step' && sim) {

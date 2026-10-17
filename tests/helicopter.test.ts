@@ -98,3 +98,25 @@ describe('helicopter flight model', () => {
     expect(h.position.z).toBeGreaterThanOrEqual(-50 + 4 - 0.5);
   });
 });
+
+describe('carrying a load and fighting off grabbers', () => {
+  it('climbs more slowly when fully loaded', () => {
+    const empty = airborne(50);
+    const full = airborne(50);
+    full.load = 1;
+    fly(empty, 2, input({ collective: 1 }));
+    fly(full, 2, input({ collective: 1 }));
+    expect(full.position.y).toBeLessThan(empty.position.y - 3);
+  });
+
+  it('can always climb out from under a pile of zombies, but takes damage', () => {
+    const h = new Helicopter();
+    h.reset(0, 0, 0, 0);
+    fly(h, 5, input());
+    h.load = 1;
+    h.grabbers = 12;
+    fly(h, 3, input({ collective: 1 }));
+    expect(h.position.y).toBeGreaterThan(1.9 + 1);
+    expect(h.health).toBeLessThan(100);
+  });
+});

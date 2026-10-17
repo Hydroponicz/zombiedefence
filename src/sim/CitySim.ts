@@ -4,6 +4,7 @@
 
 import { dayNumber, isDaytime, START_MINUTE } from './clock';
 import { DISTRICT_TEMPLATES, neighborsOf } from './layout';
+import { applyCommand, baseOf, emptyCargo, mergeTroops, type PlayerCommand } from './operations';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
 
@@ -46,6 +47,14 @@ export const TUNING = {
   /** Extra decay per hour from maintenance backlog, from day 3. */
   gridBacklog: 0.0015,
   outbreakStartInfected: 25,
+  /** Daily supply flight into the base from outside the city, at 07:00. */
+  supplyFlightMinute: 7 * 60,
+  supplyFlightTroops: 60,
+  supplyFlightRations: 8000,
+  supplyFlightMedicine: 2000,
+  supplyFlightAmmo: 30000,
+  /** Research points per scientist at the base per game hour. */
+  researchPerScientist: 1,
 };
 
 export class CitySim {
@@ -58,6 +67,11 @@ export class CitySim {
 
   step(ticks = 1): void {
     for (let i = 0; i < ticks; i++) tick(this.state, this.pending);
+  }
+
+  /** A player action (loading, deploying, boarding...). Returns whether it happened. */
+  command(cmd: PlayerCommand): boolean {
+    return applyCommand(this.state, cmd, makeEmit(this.state, this.pending));
   }
 
   /** Rotor noise from the player's helicopter hovering low over a district. */
@@ -87,6 +101,9 @@ export function createCity(seed: number | string): CityState {
     collapsed: false,
     collapsedAt: null,
     flags: {},
+    cargo: emptyCargo(),
+    research: 0,
+    stats: { civiliansEvacuated: 0, scientistsEvacuated: 0, troopsDeployed: 0, troopsRelieved: 0, cratesDelivered: 0, lostInCrashes: 0 },
   };
   const rand = () => nextRandom(state);
   const totalPop = DISTRICT_TEMPLATES.reduce((s, d) => s + d.population, 0);
@@ -106,7 +123,7 @@ export function createCity(seed: number | string): CityState {
       zombies: 0,
       dead: 0,
       troops: { strength: tpl.troops, fatigue: 0, morale: 0.85, ammo: tpl.troops * TUNING.roundsPerSoldier },
-      rations: people * TUNING.startingRationDays * (0.75 + rand() * 0.5),
+      rations: tpl.rations ?? people * TUNING.startingRationDays * (0.75 + rand() * 0.5),
       medicine: tpl.medicine ?? people * 0.05,
       fuel: tpl.fuel ?? 0,
       power: 'on',
@@ -118,6 +135,7 @@ export function createCity(seed: number | string): CityState {
       killRate: 0,
       playerNoise: 0,
       burning: 0,
+      scientists: tpl.scientists ?? 0,
       flags: {},
       cooldowns: {},
     };
@@ -142,14 +160,10 @@ function tick(s: CityState, out: SimEvent[]): void {
   const night = !isDaytime(t);
   const hourly = Math.floor(t) % 60 === 0;
   const ds = s.districts;
-  const emit = (district: number | null, severity: Severity, text: string) => {
-    const e: SimEvent = { id: ++s.eventSeq, t, district, severity, text };
-    out.push(e);
-    s.log.push(e);
-    if (s.log.length > LOG_LIMIT) s.log.shift();
-  };
+  const emit = makeEmit(s, out);
 
   if (Math.floor(t) % 1440 === 360) emit(null, 'info', `Day ${day} begins.`);
+  if (Math.floor(t) % 1440 === TUNING.supplyFlightMinute) supplyFlight(s, emit);
 
   if (hourly) spontaneousOutbreaks(s, day, emit);
   updatePower(s, day, night, emit);
@@ -160,8 +174,9 @@ function tick(s: CityState, out: SimEvent[]): void {
   if (hourly) distributeRations(s, emit);
   for (const d of ds) updateStatus(d, emit);
 
-  const base = ds.find((d) => d.kind === 'airbase');
-  if (base && !s.collapsed && base.status === 'overrun') {
+  const base = baseOf(s);
+  s.research += base.scientists * TUNING.researchPerScientist * H;
+  if (!s.collapsed && base.status === 'overrun') {
     s.collapsed = true;
     s.collapsedAt = t;
     emit(base.id, 'critical', `${base.name} has fallen. The city has collapsed.`);
@@ -172,6 +187,25 @@ function tick(s: CityState, out: SimEvent[]): void {
 }
 
 type Emit = (district: number | null, severity: Severity, text: string) => void;
+
+function makeEmit(s: CityState, out: SimEvent[]): Emit {
+  return (district, severity, text) => {
+    const e: SimEvent = { id: ++s.eventSeq, t: s.t, district, severity, text };
+    out.push(e);
+    s.log.push(e);
+    if (s.log.length > LOG_LIMIT) s.log.shift();
+  };
+}
+
+/** Fresh soldiers and supplies flown in from outside, while the base holds. */
+function supplyFlight(s: CityState, emit: Emit): void {
+  const base = baseOf(s);
+  if (base.status === 'overrun') return;
+  mergeTroops(base, TUNING.supplyFlightTroops, 0, 0.9, TUNING.supplyFlightTroops * 300 + TUNING.supplyFlightAmmo);
+  base.rations += TUNING.supplyFlightRations;
+  base.medicine += TUNING.supplyFlightMedicine;
+  emit(base.id, 'info', `Supply flight landed at ${base.name}: ${TUNING.supplyFlightTroops} fresh troops, food, medicine and ammunition.`);
+}
 
 function spontaneousOutbreaks(s: CityState, day: number, emit: Emit): void {
   if (day > 3 || nextRandom(s) > 0.03) return;
@@ -271,6 +305,15 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const medicineShort = d.medicine <= 0;
   if (medicineShort) civDeaths += encounters * 0.1;
 
+  // Scientists share the civilians' risk.
+  if (d.scientists > 0 && P > 0) {
+    const before = d.scientists;
+    d.scientists = Math.max(0, d.scientists * (1 - (bitten + civDeaths) / P));
+    if (before >= 1 && d.scientists < 1) {
+      d.scientists = 0;
+      emit(d.id, 'critical', `The research team in ${d.name} has been lost.`);
+    }
+  }
   d.population = Math.max(0, P - bitten - civDeaths);
   d.infected += bitten + troopLoss * 0.5;
   d.dead += civDeaths + troopLoss * 0.5 + civKills + soldierKills;
@@ -421,16 +464,6 @@ function rout(s: CityState, d: DistrictState, emit: Emit): void {
   tr.ammo -= tr.ammo * 0.7;
   tr.morale = 0.3;
   emit(d.id, 'critical', `Troops in ${d.name} have broken and are falling back to ${to.name}.`);
-}
-
-function mergeTroops(to: DistrictState, strength: number, fatigue: number, morale: number, ammo: number): void {
-  const tr = to.troops;
-  const total = tr.strength + strength;
-  if (total <= 0) return;
-  tr.fatigue = (tr.fatigue * tr.strength + fatigue * strength) / total;
-  tr.morale = (tr.morale * tr.strength + morale * strength) / total;
-  tr.strength = total;
-  tr.ammo += ammo;
 }
 
 function migrate(s: CityState, night: boolean): void {

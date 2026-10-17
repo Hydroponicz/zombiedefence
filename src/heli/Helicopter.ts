@@ -26,6 +26,17 @@ const SKID_DEPTH = 1.9; // body centre to skid bottom
 const BODY_RADIUS = 4;
 const SAFE_LANDING_SPEED = 6;
 const SPOOL_TIME = 4;
+/** How much a full load blunts climb, attitude response and yaw. */
+const LOAD_CLIMB = 0.45;
+const LOAD_RESPONSE = 0.35;
+const LOAD_YAW = 0.25;
+/**
+ * Each zombie on the skids pulls down this hard (m/s²) and does this much damage per second.
+ * The pull is capped below a fully loaded climb, so full throttle always escapes, slowly.
+ */
+const GRAB_PULL = 1.3;
+const GRAB_PULL_MAX = 5;
+const GRAB_DAMAGE = 1.2;
 
 export class Helicopter {
   readonly object = new THREE.Group();
@@ -43,6 +54,10 @@ export class Helicopter {
   destroyed = false;
   /** Set for one frame when the helicopter takes damage. */
   lastImpact = 0;
+  /** Cargo load 0 (empty) .. 1 (full): heavier handling. */
+  load = 0;
+  /** Zombies hanging off the skids. */
+  grabbers = 0;
 
   private mainRotor = new THREE.Group();
   private tailRotor = new THREE.Group();
@@ -161,7 +176,7 @@ export class Helicopter {
     const lift = this.rotor * this.rotor;
 
     // Attitude: approach the stick's target and self-level when it is released.
-    const k = 1 - Math.exp(-ATTITUDE_RESPONSE * dt);
+    const k = 1 - Math.exp(-ATTITUDE_RESPONSE * (1 - LOAD_RESPONSE * this.load) * dt);
     const groundLock = this.landed && controls.collective <= 0.05;
     const targetPitch = groundLock ? 0 : controls.pitch * MAX_PITCH;
     const targetRoll = groundLock ? 0 : controls.roll * MAX_ROLL;
@@ -171,7 +186,7 @@ export class Helicopter {
     // Yaw from the pedals plus a coordinated turn from banking at speed.
     const horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
     const bankTurn = -this.bankRight * BANK_TURN * Math.min(1, horizontalSpeed / 25);
-    const targetYawRate = (groundLock ? 0.3 : 1) * -controls.yaw * MAX_YAW_RATE + bankTurn;
+    const targetYawRate = (groundLock ? 0.3 : 1) * -controls.yaw * MAX_YAW_RATE * (1 - LOAD_YAW * this.load) + bankTurn;
     this.yawRate += (targetYawRate - this.yawRate) * (1 - Math.exp(-4 * dt));
     this.yaw += this.yawRate * dt;
 
@@ -182,8 +197,13 @@ export class Helicopter {
     const hold = (G / Math.max(0.45, up.y)) * lift;
     const ceilingFade = Math.max(0, Math.min(1, (CEILING - this.position.y) / 80));
     const accel = up.multiplyScalar(hold * (0.6 + 0.4 * ceilingFade));
-    const collective = controls.collective > 0 ? controls.collective * CLIMB_ACCEL * ceilingFade : controls.collective * DESCEND_ACCEL;
+    const climb = CLIMB_ACCEL * (1 - LOAD_CLIMB * this.load) * ceilingFade;
+    const collective = controls.collective > 0 ? controls.collective * climb : controls.collective * DESCEND_ACCEL;
     accel.y += collective * lift - G;
+    if (this.grabbers > 0 && live) {
+      accel.y -= Math.min(GRAB_PULL_MAX, this.grabbers * GRAB_PULL);
+      this.damage(this.grabbers * GRAB_DAMAGE * dt);
+    }
 
     // Drag: quadratic forward, extra sideways so turns carve, strong vertical damping.
     const v = this.velocity;

@@ -33,6 +33,8 @@ Add `?seed=1234` to the URL to replay a specific city and outbreak.
 | Time speed | D-pad left / right (LT / RT on the map) | [ / ] |
 | Map: select district | D-pad | Arrow keys or click |
 | Map: overlay | LB / RB | 1–6 or Tab |
+| Landed: choose operation | D-pad up / down | Up / Down arrows |
+| Landed: start / stop it | A | E or Enter |
 | Pause | Menu | Esc |
 | Show / hide controls | | H |
 
@@ -62,6 +64,25 @@ Any controller using the browser's standard gamepad mapping works (Xbox, PlaySta
 - **The collapse from afar:** smoke columns and street fires over contested, rioting and overrun
   districts; depot fires with towering black smoke; abandoned cars across the city.
 - **HUD:** the district panel shows rough zombie and troop counts.
+
+## What's in phase 3
+
+Land anywhere (the street, a rooftop or a helipad) and a menu of ground operations appears.
+Each runs one person or crate at a time; lift off to leave.
+
+- **At Fort Kessler:** load fresh troops (the base keeps 50 back), and relief crates of rations,
+  ammunition or medicine from the base stores. Passengers unload automatically when you touch down.
+  A supply flight brings fresh troops and stores every morning at 07:00.
+- **In the city:** deploy troops, unload crates, evacuate civilians, relieve exhausted soldiers, and
+  extract scientists from the University Heights lab and St. Mary's.
+- **8 seats and 2 crate slots.** A full load climbs and turns noticeably slower.
+- **Hot landing zones:** zombies drawn by the rotors reach a helicopter on the street. While they're
+  at the doors, loading pauses; if they get to the skids they drag it down and tear at it until you
+  climb above 6 m. Troops aboard fire from the doors while you're low. Rooftops are out of reach, but
+  people take the stairs, so boarding there takes 2.5× longer (except on helipads).
+- **Consequences:** evacuees can carry hidden bites into the base; rested soldiers recover at the
+  base; scientists there earn research points; a crash loses everyone aboard.
+- **HUD:** seats and crates, people saved, scientists extracted and research earned.
 
 ## Project layout
 

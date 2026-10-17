@@ -53,6 +53,8 @@ export type Action =
   | 'rtPress'
   | 'back'
   | 'padDebug'
+  /** Start or stop the selected ground operation. */
+  | 'confirm'
   | `overlay${number}`;
 
 const KEY_ACTIONS: Record<string, Action> = {
@@ -63,6 +65,8 @@ const KEY_ACTIONS: Record<string, Action> = {
   KeyL: 'searchlight',
   KeyC: 'camera',
   KeyG: 'padDebug',
+  KeyE: 'confirm',
+  Enter: 'confirm',
   BracketRight: 'timeFaster',
   BracketLeft: 'timeSlower',
   Tab: 'next',
@@ -73,6 +77,7 @@ const PAD = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, VIEW: 8, MENU:
 const PAD_ACTIONS: [number, Action][] = [
   [PAD.VIEW, 'map'],
   [PAD.MENU, 'pause'],
+  [PAD.A, 'confirm'],
   [PAD.Y, 'searchlight'],
   [PAD.R3, 'camera'],
   [PAD.RB, 'next'],

@@ -27,6 +27,8 @@ const enum Mode {
   Post,
   Turning,
   Dead,
+  /** Hanging off the helicopter's skids. */
+  Grab,
 }
 
 interface Agent {
@@ -68,6 +70,14 @@ const CORPSE_SECONDS = 25;
 const TURN_SECONDS = 6;
 const GRID = 20;
 const POSTS_PER_DISTRICT = 3;
+/** Skids lower than this above the street can be grabbed; above SHAKE_OFF the dead let go. */
+const GRAB_CLEARANCE = 4;
+const SHAKE_OFF_CLEARANCE = 6;
+const GRAB_RANGE = 3.5;
+/** Zombies this close to a helicopter on the street stop people boarding. */
+const DOOR_RANGE = 9;
+const DOOR_GUN_RANGE = 70;
+const DOOR_GUN_SHOTS_PER_TROOP = 0.8;
 /** People are drawn larger than life so they read from the air. */
 const FIGURE_SCALE = 1.35;
 
@@ -87,11 +97,19 @@ export interface AttractInfo {
   district: number;
   /** Zombies currently heading for the helicopter. */
   drawn: number;
+  /** Zombies at the doors of a helicopter on the street. */
+  threat: number;
+  /** Zombies hanging off the skids. */
+  grabbers: number;
 }
 
 export class Agents {
   readonly group = new THREE.Group();
-  readonly attract: AttractInfo = { active: false, district: -1, drawn: 0 };
+  readonly attract: AttractInfo = { active: false, district: -1, drawn: 0, threat: 0, grabbers: 0 };
+  /** Height of the helicopter's skids above the street. */
+  private clearance = 999;
+  private heliY = 0;
+  private doorGunTimer = 0;
   private agents: Agent[] = [];
   private rand: () => number;
   private reconcileTimer = 0;
@@ -116,9 +134,17 @@ export class Agents {
     this.buildMeshes();
   }
 
-  update(dt: number, heli: THREE.Vector3, altitude: number, rotor: number, state: CityState | null, night: number): void {
+  /**
+   * @param altitude height above whatever is below (roof or street), for rotor noise
+   * @param clearance height of the skids above the street, for grabbing and door threats
+   */
+  update(dt: number, heli: THREE.Vector3, altitude: number, rotor: number, state: CityState | null, night: number, clearance = altitude): void {
     const cx = heli.x;
     const cz = heli.z;
+    this.clearance = clearance;
+    this.heliY = heli.y;
+    this.attract.threat = 0;
+    this.attract.grabbers = 0;
 
     const attractActive = rotor > 0.6 && altitude < ATTRACT_ALTITUDE;
     this.attract.active = attractActive;
@@ -335,6 +361,29 @@ export class Agents {
   private updateZombie(a: Agent, dt: number, hx: number, hz: number, attract: boolean): void {
     a.timer -= dt;
     if (a.mode === Mode.Dead) return;
+
+    const toHeli = Math.hypot(hx - a.x, hz - a.z);
+    if (a.mode === Mode.Grab) {
+      if (this.clearance > SHAKE_OFF_CLEARANCE) {
+        // Shaken off as the helicopter climbs.
+        a.mode = Mode.Walk;
+        this.retarget(a);
+      } else {
+        a.x = hx + a.ox;
+        a.z = hz + a.oz;
+        a.heading = Math.atan2(a.ox, a.oz);
+        this.attract.grabbers++;
+        return;
+      }
+    }
+    if (this.clearance < SHAKE_OFF_CLEARANCE && toHeli < DOOR_RANGE) this.attract.threat++;
+    if (this.clearance < GRAB_CLEARANCE && toHeli < GRAB_RANGE) {
+      const ang = this.rand() * Math.PI * 2;
+      a.mode = Mode.Grab;
+      a.ox = Math.cos(ang) * 1.9;
+      a.oz = Math.sin(ang) * 2.6;
+      return;
+    }
     if (a.mode === Mode.Feed) {
       if (a.timer <= 0) {
         a.mode = Mode.Walk;
@@ -417,6 +466,42 @@ export class Agents {
       target.mode = Mode.Dead;
       target.timer = CORPSE_SECONDS;
     }
+  }
+
+  /**
+   * Troops aboard fire from the doors at zombies near a low helicopter.
+   * @param troops soldiers aboard
+   */
+  doorGunners(dt: number, heli: THREE.Vector3, troops: number): number {
+    if (troops < 1 || this.clearance > 12) {
+      this.doorGunTimer = 0;
+      return 0;
+    }
+    this.doorGunTimer += dt;
+    const interval = 1 / (troops * DOOR_GUN_SHOTS_PER_TROOP);
+    let kills = 0;
+    const origin = { x: heli.x, z: heli.z } as Agent;
+    while (this.doorGunTimer >= interval) {
+      this.doorGunTimer -= interval;
+      const target = this.nearest(this.zombies, origin, DOOR_GUN_RANGE);
+      if (!target) {
+        this.doorGunTimer = 0;
+        break;
+      }
+      const side = this.rand() < 0.5 ? -1.4 : 1.4;
+      const hit = this.rand() < 0.4;
+      const miss = hit ? 0 : 3;
+      this.effects.tracer(
+        heli.x + side, this.heliY - 0.4, heli.z,
+        target.x + (this.rand() - 0.5) * miss, 1 + this.rand() * 0.8, target.z + (this.rand() - 0.5) * miss,
+      );
+      if (hit) {
+        target.mode = Mode.Dead;
+        target.timer = CORPSE_SECONDS;
+        kills++;
+      }
+    }
+    return kills;
   }
 
   /** Walk toward the current target intersection. Returns true on arrival. */
@@ -567,7 +652,7 @@ export class Agents {
       const bob = moving ? Math.abs(Math.sin(a.phase)) * 0.08 : 0;
       const zombie = kind === Kind.Zombie;
       const sway = zombie && moving ? Math.sin(a.phase * 0.5) * 0.14 : 0;
-      const lean = zombie && !lying ? 0.18 : a.mode === Mode.Flee ? 0.25 : a.mode === Mode.Feed ? 0.9 : 0;
+      const lean = a.mode === Mode.Grab ? -0.35 : zombie && !lying ? 0.18 : a.mode === Mode.Flee ? 0.25 : a.mode === Mode.Feed ? 0.9 : 0;
       this.e.set(lying ? -Math.PI / 2 : -lean, a.heading, sway, 'YXZ');
       this.q.setFromEuler(this.e);
       this.m.compose(this.v.set(a.x, lying ? 0.2 : bob, a.z), this.q, this.s.setScalar(FIGURE_SCALE));

@@ -2,6 +2,7 @@
 // catch up one tick per elapsed game minute.
 
 import { advanceGameTime, START_MINUTE } from './clock';
+import type { PlayerCommand } from './operations';
 import type { SimRequest, SimResponse } from './protocol';
 import type { CityState, SimEvent } from './types';
 
@@ -26,8 +27,10 @@ export class SimClient {
     this.worker = new Worker(new URL('./sim.worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e: MessageEvent<SimResponse>) => {
       this.state = e.data.state;
-      this.inFlight = false;
       if (e.data.events.length) this.onEvents(e.data.events);
+      // Command acknowledgements don't answer a step request.
+      if (e.data.type === 'ack') return;
+      this.inFlight = false;
       this.flush();
     };
     this.send({ type: 'init', seed });
@@ -46,6 +49,10 @@ export class SimClient {
     if (this.paused) return;
     this.time = advanceGameTime(this.time, realDt * this.timeScale);
     this.flush();
+  }
+
+  command(command: PlayerCommand): void {
+    this.send({ type: 'command', command });
   }
 
   addNoise(district: number, amount: number): void {

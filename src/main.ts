@@ -1,8 +1,10 @@
 import * as THREE from 'three';
+import { Operations } from './game/Operations';
 import { ChaseCamera } from './heli/ChaseCamera';
 import { Helicopter } from './heli/Helicopter';
 import { Input, type FrameInput } from './input/Input';
 import { districtAt } from './sim/layout';
+import { MAX_PAYLOAD_KG, payloadKg } from './sim/operations';
 import { SimClient } from './sim/SimClient';
 import { DebugMap } from './ui/DebugMap';
 import { Hud } from './ui/Hud';
@@ -21,6 +23,10 @@ const POWER_LIGHT = { on: 1, backup: 0.35, dark: 0 } as const;
 /** How often rotor noise is reported to the simulation, in real seconds. */
 const NOISE_REPORT_SECONDS = 1;
 const NOISE_PER_REPORT = 0.15;
+/** Below this ground speed (m/s) a landed helicopter counts as parked for ground operations. */
+const PARKED_SPEED = 2;
+const HELIPAD_RADIUS = 12;
+const SKID_DEPTH = 1.9;
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -53,6 +59,8 @@ const pauseEl = document.getElementById('pause')!;
 
 const sim = new SimClient(seed);
 sim.onEvents = (events) => hud.addEvents(events);
+const ops = new Operations((cmd) => sim.command(cmd));
+ops.onToast = (text) => hud.toast(text, 2.5);
 
 input.onGamepadChange = (name) => hud.toast(name ? 'Controller connected' : 'Controller disconnected', 2);
 
@@ -121,6 +129,9 @@ function update(dt: number): void {
 
   // While the map is open the helicopter hovers on its own.
   const flight = map.visible ? NEUTRAL : frame;
+  const cargo = sim.state?.cargo;
+  heli.load = cargo ? Math.min(1, payloadKg(cargo) / MAX_PAYLOAD_KG) : 0;
+  heli.grabbers = agents.attract.grabbers;
   accumulator = Math.min(accumulator + dt, 0.25);
   while (accumulator >= PHYSICS_STEP) {
     heli.update(PHYSICS_STEP, flight, city);
@@ -128,7 +139,10 @@ function update(dt: number): void {
   }
 
   if (heli.destroyed) {
-    if (respawnTimer === 0) hud.toast('Helicopter destroyed', RESPAWN_SECONDS);
+    if (respawnTimer === 0) {
+      hud.toast('Helicopter destroyed', RESPAWN_SECONDS);
+      sim.command({ type: 'crash', district: districtAt(heli.position.x, heli.position.z) });
+    }
     respawnTimer += dt;
     if (respawnTimer > RESPAWN_SECONDS) {
       respawnTimer = 0;
@@ -148,9 +162,24 @@ function update(dt: number): void {
     effects.syncWithSim(state);
   }
 
-  const altitude = heli.position.y - 1.9 - city.surfaceHeight(heli.position.x, heli.position.z);
-  agents.update(dt, heli.position, altitude, heli.destroyed ? 0 : heli.rotor, state, night);
+  const surface = city.surfaceHeight(heli.position.x, heli.position.z);
+  const altitude = heli.position.y - SKID_DEPTH - surface;
+  const clearance = heli.position.y - SKID_DEPTH;
+  agents.update(dt, heli.position, altitude, heli.destroyed ? 0 : heli.rotor, state, night, clearance);
+  if (!heli.destroyed) agents.doorGunners(dt, heli.position, state?.cargo.troops ?? 0);
   effects.update(dt, night);
+
+  // Ground operations: loading, deploying, evacuating.
+  const atHelipad = city.helipads.some((p) => Math.hypot(p.x - heli.position.x, p.z - heli.position.z) < HELIPAD_RADIUS && Math.abs(p.y - surface) < 1);
+  ops.update(dt, {
+    landed: heli.landed && heli.speed < PARKED_SPEED && !heli.destroyed,
+    district: districtAt(heli.position.x, heli.position.z),
+    onRoof: surface > 3 && !atHelipad,
+    threat: agents.attract.threat,
+    grabbers: agents.attract.grabbers,
+  }, state, map.visible ? new Set() : frame.actions);
+  hud.updateOps(map.visible ? null : ops.view, frame.usingGamepad);
+  if (state) hud.updateCargo(state.cargo, state.stats, state.research);
 
   // Hovering low is loud: report it so the simulation draws zombies in from nearby districts.
   noiseTimer -= dt;
@@ -166,6 +195,7 @@ function update(dt: number): void {
   hud.update(dt, sim.time, sim.timeScale, state && districtIndex >= 0 ? state.districts[districtIndex] : null, {
     altitude,
     drawn: agents.attract.active ? agents.attract.drawn : 0,
+    grabbers: agents.attract.grabbers,
     speed: heli.speed,
     verticalSpeed: heli.velocity.y,
     heading: ((forward % 360) + 360) % 360,
@@ -198,4 +228,4 @@ window.addEventListener('resize', () => {
 });
 
 // Handy for debugging from the console.
-Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects } });
+Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops } });

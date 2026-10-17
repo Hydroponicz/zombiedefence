@@ -1,8 +1,10 @@
 // DOM heads-up display: clock, district under the helicopter, flight instruments, radio log.
 
 import { formatClock, isDaytime } from '../sim/clock';
+import type { OperationsView } from '../game/Operations';
 import type { PadReading } from '../input/Input';
-import type { DistrictState, SimEvent } from '../sim/types';
+import { CRATES, SEATS } from '../sim/operations';
+import type { Cargo, DistrictState, PlayerStats, SimEvent } from '../sim/types';
 
 const RADIO_LIMIT = 6;
 const RADIO_SECONDS = 25;
@@ -22,6 +24,8 @@ export const CONTROLS_HTML = `
   <tr><td>Map: overlay</td><td>LB / RB</td><td><kbd>1</kbd>–<kbd>6</kbd> or <kbd>Tab</kbd></td></tr>
   <tr><td>Pause</td><td>Menu</td><td><kbd>Esc</kbd></td></tr>
   <tr><td>Show / hide controls</td><td></td><td><kbd>H</kbd></td></tr>
+  <tr><td>Landed: choose operation</td><td>D-pad ▲ ▼</td><td><kbd>↑</kbd> / <kbd>↓</kbd></td></tr>
+  <tr><td>Landed: start / stop it</td><td>A</td><td><kbd>E</kbd> or <kbd>Enter</kbd></td></tr>
   <tr><td>Controller readout</td><td></td><td><kbd>G</kbd></td></tr>
 </table>
 <div class="controller-status"></div>`;
@@ -39,6 +43,8 @@ export interface FlightReadout {
   searchlight: boolean;
   /** Zombies currently drawn toward the helicopter by rotor noise. */
   drawn: number;
+  /** Zombies hanging off the skids. */
+  grabbers: number;
 }
 
 export class Hud {
@@ -52,6 +58,10 @@ export class Hud {
   private radio: { li: HTMLLIElement; age: number }[] = [];
   private lastDistrictKey = '';
   private pad = el('hud-pad');
+  private ops = el('hud-ops');
+  private cargo = el('hud-cargo');
+  private lastOpsKey = '';
+  private lastCargoKey = '';
   private lastStatus = '';
 
   constructor() {
@@ -97,6 +107,49 @@ export class Hud {
     this.toastTimer = seconds;
   }
 
+  /** The ground operations menu, shown while landed. */
+  updateOps(view: OperationsView | null, gamepad: boolean): void {
+    const key = view ? JSON.stringify(view) + gamepad : '';
+    if (key === this.lastOpsKey) return;
+    this.lastOpsKey = key;
+    this.ops.hidden = !view;
+    if (!view) return;
+    const rows = view.options
+      .map((o) => `<div class="op${o.selected ? ' selected' : ''}${o.enabled ? '' : ' disabled'}${o.active ? ' active' : ''}">
+          <span class="label">${o.label}</span><span class="detail">${o.detail}</span>
+          ${o.active ? `<div class="progress" style="width:${Math.round(o.progress * 100)}%"></div>` : ''}
+        </div>`)
+      .join('');
+    const hint = gamepad ? 'D-pad ▲▼ select · A start / stop · lift off to leave' : '↑ ↓ select · E or Enter start / stop · lift off to leave';
+    this.ops.innerHTML = `<div class="title">${view.title}</div>
+      <div class="status${view.warning ? ' warning' : ''}">${view.status}</div>${rows}<div class="hint">${hint}</div>`;
+  }
+
+  /** Seats, crates and what the player has achieved so far. */
+  updateCargo(cargo: Cargo, stats: PlayerStats, research: number): void {
+    const key = JSON.stringify(cargo) + JSON.stringify(stats) + Math.floor(research);
+    if (key === this.lastCargoKey) return;
+    this.lastCargoKey = key;
+    const seats: string[] = [];
+    const fill = (n: number, cls: string) => { for (let i = 0; i < n; i++) seats.push(cls); };
+    fill(cargo.troops, 'troops');
+    fill(cargo.civilians + cargo.infected, 'civilians');
+    fill(cargo.tired, 'tired');
+    fill(cargo.scientists, 'scientists');
+    while (seats.length < SEATS) seats.push('');
+    const aboard = [
+      cargo.troops && `${cargo.troops} troops`,
+      cargo.civilians + cargo.infected && `${cargo.civilians + cargo.infected} civilians`,
+      cargo.tired && `${cargo.tired} exhausted soldiers`,
+      cargo.scientists && `${cargo.scientists} scientists`,
+    ].filter(Boolean).join(' · ') || 'No passengers';
+    const crates = cargo.crates.length ? cargo.crates.map((k) => CRATES[k].label).join(', ') : 'none';
+    this.cargo.innerHTML = `<div class="seats">${seats.map((c) => `<div class="seat ${c}"></div>`).join('')}</div>
+      <div class="line">${aboard}</div>
+      <div class="line">Crates: ${crates}</div>
+      <div class="stats">Saved ${stats.civiliansEvacuated} · Scientists ${stats.scientistsEvacuated} · Research ${Math.floor(research)}</div>`;
+  }
+
   addEvents(events: SimEvent[]): void {
     for (const e of events) {
       // The info-level chatter is visible on the map; the radio carries what matters.
@@ -133,7 +186,9 @@ export class Hud {
 
     const state = flight.destroyed
       ? 'DESTROYED'
-      : flight.drawn > 0
+      : flight.grabbers > 0
+        ? `<span style="color:var(--critical)">${flight.grabbers} ON THE SKIDS · CLIMB!</span>`
+        : flight.drawn > 0
         ? `<span style="color:var(--warn)">ROTOR NOISE · ${flight.drawn} drawn in</span>`
         : flight.landed ? 'LANDED' : flight.searchlight ? 'SEARCHLIGHT ON' : '';
     const hp = Math.round(flight.health);

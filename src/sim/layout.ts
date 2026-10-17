@@ -48,11 +48,13 @@ export interface DistrictTemplate {
   powerThreshold?: number;
   fuel?: number;
   medicine?: number;
+  rations?: number;
+  scientists?: number;
 }
 
 export const DISTRICT_TEMPLATES: DistrictTemplate[] = [
   { name: 'Northside', kind: 'residential', col: 0, row: 0, population: 32000, troops: 30, features: {} },
-  { name: 'University Heights', kind: 'university', col: 1, row: 0, population: 18000, troops: 20, features: { lab: true } },
+  { name: 'University Heights', kind: 'university', col: 1, row: 0, population: 18000, troops: 20, features: { lab: true }, scientists: 24 },
   { name: 'Riverside', kind: 'apartments', col: 2, row: 0, population: 45000, troops: 35, features: {} },
   { name: 'Harbor', kind: 'harbor', col: 3, row: 0, population: 9000, troops: 25, features: { fuelDepot: true }, fuel: 400000 },
   { name: 'Westfield', kind: 'residential', col: 0, row: 1, population: 34000, troops: 30, features: { substation: true } },
@@ -65,11 +67,14 @@ export const DISTRICT_TEMPLATES: DistrictTemplate[] = [
   {
     name: 'Fort Kessler', kind: 'airbase', col: 0, row: 2, population: 1500, troops: 600,
     features: { generator: 250, fortified: true, fuelDepot: true }, powerThreshold: 0.2, fuel: 120000,
+    // Military stores the player loads relief crates from.
+    rations: 60000, medicine: 20000,
   },
   { name: 'Industrial Park', kind: 'industrial', col: 1, row: 2, population: 7000, troops: 25, features: { powerPlant: true, fuelDepot: true }, fuel: 250000 },
   {
     name: "St. Mary's", kind: 'hospital', col: 2, row: 2, population: 16000, troops: 40,
     features: { hospital: true, generator: 300 }, powerThreshold: 0.15, fuel: 8000, medicine: 50000,
+    scientists: 6,
   },
   { name: 'Southgate', kind: 'residential', col: 3, row: 2, population: 30000, troops: 25, features: {} },
 ];

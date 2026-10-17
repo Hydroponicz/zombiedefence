@@ -86,6 +86,40 @@ html, body {
 #hud-flight .bar div { height: 100%; background: var(--held); }
 #hud-flight .state { grid-column: span 2; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; }
 
+#hud-cargo {
+  bottom: 16px;
+  left: 228px;
+  font-size: 13px;
+  min-width: 190px;
+}
+#hud-cargo .seats { display: flex; gap: 3px; margin: 4px 0 6px; }
+#hud-cargo .seat { width: 14px; height: 14px; border-radius: 3px; background: rgba(255,255,255,0.12); }
+#hud-cargo .seat.troops { background: #8ad37f; }
+#hud-cargo .seat.civilians { background: #7fc4ff; }
+#hud-cargo .seat.tired { background: #d9b93f; }
+#hud-cargo .seat.scientists { background: #c79bff; }
+#hud-cargo .line { color: var(--muted); font-size: 12px; }
+#hud-cargo .stats { margin-top: 6px; color: var(--muted); font-size: 12px; }
+
+#hud-ops {
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 340px;
+  font-size: 14px;
+}
+#hud-ops[hidden] { display: none; }
+#hud-ops .title { font-weight: 600; margin-bottom: 4px; }
+#hud-ops .status { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+#hud-ops .status.warning { color: var(--critical); font-weight: 700; }
+#hud-ops .op { position: relative; display: flex; justify-content: space-between; gap: 18px; padding: 4px 8px; border-radius: 4px; overflow: hidden; }
+#hud-ops .op.selected { background: rgba(255,255,255,0.12); }
+#hud-ops .op.disabled { opacity: 0.4; }
+#hud-ops .op.active .label::after { content: ' ●'; color: var(--held); }
+#hud-ops .op .detail { color: var(--muted); font-size: 12px; }
+#hud-ops .op .progress { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--held); }
+#hud-ops .hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
 #hud-radio {
   position: absolute;
   right: 16px;
