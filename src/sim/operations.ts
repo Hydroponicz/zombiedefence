@@ -4,6 +4,7 @@
 
 import { addAirframe, maybeRecruit, validOrder } from './pilots';
 import { nextRandom } from './rng';
+import { screenAtGate } from './quarantine';
 import { siteName } from './sites';
 import type { Cargo, CityState, CrateKind, DistrictState, Farp, Order, Severity, Site } from './types';
 
@@ -329,7 +330,8 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       }
       const civilians = c.civilians;
       base.population += c.civilians;
-      base.infected += c.infected;
+      const caught = screenAtGate(s, base, c.infected);
+      if (caught > 0) parts.push(`${caught} bitten caught at the quarantine checkpoint`);
       if (c.tired > 0) mergeTroops(base, c.tired, c.tiredFatigue, 0.6, 0);
       base.scientists += c.scientists;
       s.stats.civiliansEvacuated += c.civilians + c.infected;
@@ -381,7 +383,8 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       const d = s.districts[cmd.district];
       if (d) {
         d.population += c.civilians;
-        d.infected += c.infected;
+        if (d.kind === 'airbase') screenAtGate(s, d, c.infected);
+        else d.infected += c.infected;
         d.scientists += c.scientists;
         if (c.troops + c.tired > 0) mergeTroops(d, c.troops + c.tired, (c.troopFatigue * c.troops + c.tiredFatigue * c.tired) / (c.troops + c.tired), 0.7, c.troops * ROUNDS_PER_TROOP);
         for (const kind of c.crates) {

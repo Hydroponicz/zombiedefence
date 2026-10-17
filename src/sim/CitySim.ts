@@ -8,6 +8,7 @@ import { applyCommand, baseOf, emptyCargo, mergeTroops, type PlayerCommand } fro
 import { applyHordeLosses, countHordes, formHordes, moveHordes, totalZombies } from './hordes';
 import { initialFleet, payday, updatePilots } from './pilots';
 import { createSites, updateSites } from './sites';
+import { baseSealed, checkSeal, isBase } from './quarantine';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
 
@@ -205,6 +206,10 @@ function tick(s: CityState, out: SimEvent[]): void {
   moveHordes(s, night, emit);
   countHordes(s);
   for (const d of ds) updateStatus(d, emit);
+  if (checkSeal(s)) {
+    const base = baseOf(s);
+    emit(base.id, 'critical', `Every district has fallen. The dead are at the gates of ${base.name}.`);
+  }
   loseFarps(s, emit);
   updatePilots(s, emit);
 
@@ -549,6 +554,9 @@ function migrate(s: CityState, night: boolean): void {
   const di = new Float64Array(ds.length);
 
   const hospital = ds.find((d) => d.features.hospital && d.status !== 'overrun');
+  // Until the city has fallen, the base's perimeter keeps the dead and the bitten out.
+  const sealed = baseSealed(s);
+  const shut = (d: DistrictState) => sealed && isBase(d);
 
   for (const d of ds) {
     // Zombies wander toward people, light and noise. Hordes move on once prey runs out.
@@ -563,14 +571,17 @@ function migrate(s: CityState, night: boolean): void {
       let total = 0;
       const pull = d.neighbors.map((n) => {
         const c = ds[n];
+        if (shut(c)) return 0;
         const a = Math.sqrt(c.population + c.troops.strength + 1) * (night && c.power !== 'dark' ? 1.6 : 1) * (1 + c.noise + c.playerNoise);
         total += a;
         return a;
       });
-      d.neighbors.forEach((n, i) => {
-        dz[n] += (outflow * pull[i]) / total;
-      });
-      dz[d.id] -= outflow;
+      if (total > 0) {
+        d.neighbors.forEach((n, i) => {
+          dz[n] += (outflow * pull[i]) / total;
+        });
+        dz[d.id] -= outflow;
+      }
     }
 
     // Civilians flee from danger or collapse. The bitten hide among them.
@@ -582,9 +593,14 @@ function migrate(s: CityState, night: boolean): void {
         const p = d.population * rate * H;
         const inf = d.infected * rate * H;
         dp[d.id] -= p;
-        di[d.id] -= inf;
         dp[to.id] += p * 0.97;
-        di[to.id] += inf + p * 0.03;
+        if (shut(to)) {
+          // Refugees at the base gate: the healthy are let in, the bitten turned back.
+          dp[to.id] += p * 0.03;
+        } else {
+          di[d.id] -= inf;
+          di[to.id] += inf + p * 0.03;
+        }
       } else rate = 0;
     }
 

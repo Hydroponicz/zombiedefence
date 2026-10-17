@@ -47,20 +47,37 @@ describe('player operations in the simulation', () => {
     expect(market.order).toBe(40 + CRATES.rations.order);
   });
 
-  it('evacuates civilians, with the bitten hiding among them, to the base', () => {
+  it('evacuates civilians to the base, where the bitten among them are caught at the gate', () => {
     const sim = new CitySim('evac');
     const d = byName(sim, 'Northside');
     d.infected = d.population; // half of everyone is bitten
     const base = baseOf(sim.state);
     const pop = base.population;
-    const inf = base.infected;
+    const dead = base.dead;
     for (let i = 0; i < SEATS + 2; i++) sim.command({ type: 'board', district: d.id, kind: 'civilian' });
     expect(seatsUsed(sim.state.cargo)).toBe(SEATS);
-    expect(sim.state.cargo.infected).toBeGreaterThan(0);
+    const bitten = sim.state.cargo.infected;
+    expect(bitten).toBeGreaterThan(0);
     sim.command({ type: 'unloadAtBase' });
-    expect(base.population + base.infected).toBe(pop + inf + SEATS);
-    expect(base.infected).toBeGreaterThan(inf);
+    expect(base.population).toBe(pop + SEATS - bitten);
+    expect(base.infected).toBe(0);
+    expect(base.dead).toBe(dead + bitten);
     expect(sim.state.stats.civiliansEvacuated).toBe(SEATS);
+  });
+
+  it('lets the bitten in once every other district has fallen', () => {
+    const sim = new CitySim('open');
+    const base = baseOf(sim.state);
+    for (const x of sim.state.districts) {
+      if (x === base) continue;
+      Object.assign(x, { status: 'overrun', population: 0, zombies: 500 });
+      x.troops.strength = 0;
+    }
+    sim.step(1);
+    expect(sim.state.flags.baseOpen).toBe(true);
+    sim.state.cargo.infected = 2;
+    sim.command({ type: 'unloadAtBase' });
+    expect(base.infected).toBeGreaterThanOrEqual(2);
   });
 
   it('rotates exhausted soldiers out to rest at the base', () => {

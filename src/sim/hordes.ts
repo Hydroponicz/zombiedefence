@@ -8,7 +8,8 @@
 
 import { districtAt, districtCenter, DISTRICT_TEMPLATES } from './layout';
 import { nextRandom } from './rng';
-import { nearestNode, nodeX, nodeZ, stepToward } from './streets';
+import { baseSealed, isBase } from './quarantine';
+import { neighbors, nearestNode, nodeX, nodeZ } from './streets';
 import type { CityState, DistrictState, Horde, Severity } from './types';
 
 type Emit = (district: number | null, severity: Severity, text: string, radio?: boolean) => void;
@@ -68,7 +69,10 @@ function attraction(d: DistrictState, x: number, z: number, night: boolean): num
 function chooseTarget(s: CityState, h: Horde, night: boolean, emit: Emit, force = false): void {
   let best = h.target;
   let bestScore = -Infinity;
+  const sealed = baseSealed(s);
+  if (sealed && isBase(s.districts[h.target])) force = true;
   for (const d of s.districts) {
+    if (sealed && isBase(d)) continue;
     const score = attraction(d, h.x, h.z, night) * (0.9 + nextRandom(s) * 0.2);
     if (score > bestScore) {
       bestScore = score;
@@ -122,6 +126,22 @@ export function formHordes(s: CityState, emit: Emit): void {
   }
 }
 
+/** The neighbouring corner that gets closest to (x, z), never inside the sealed base. */
+function nextCorner(s: CityState, i: number, j: number, x: number, z: number): [number, number] {
+  const sealed = baseSealed(s);
+  let best: [number, number] = [i, j];
+  let bestD = Infinity;
+  for (const [ni, nj] of neighbors(i, j)) {
+    if (sealed && isBase(s.districts[districtAt(nodeX(ni), nodeZ(nj))])) continue;
+    const d = Math.hypot(nodeX(ni) - x, nodeZ(nj) - z);
+    if (d < bestD) {
+      bestD = d;
+      best = [ni, nj];
+    }
+  }
+  return best;
+}
+
 /** Every game minute: walk the streets, settle on targets, merge and disband. */
 export function moveHordes(s: CityState, night: boolean, emit: Emit): void {
   for (const h of s.hordes) {
@@ -161,7 +181,7 @@ export function moveHordes(s: CityState, night: boolean, emit: Emit): void {
         h.settle = SETTLE_MINUTES;
         break;
       }
-      [h.ni, h.nj] = stepToward(h.ni, h.nj, c.x, c.z);
+      [h.ni, h.nj] = nextCorner(s, h.ni, h.nj, c.x, c.z);
     }
   }
 

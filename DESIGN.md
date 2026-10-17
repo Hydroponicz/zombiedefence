@@ -91,6 +91,11 @@ troops pulled off the barricade → breach.
 
 **The light dilemma:** lit districts are calmer but draw hordes at night.
 
+**Sealed base** (`src/sim/quarantine.ts`): until every other district is overrun, the base takes
+no zombie drift. Hordes skip it as a target and route around it, refugees arrive without the
+bitten, and bitten evacuees are put down at the gate. `flags.baseOpen` breaks the seal for good.
+The client's crowd treats the base's ground as a wall while sealed.
+
 **Strategic sites** (`src/sim/sites.ts`):
 - **Layout:** sites are planned from the seed (block, variant and landing zone), so the 3D city
   builds them where the simulation has them.

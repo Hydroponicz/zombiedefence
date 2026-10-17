@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { CitySim, createCity } from '../src/sim/CitySim';
 import { applyHordeLosses, countHordes, formHordes, moveHordes, totalZombies } from '../src/sim/hordes';
-import { districtCenter, DISTRICT_TEMPLATES } from '../src/sim/layout';
+import { districtAt, districtCenter, DISTRICT_TEMPLATES } from '../src/sim/layout';
 import { nearestNode, nodeX, nodeZ } from '../src/sim/streets';
 import type { CityState, Horde } from '../src/sim/types';
 import { Agents } from '../src/world/Agents';
@@ -55,20 +55,46 @@ describe('hordes', () => {
     const s = emptyCity();
     const from = districtCenter(DISTRICT_TEMPLATES[0].col, DISTRICT_TEMPLATES[0].row);
     const h = horde(s, 1, from.x, from.z, 3000);
-    // Everyone else is gone; only Fort Kessler still draws them.
-    const base = s.districts.find((d) => d.kind === 'airbase')!;
-    for (const d of s.districts) if (d !== base) {
+    // Everyone else is gone; only St. Mary's still draws them.
+    const prey = s.districts.find((d) => d.kind === 'hospital')!;
+    for (const d of s.districts) if (d !== prey) {
       d.population = 0;
       d.troops.strength = 0;
     }
-    h.target = base.id;
-    const c = districtCenter(base.col, base.row);
+    h.target = prey.id;
+    const c = districtCenter(prey.col, prey.row);
     const start = Math.hypot(c.x - h.x, c.z - h.z);
     for (let m = 0; m < 240; m++) {
       s.t++;
       moveHordes(s, false, quiet);
     }
     expect(Math.hypot(c.x - h.x, c.z - h.z)).toBeLessThan(start - 400);
+  });
+
+  it('stay out of the sealed base until every other district has fallen', () => {
+    const s = emptyCity();
+    const base = s.districts.find((d) => d.kind === 'airbase')!;
+    // Only the base has anyone left, and a horde waits next door.
+    for (const d of s.districts) if (d !== base) {
+      d.population = 0;
+      d.troops.strength = 0;
+    }
+    const next = districtCenter(base.col + 1, base.row);
+    const h = horde(s, 1, next.x, next.z, 5000);
+    const walk = (minutes: number) => {
+      let inside = 0;
+      for (let m = 0; m < minutes; m++) {
+        s.t++;
+        moveHordes(s, false, quiet);
+        if (districtAt(h.x, h.z) === base.id) inside++;
+      }
+      return inside;
+    };
+    expect(walk(1200)).toBe(0);
+    expect(h.target).not.toBe(base.id);
+    s.flags.baseOpen = true;
+    h.settle = 0;
+    expect(walk(1200)).toBeGreaterThan(0);
   });
 
   it('merge when they meet', () => {

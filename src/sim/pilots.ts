@@ -5,6 +5,7 @@
 import { districtCenter, DISTRICT_TEMPLATES } from './layout';
 import { BASE_RESERVE_TROOPS, baseOf, BLADDER_LITRES, CRATES, mergeTroops, ROUNDS_PER_TROOP, SEATS, type Emit } from './operations';
 import { totalZombies } from './hordes';
+import { screenAtGate } from './quarantine';
 import { nextRandom } from './rng';
 import type { CityState, CrateKind, DistrictState, JobKind, Order, Pilot, Trip } from './types';
 
@@ -285,7 +286,7 @@ function homecoming(s: CityState, p: Pilot, emit: Emit): void {
   const base = baseOf(s);
   const d = s.districts[trip.district];
   base.population += trip.civilians;
-  base.infected += trip.infected;
+  screenAtGate(s, base, trip.infected);
   if (trip.tired > 0) mergeTroops(base, trip.tired, trip.tiredFatigue, 0.6, 0);
   base.fuel += trip.fuel;
   s.stats.civiliansEvacuated += trip.civilians + trip.infected;

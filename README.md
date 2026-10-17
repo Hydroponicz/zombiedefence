@@ -131,6 +131,18 @@ Each runs one person or crate at a time; lift off to leave.
   and use the menu). Crashes and desertions lose them.
 - **Downed pilots** who survive a crash wait in the district: land there to pick them up.
 
+## Fort Kessler is sealed
+
+No infection or zombie gets into the base until every other district has been overrun:
+- **Hordes:** they never target the base and walk around its perimeter.
+- **Resident zombies:** they don't drift in.
+- **The on-screen dead:** they pile up at the edge of the base's ground instead of crossing it.
+- **The bitten:** any arriving with refugees or evacuees, yours or the AI pilots', are caught at the
+  quarantine checkpoint.
+
+When the last district falls, the radio reports "The dead are at the gates" and the base is open
+to the dead from then on.
+
 ## Strategic sites
 
 Every district has key buildings the military holds: about 54 in all. They're clustered on the blocks around each district's central intersection, as a defensible core, with exact blocks varying by seed.

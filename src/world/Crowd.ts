@@ -13,7 +13,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { districtAt } from '../sim/layout';
+import { districtAt, districtCenter, DISTRICT_SIZE } from '../sim/layout';
 import type { CityState, Horde } from '../sim/types';
 import { walkable, type WalkGrid } from './City';
 
@@ -166,6 +166,8 @@ export class Crowd {
   private remove = new Uint8Array(CROWD_CAPACITY);
   /** Time owed to an agent skipped by its update tier. */
   private lag = new Float32Array(CROWD_CAPACITY);
+  /** The sealed base's ground, a wall to the dead until the city falls (see sim/quarantine.ts). */
+  private sealed: { x0: number; x1: number; z0: number; z1: number } | null = null;
   private slotX = 0;
   private slotZ = 0;
 
@@ -251,6 +253,8 @@ export class Crowd {
 
   /** A bitten civilian rises. */
   spawnResident(x: number, z: number): void {
+    // Nobody rises inside the sealed base: the medics there make sure of it.
+    if (!this.open(x, z) && this.sealed) return;
     this.add(x, z, 0, Mode.Wander);
   }
 
@@ -262,6 +266,15 @@ export class Crowd {
    * @param share fraction of each district's area inside the resident radius
    */
   reconcile(state: CityState, cx: number, cz: number, share: Map<number, number>): void {
+    const base = state.districts.find((d) => d.kind === 'airbase');
+    if (base && !state.flags.baseOpen) {
+      const c = districtCenter(base.col, base.row);
+      const h = DISTRICT_SIZE / 2;
+      this.sealed = { x0: c.x - h, x1: c.x + h, z0: c.z - h, z1: c.z + h };
+    } else {
+      this.sealed = null;
+    }
+
     // Residents.
     const residents = new Map<number, number[]>();
     for (let i = 0; i < this.count; i++) {
@@ -368,7 +381,7 @@ export class Crowd {
       const a = this.rand() * Math.PI * 2;
       const x = cx + Math.cos(a) * r;
       const z = cz + Math.sin(a) * r;
-      if (districtAt(x, z) !== district || !walkable(this.walk, x, z)) continue;
+      if (districtAt(x, z) !== district || !this.open(x, z)) continue;
       this.add(x, z, 0, this.rand() < 0.3 ? Mode.Idle : Mode.Wander);
       return;
     }
@@ -631,7 +644,7 @@ export class Crowd {
     let head = 0;
     let tail = 0;
     const open = (c: number, r: number) =>
-      walkable(this.walk, this.flowX0 + (c + 0.5) * FLOW_CELL, this.flowZ0 + (r + 0.5) * FLOW_CELL);
+      this.open(this.flowX0 + (c + 0.5) * FLOW_CELL, this.flowZ0 + (r + 0.5) * FLOW_CELL);
     // Goal: open ground under the helicopter, or around the building it sits on.
     const hc = Math.floor((hx - this.flowX0) / FLOW_CELL);
     const hr = Math.floor((hz - this.flowZ0) / FLOW_CELL);
@@ -693,15 +706,22 @@ export class Crowd {
     if (px || pz) this.move(i, px * Math.min(1, dt * 6), pz * Math.min(1, dt * 6), false, false);
   }
 
+  /** Open ground the dead can walk on: not inside buildings, nor behind a sealed perimeter. */
+  private open(x: number, z: number): boolean {
+    const b = this.sealed;
+    if (b && x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) return false;
+    return walkable(this.walk, x, z);
+  }
+
   /** Move with separation and wall sliding. */
   private move(i: number, dx: number, dz: number, wander: boolean, separate = true): void {
     const x = this.x[i];
     const z = this.z[i];
     let nx = x + dx;
     let nz = z + dz;
-    if (!walkable(this.walk, nx, nz)) {
-      if (walkable(this.walk, nx, z)) nz = z;
-      else if (walkable(this.walk, x, nz)) nx = x;
+    if (!this.open(nx, nz)) {
+      if (this.open(nx, z)) nz = z;
+      else if (this.open(x, nz)) nx = x;
       else {
         nx = x;
         nz = z;
