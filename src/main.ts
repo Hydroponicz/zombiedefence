@@ -6,7 +6,9 @@ import { districtAt } from './sim/layout';
 import { SimClient } from './sim/SimClient';
 import { DebugMap } from './ui/DebugMap';
 import { Hud } from './ui/Hud';
+import { Agents } from './world/Agents';
 import { City } from './world/City';
+import { Effects } from './world/Effects';
 import { Environment } from './world/Environment';
 
 const params = new URLSearchParams(location.search);
@@ -16,6 +18,9 @@ const PHYSICS_STEP = 1 / 120;
 const RESPAWN_SECONDS = 4;
 const MAP_REFRESH = 1 / 15;
 const POWER_LIGHT = { on: 1, backup: 0.35, dark: 0 } as const;
+/** How often rotor noise is reported to the simulation, in real seconds. */
+const NOISE_REPORT_SECONDS = 1;
+const NOISE_PER_REPORT = 0.15;
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -30,6 +35,10 @@ const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerH
 const environment = new Environment(scene);
 const city = new City(seed);
 scene.add(city.group);
+const effects = new Effects(seed, city.fuelSites);
+scene.add(effects.group);
+const agents = new Agents(seed, effects);
+scene.add(agents.group);
 
 const heli = new Helicopter();
 scene.add(heli.object);
@@ -52,6 +61,8 @@ let respawnTimer = 0;
 let accumulator = 0;
 let mapTimer = 0;
 let firstInput = false;
+let noiseTimer = 0;
+let lastSyncedState: unknown = null;
 const NEUTRAL = { collective: 0, yaw: 0, pitch: 0, roll: 0 };
 
 function setPaused(value: boolean): void {
@@ -131,14 +142,30 @@ function update(dt: number): void {
   city.setNight(night);
 
   const state = sim.state;
-  if (state) {
+  if (state && state !== lastSyncedState) {
+    lastSyncedState = state;
     state.districts.forEach((d, i) => city.setDistrictLight(i, POWER_LIGHT[d.power]));
+    effects.syncWithSim(state);
+  }
+
+  const altitude = heli.position.y - 1.9 - city.surfaceHeight(heli.position.x, heli.position.z);
+  agents.update(dt, heli.position, altitude, heli.destroyed ? 0 : heli.rotor, state, night);
+  effects.update(dt, night);
+
+  // Hovering low is loud: report it so the simulation draws zombies in from nearby districts.
+  noiseTimer -= dt;
+  if (noiseTimer <= 0) {
+    noiseTimer = NOISE_REPORT_SECONDS;
+    if (agents.attract.active && agents.attract.district >= 0) {
+      sim.addNoise(agents.attract.district, NOISE_PER_REPORT * sim.timeScale);
+    }
   }
 
   const districtIndex = districtAt(heli.position.x, heli.position.z);
   const forward = (-heli.yaw * 180) / Math.PI;
   hud.update(dt, sim.time, sim.timeScale, state && districtIndex >= 0 ? state.districts[districtIndex] : null, {
-    altitude: heli.position.y - 1.9 - city.surfaceHeight(heli.position.x, heli.position.z),
+    altitude,
+    drawn: agents.attract.active ? agents.attract.drawn : 0,
     speed: heli.speed,
     verticalSpeed: heli.velocity.y,
     heading: ((forward % 360) + 360) % 360,
@@ -171,4 +198,4 @@ window.addEventListener('resize', () => {
 });
 
 // Handy for debugging from the console.
-Object.assign(window, { game: { sim, heli, city, seed, input, map } });
+Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects } });

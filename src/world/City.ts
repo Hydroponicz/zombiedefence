@@ -8,10 +8,13 @@ import {
   CITY_WIDTH,
   DISTRICT_SIZE,
   DISTRICT_TEMPLATES,
+  districtAt,
   districtCenter,
   type DistrictKind,
 } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { NODES_X, NODES_Z, nodeX, nodeZ, ROAD_WIDTH, STREET_SPACING } from './streets';
 
 const BLOCKS = 8;
 const CELL = DISTRICT_SIZE / BLOCKS; // 80 m
@@ -64,9 +67,12 @@ const COLLISION_CELL = 40;
 export class City {
   readonly group = new THREE.Group();
   readonly helipads: Helipad[] = [];
+  /** Fuel tank farms, where depot fires burn. */
+  readonly fuelSites: { district: number; x: number; z: number }[] = [];
   private boxes: Box[] = [];
   private cylinders: Cylinder[] = [];
   private trees: { x: number; z: number; s: number }[] = [];
+  private cars: { x: number; z: number; yaw: number; color: number }[] = [];
   private colliders: Collider[] = [];
   private grid = new Map<number, number[]>();
   private districtLight = new Float32Array(DISTRICT_TEMPLATES.length).fill(1);
@@ -79,6 +85,7 @@ export class City {
     const rand = makeRandom(`city-${seed}`);
     DISTRICT_TEMPLATES.forEach((tpl, i) => this.buildDistrict(i, tpl.kind, rand));
     this.buildGround();
+    this.placeCars(rand);
     this.buildInstances();
     this.buildColliders();
   }
@@ -224,6 +231,7 @@ export class City {
   }
 
   private buildTankFarm(district: number, cx: number, cz: number): void {
+    this.fuelSites.push({ district, x: cx, z: cz });
     for (let i = 0; i < 2; i++) {
       for (let j = 0; j < 2; j++) {
         this.cylinders.push({ x: cx - 15 + i * 30, z: cz - 15 + j * 30, r: 11, h: 14, color: 0xd9d6cf, district });
@@ -319,6 +327,7 @@ export class City {
       this.boxes.push({ x: cx + dx, z: cz + dz, w, d, h: 3, color: 0x55584f, district, solid: true });
     }
     this.cylinders.push({ x: cx + 240, z: cz - 40, r: 8, h: 10, color: 0xcfcbc2, district });
+    this.fuelSites.push({ district, x: cx + 240, z: cz - 25 });
     this.cylinders.push({ x: cx + 240, z: cz - 10, r: 8, h: 10, color: 0xcfcbc2, district });
     for (let i = 0; i < 4; i++) this.addHelipad(cx - 160 + i * 50, cz - 70, 0.35, i === 0 ? `${name} pad 1` : `${name} pad ${i + 1}`);
   }
@@ -330,10 +339,11 @@ export class City {
   private buildGround(): void {
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(9000, 9000),
-      new THREE.MeshLambertMaterial({ color: 0x55664a }),
+      // Pushed back in depth and kept well below the streets so it can't show through them.
+      new THREE.MeshLambertMaterial({ color: 0x55664a, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 4 }),
     );
     ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.05;
+    ground.position.y = -0.6;
     ground.receiveShadow = true;
     this.group.add(ground);
 
@@ -373,6 +383,33 @@ export class City {
       m.rotation.x = -Math.PI / 2;
       m.position.set(pad.x, pad.y + 0.05, pad.z);
       this.group.add(m);
+    }
+  }
+
+  /** Parked and abandoned cars along the curbs, thicker downtown. */
+  private placeCars(rand: () => number): void {
+    const colors = [0x8c1d1d, 0x1d3f8c, 0xd8d8d0, 0x2a2a2a, 0x6b6f72, 0x9c7a2b, 0x2f5f3a, 0xb0b4b8];
+    const curb = ROAD_WIDTH / 2 - 2.2;
+    for (let i = 0; i < NODES_X; i++) {
+      for (let j = 0; j < NODES_Z; j++) {
+        for (const horizontal of [true, false]) {
+          if (horizontal ? i === NODES_X - 1 : j === NODES_Z - 1) continue;
+          const n = rand() < 0.45 ? 1 + Math.floor(rand() * 3) : 0;
+          for (let k = 0; k < n; k++) {
+            const t = 0.15 + rand() * 0.7;
+            const side = rand() < 0.5 ? -1 : 1;
+            // A few are abandoned mid-road at an angle.
+            const abandoned = rand() < 0.15;
+            const offset = abandoned ? (rand() - 0.5) * 6 : side * curb;
+            const x = horizontal ? nodeX(i) + t * STREET_SPACING : nodeX(i) + offset;
+            const z = horizontal ? nodeZ(j) + offset : nodeZ(j) + t * STREET_SPACING;
+            const district = districtAt(x, z);
+            if (district < 0 || DISTRICT_TEMPLATES[district].kind === 'airbase') continue;
+            const yaw = (horizontal ? 0 : Math.PI / 2) + (abandoned ? (rand() - 0.5) * 1.2 : 0);
+            this.cars.push({ x, z, yaw, color: colors[Math.floor(rand() * colors.length)] });
+          }
+        }
+      }
     }
   }
 
@@ -421,6 +458,22 @@ export class City {
     });
     trees.castShadow = true;
     this.group.add(trees);
+
+    const body = new THREE.BoxGeometry(4.3, 0.9, 1.8);
+    body.translate(0, 0.65, 0);
+    const cabin = new THREE.BoxGeometry(2.2, 0.7, 1.6);
+    cabin.translate(-0.2, 1.45, 0);
+    const carGeo = mergeGeometries([body, cabin]);
+    const cars = new THREE.InstancedMesh(carGeo, new THREE.MeshLambertMaterial(), this.cars.length);
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    this.cars.forEach((c, i) => {
+      m.compose(new THREE.Vector3(c.x, 0, c.z), q.setFromAxisAngle(up, c.yaw), new THREE.Vector3(1, 1, 1));
+      cars.setMatrixAt(i, m);
+      cars.setColorAt(i, color.setHex(c.color));
+    });
+    cars.castShadow = true;
+    this.group.add(cars);
   }
 
   /** Procedural windows from world position, lit at night per district power level. */
@@ -438,6 +491,7 @@ export class City {
           uniform float uDistrictLight[${count}];
           varying vec3 vWinPos;
           varying vec3 vWinNormal;
+          varying float vWinLit;
           varying float vWinLight;`,
         )
         .replace(
@@ -451,6 +505,7 @@ export class City {
           #endif
           vWinPos = (modelMatrix * winPos).xyz;
           vWinNormal = normalize(mat3(modelMatrix) * winNormal);
+          vWinLit = aLit;
           vWinLight = aLit * uDistrictLight[int(aDistrict + 0.5)];`,
         );
       shader.fragmentShader = shader.fragmentShader
@@ -460,13 +515,15 @@ export class City {
           uniform float uNight;
           varying vec3 vWinPos;
           varying vec3 vWinNormal;
+          varying float vWinLit;
           varying float vWinLight;
           float winHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`,
         )
         .replace(
           '#include <emissivemap_fragment>',
           `#include <emissivemap_fragment>
-          if (vWinLight > 0.001 && abs(vWinNormal.y) < 0.5 && vWinPos.y > 1.5) {
+          // Windows are always drawn; only their night glow depends on the district's power.
+          if (vWinLit > 0.5 && abs(vWinNormal.y) < 0.5 && vWinPos.y > 1.5) {
             float along = abs(vWinNormal.x) > 0.5 ? vWinPos.z : vWinPos.x;
             vec2 cell = vec2(floor(along / 3.2), floor(vWinPos.y / 3.4));
             vec2 f = vec2(fract(along / 3.2), fract(vWinPos.y / 3.4));

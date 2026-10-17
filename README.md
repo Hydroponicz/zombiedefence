@@ -51,11 +51,23 @@ Any controller using the browser's standard gamepad mapping works (Xbox, PlaySta
   and the full radio log.
 - **District lights** follow the simulation's power grid, so blackouts are visible from the air.
 
+## What's in phase 2
+
+- **Living streets** within about 380 m of the helicopter: zombies, civilians and soldiers whose
+  numbers match the simulation (one-for-one while an outbreak is small, compressed for hordes).
+  Zombies shamble along the streets, chase and bite civilians, who flee and later rise as zombies.
+  Soldiers man sandbag posts while their district holds and shoot with tracers.
+- **Rotor noise:** hovering under 70 m draws nearby zombies toward the helicopter (the HUD shows
+  how many) and is reported to the simulation, which pulls hordes in from neighbouring districts.
+- **The collapse from afar:** smoke columns and street fires over contested, rioting and overrun
+  districts; depot fires with towering black smoke; abandoned cars across the city.
+- **HUD:** the district panel shows rough zombie and troop counts.
+
 ## Project layout
 
 ```
 src/sim/      City simulation (no browser dependencies), clock, layout, worker bridge
-src/world/    City generation and collision, sky and lighting
+src/world/    City generation and collision, street grid, people on the streets, effects, sky
 src/heli/     Helicopter flight model and chase camera
 src/input/    Keyboard, mouse and gamepad input
 src/ui/       HUD and debug map

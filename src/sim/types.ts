@@ -49,6 +49,10 @@ export interface DistrictState {
   noise: number;
   /** Zombie kills per game hour, smoothed. */
   killRate: number;
+  /** Rotor noise from the player's helicopter, 0..3. Draws zombies in from neighbouring districts. */
+  playerNoise: number;
+  /** Game minutes a depot fire has left to burn. */
+  burning: number;
 
   /** One-shot event flags. */
   flags: Record<string, boolean>;

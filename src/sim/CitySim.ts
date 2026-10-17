@@ -60,6 +60,12 @@ export class CitySim {
     for (let i = 0; i < ticks; i++) tick(this.state, this.pending);
   }
 
+  /** Rotor noise from the player's helicopter hovering low over a district. */
+  addPlayerNoise(district: number, amount: number): void {
+    const d = this.state.districts[district];
+    if (d) d.playerNoise = clamp(d.playerNoise + amount, 0, 3);
+  }
+
   /** Events produced since the last call. */
   takeEvents(): SimEvent[] {
     const out = this.pending;
@@ -110,6 +116,8 @@ export function createCity(seed: number | string): CityState {
       status: 'held',
       noise: 0,
       killRate: 0,
+      playerNoise: 0,
+      burning: 0,
       flags: {},
       cooldowns: {},
     };
@@ -280,6 +288,8 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const kills = civKills + soldierKills;
   d.killRate = d.killRate * 0.95 + (kills / H) * 0.05;
   d.noise = d.noise * 0.9 + clamp(d.killRate / 50, 0, 2) * 0.1;
+  d.playerNoise *= 0.97;
+  d.burning = Math.max(0, d.burning - 1);
 
   if (!d.flags.outbreak && d.zombies > 15) {
     d.flags.outbreak = true;
@@ -306,6 +316,7 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
     if (d.features.fuelDepot && Math.floor(s.t) % 60 === 0 && nextRandom(s) < 0.03 && d.fuel > 1000) {
       d.fuel *= 0.7;
       d.noise = 2;
+      d.burning = 360;
       emit(d.id, 'critical', `Fuel depot fire in ${d.name}. The blaze is drawing the dead.`);
     }
   }
@@ -437,11 +448,13 @@ function migrate(s: CityState, night: boolean): void {
       const horde = d.zombies > 300 && humans < d.zombies * 0.05;
       let rate = horde ? TUNING.hordeWanderRate : TUNING.zombieWanderRate;
       if (!horde && humans / (d.zombies + 1) > 0.2) rate *= 0.3;
+      // A helicopter hovering low keeps the local dead busy.
+      rate /= 1 + d.playerNoise;
       const outflow = d.zombies * rate * H;
       let total = 0;
       const pull = d.neighbors.map((n) => {
         const c = ds[n];
-        const a = Math.sqrt(c.population + c.troops.strength + 1) * (night && c.power !== 'dark' ? 1.6 : 1) * (1 + c.noise);
+        const a = Math.sqrt(c.population + c.troops.strength + 1) * (night && c.power !== 'dark' ? 1.6 : 1) * (1 + c.noise + c.playerNoise);
         total += a;
         return a;
       });

@@ -220,8 +220,8 @@ throttle, light assists. Deadzones and sensitivity are configurable. Uses the Ga
 
 ## Build order
 
-Status: phase 1 is done (see README). Phase 1 also wired district window lights to the
-simulation's power grid, an early piece of phase 2.
+Status: phases 1 and 2 are done (see README). Phase 2's write-back so far is rotor noise; landing
+and drops writing back come with the player actions in phase 3.
 
 Phase 1 tuning note: with no player, the baseline run is a slow outbreak on days 1–4, shortages
 and riots on days 4–6, most districts falling on days 6–9, and the base falling around day 14–16.

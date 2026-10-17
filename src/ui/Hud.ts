@@ -37,6 +37,8 @@ export interface FlightReadout {
   landed: boolean;
   destroyed: boolean;
   searchlight: boolean;
+  /** Zombies currently drawn toward the helicopter by rotor noise. */
+  drawn: number;
 }
 
 export class Hud {
@@ -114,19 +116,26 @@ export class Hud {
     const scale = timeScale > 1 ? ` <small>Time ×${timeScale}</small>` : '';
     this.clock.innerHTML = `${isDaytime(t) ? '☀' : '☾'} ${formatClock(t)}${scale}`;
 
+    const zombies = district ? approx(district.zombies) : '';
+    const troops = district ? Math.round(district.troops.strength) : 0;
     const key = district
-      ? `${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}`
+      ? `${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}`
       : 'none';
     if (key !== this.lastDistrictKey) {
       this.lastDistrictKey = key;
       this.district.innerHTML = district
         ? `<div class="name">${district.name}</div>
            <span class="chip ${district.status}">${district.status}</span>
-           <div class="meta">${POWER_LABEL[district.power]} · Order ${Math.round(district.order)}${district.rioting ? ' · Rioting' : ''}</div>`
+           <div class="meta">${POWER_LABEL[district.power]} · Order ${Math.round(district.order)}${district.rioting ? ' · Rioting' : ''}</div>
+           <div class="meta">Zombies ${zombies} · Troops ${troops}</div>`
         : `<div class="name">Outside the city</div>`;
     }
 
-    const state = flight.destroyed ? 'DESTROYED' : flight.landed ? 'LANDED' : flight.searchlight ? 'SEARCHLIGHT ON' : '';
+    const state = flight.destroyed
+      ? 'DESTROYED'
+      : flight.drawn > 0
+        ? `<span style="color:var(--warn)">ROTOR NOISE · ${flight.drawn} drawn in</span>`
+        : flight.landed ? 'LANDED' : flight.searchlight ? 'SEARCHLIGHT ON' : '';
     const hp = Math.round(flight.health);
     this.flight.innerHTML = `
       <span class="label">ALT</span><span>${Math.round(flight.altitude)} m</span>
@@ -146,6 +155,14 @@ export class Hud {
       if (this.toastTimer <= 0) this.toastEl.classList.remove('show');
     }
   }
+}
+
+/** Rough counts read better than exact simulation numbers. */
+function approx(n: number): string {
+  if (n < 1) return 'none';
+  if (n < 20) return String(Math.round(n));
+  if (n < 1000) return `~${Math.round(n / 10) * 10}`;
+  return `~${(n / 1000).toFixed(1)}k`;
 }
 
 function el(id: string): HTMLElement {

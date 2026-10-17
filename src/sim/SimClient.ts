@@ -48,6 +48,10 @@ export class SimClient {
     this.flush();
   }
 
+  addNoise(district: number, amount: number): void {
+    this.send({ type: 'noise', district, amount });
+  }
+
   private flush(): void {
     if (this.inFlight) return;
     const ticks = Math.min(MAX_BATCH, Math.floor(this.time) - this.requestedTo);
