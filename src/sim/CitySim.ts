@@ -8,6 +8,7 @@ import { applyCommand, baseOf, emptyCargo, mergeTroops, type PlayerCommand } fro
 import { applyHordeLosses, countHordes, formHordes, moveHordes, totalZombies } from './hordes';
 import { initialFleet, payday, updatePilots } from './pilots';
 import { createSites, updateSites } from './sites';
+import { createSupply, updateSupply } from './supply';
 import { baseSealed, checkSeal, isBase } from './quarantine';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
@@ -119,6 +120,7 @@ export function createCity(seed: number | string): CityState {
     hordes: [],
     hordeSeq: 0,
     sites: [],
+    supply: createSupply(),
     pilotSeq: 0,
     airframeSeq: 0,
   };
@@ -199,7 +201,7 @@ function tick(s: CityState, out: SimEvent[]): void {
   for (const d of ds) applyHordeLosses(s, d.id, updateDistrict(s, d, day, night, emit));
 
   migrate(s, night);
-  if (hourly) distributeRations(s, emit);
+  updateSupply(s, hourly, emit);
   if (hourly) fuelConvoys(s, emit);
   if (hourly) formHordes(s, emit);
   if (hourly) updateSites(s, night, emit, (d) => effectiveness(d, night));
@@ -425,10 +427,9 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   d.rations = Math.max(0, d.rations - (people / 1440) * hoarding * water);
   d.medicine = Math.max(0, d.medicine - encounters * 0.5 - (people / 1440) * 0.02);
   if (Math.floor(s.t) % 60 === 0) {
-    // Outside supply dries up after day 2; after that people scavenge, with less to find each day.
-    const outside = d.status === 'overrun' ? 0 : Math.max(0, 0.6 - 0.3 * (day - 1));
+    // Food comes in by truck (see supply.ts); without it people scavenge, finding less each day.
     const scavenged = d.rations <= 0 ? Math.max(0.1, 0.5 - 0.03 * day) : 0;
-    d.rations += (people * (outside + scavenged)) / 24;
+    d.rations += (people * scavenged) / 24;
   }
   if (d.rioting) {
     d.rations *= 1 - 0.03 * H;
@@ -617,31 +618,6 @@ function migrate(s: CityState, night: boolean): void {
     d.population = Math.max(0, d.population + dp[i]);
     d.infected = Math.max(0, d.infected + di[i]);
   });
-}
-
-function distributeRations(s: CityState, emit: Emit): void {
-  const wh = s.districts.find((d) => d.features.warehouse);
-  if (!wh) return;
-  const working = wh.status !== 'overrun' && !wh.rioting && wh.order > 30;
-  if (!working) {
-    if (!s.flags.warehouseCut) {
-      s.flags.warehouseCut = true;
-      emit(wh.id, 'critical', `Food trucks from the ${wh.name} warehouse have stopped running.`);
-    }
-    return;
-  }
-  for (const d of s.districts) {
-    if (d === wh || d.status === 'overrun') continue;
-    const reserve = (wh.population + wh.troops.strength) * 1;
-    const available = wh.rations - reserve;
-    if (available <= 0) return;
-    const people = d.population + d.troops.strength + d.infected;
-    if (d.rations / Math.max(1, people) >= 2) continue;
-    const distance = Math.abs(d.col - wh.col) + Math.abs(d.row - wh.row);
-    const shipment = Math.min(available, (people * TUNING.truckRate) / distance);
-    wh.rations -= shipment;
-    d.rations += shipment;
-  }
 }
 
 function updateStatus(d: DistrictState, emit: Emit): void {

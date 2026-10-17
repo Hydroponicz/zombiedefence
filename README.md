@@ -131,6 +131,23 @@ Each runs one person or crate at a time; lift off to leave.
   and use the menu). Crashes and desertions lose them.
 - **Downed pilots** who survive a crash wait in the district: land there to pick them up.
 
+## Food trucks and trains
+
+- **Freight trains** run every four hours into the rail yard in Industrial Park, on a line from the
+  south. Each brings 60,000 rations. They run only while Industrial Park has no infection at all;
+  the radio reports when they stop and when they start again.
+- **Civilian food trucks** drive the streets from the rail yard and the Market District warehouse to
+  any district below two days of food. You can see them in the city and as white squares on the map.
+- **A district without infection never runs out of food.** If the city's own stocks are spent,
+  regional trucks come in from outside.
+- **Districts with the dead in them** get trucks only from the city's stocks, and only while they
+  hold or still keep order. Once the yard and warehouse are empty they go hungry: "No food is left
+  to truck into …".
+- **Trucks at risk:** trucks crossing contested or overrun ground can be lost, and rioters hijack
+  them.
+
+Keeping Industrial Park clean keeps the trains running, and the trains feed the whole city.
+
 ## Fort Kessler is sealed
 
 No infection or zombie gets into the base until every other district has been overrun:

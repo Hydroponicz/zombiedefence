@@ -16,6 +16,7 @@ import { Effects } from './world/Effects';
 import { Environment } from './world/Environment';
 import { Farps } from './world/Farps';
 import { Sites } from './world/Sites';
+import { Traffic } from './world/Traffic';
 import { siteNear } from './sim/sites';
 
 const params = new URLSearchParams(location.search);
@@ -60,6 +61,8 @@ const farps = new Farps();
 scene.add(farps.group);
 const sites = new Sites(seed);
 scene.add(sites.group);
+const traffic = new Traffic();
+scene.add(traffic.group);
 const fleet = new AiFleet(city.helipads);
 scene.add(fleet.group);
 
@@ -240,6 +243,7 @@ function update(dt: number): void {
   effects.update(dt, night);
   farps.update(dt);
   sites.update(dt, night);
+  traffic.update(state, sim.time);
   fleet.update(dt, state, sim.time);
 
   // Ground operations: loading, deploying, evacuating.
@@ -316,4 +320,4 @@ window.addEventListener('resize', () => {
 });
 
 // Handy for debugging from the console.
-Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops, command, fleet, sites } });
+Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops, command, fleet, sites, traffic } });

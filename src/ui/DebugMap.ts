@@ -5,6 +5,7 @@ import { formatClock, MINUTES_PER_DAY, NIGHT_START, DAY_START } from '../sim/clo
 import { CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE, DISTRICT_TEMPLATES, GRID_COLS, GRID_ROWS } from '../sim/layout';
 import { totalZombies } from '../sim/hordes';
 import { guardsNeeded } from '../sim/sites';
+import { RAIL, trainPose, truckPose } from '../sim/supply';
 import type { CityState, DistrictState, SiteKind, SiteStatus } from '../sim/types';
 
 const OVERLAYS = ['Status', 'Infection', 'Power', 'Order', 'Supplies', 'Troops', 'Fuel'] as const;
@@ -210,6 +211,34 @@ export class DebugMap {
       g.fillRect(fx - 6, fy - 6, 12, 12);
       g.strokeRect(fx - 6, fy - 6, 12, 12);
       this.text(`FARP ${fmt(f.fuel)} L`, fx + 9, fy + 4, 11, '#f3d2a8');
+    }
+
+    // The freight line and the food chain: trains on the rail, trucks on the roads.
+    const railX = mx + (RAIL.x + CITY_WIDTH / 2) * scale;
+    const railY0 = my + (RAIL.stopZ + CITY_DEPTH / 2) * scale;
+    g.strokeStyle = s.supply.railHalted ? '#7a3b35' : '#3b3b3b';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(railX, railY0);
+    g.lineTo(railX, my + CITY_DEPTH * scale);
+    g.stroke();
+    this.text(`Rail yard ${fmt(s.supply.yard)}${s.supply.railHalted ? ' · trains stopped' : ''}`, railX + 6, railY0 - 4, 11,
+      s.supply.railHalted ? '#ef5b4f' : '#0d0f0e');
+    for (const tr of s.supply.trains) {
+      const z = trainPose(tr, s.t).z;
+      if (z > CITY_DEPTH / 2) continue;
+      g.fillStyle = '#2f4f7a';
+      g.fillRect(railX - 3, my + (z + CITY_DEPTH / 2) * scale, 6, Math.max(6, 220 * scale));
+    }
+    g.fillStyle = '#f0f0ea';
+    g.strokeStyle = '#000';
+    g.lineWidth = 1;
+    for (const tr of s.supply.trucks) {
+      const p = truckPose(tr, s.t);
+      const tx = mx + (p.x + CITY_WIDTH / 2) * scale;
+      const ty = my + (p.z + CITY_DEPTH / 2) * scale;
+      g.fillRect(tx - 2.5, ty - 2.5, 5, 5);
+      g.strokeRect(tx - 2.5, ty - 2.5, 5, 5);
     }
 
     // Strategic sites: a letter on a square coloured by status.

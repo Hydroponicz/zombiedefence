@@ -216,6 +216,44 @@ export interface Airframe {
   status: 'ready' | 'flying' | 'lost';
 }
 
+/** A civilian food truck on its way to a district. Its route is fixed when it sets off. */
+export interface Truck {
+  id: number;
+  /** Depot district it loaded at, or -1 for a regional truck from outside the city. */
+  from: number;
+  to: number;
+  rations: number;
+  /** Street corners along the route, flattened: i0, j0, i1, j1, ... */
+  path: number[];
+  /** Game minutes it set off and will arrive. */
+  depart: number;
+  arrive: number;
+}
+
+/** A freight train bringing food into the rail yard from outside the city. */
+export interface Train {
+  id: number;
+  /** Game minutes: leaves the horizon, reaches the yard, pulls out, is gone. */
+  depart: number;
+  arrive: number;
+  leave: number;
+  gone: number;
+  /** Unloaded (or turned back) at the yard. */
+  done: boolean;
+}
+
+export interface Supply {
+  /** Rations waiting at the rail yard for trucks. */
+  yard: number;
+  trucks: Truck[];
+  trains: Train[];
+  seq: number;
+  /** Game minute the next train is due to set off. */
+  nextTrain: number;
+  /** The railway has stopped running (infection at the yard). */
+  railHalted: boolean;
+}
+
 /** A forward refuelling point the player set up in the city. */
 export interface Farp {
   id: number;
@@ -280,6 +318,7 @@ export interface CityState {
   hordes: Horde[];
   hordeSeq: number;
   sites: Site[];
+  supply: Supply;
   pilotSeq: number;
   airframeSeq: number;
   /** Research points earned by scientists at the base. */

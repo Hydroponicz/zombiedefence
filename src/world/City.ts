@@ -18,6 +18,7 @@ import {
 } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
 import { planSites, type SitePlan } from '../sim/sites';
+import { RAIL } from '../sim/supply';
 import { BLOCKS_PER_DISTRICT, blockLot, NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, SIDEWALK, STREET_SPACING } from '../sim/streets';
 
 interface Box {
@@ -156,6 +157,7 @@ export class City {
     for (const p of planSites(seed)) this.sitePlans.set(`${p.i},${p.j}`, p);
     DISTRICT_TEMPLATES.forEach((tpl, i) => this.buildDistrict(i, tpl.kind, rand));
     this.buildWaterfront(rand);
+    this.buildRailLine();
     this.placeStreetFurniture(rand);
     this.buildGround();
     this.buildInstances();
@@ -252,6 +254,10 @@ export class City {
         const lot = this.lotAt(i, j, district);
         // Sidewalk around every block; houses sit on lawns inside it. Sites lay their own grounds.
         this.pad(lot, CONCRETE, district, 0.18);
+        if (RAIL.blocks.some(([a, b]) => a === i && b === j)) {
+          this.buildRailYard(district, lot);
+          continue;
+        }
         const site = this.sitePlans.get(`${i},${j}`);
         if (site) {
           this.buildSite(district, site, lot, rand);
@@ -288,6 +294,32 @@ export class City {
         s: 1.2 + rand() * 0.8,
       });
     }
+  }
+
+  /** The freight line: ballast and rails from the yard south, out past the city edge. */
+  private buildRailLine(): void {
+    const z0 = RAIL.stopZ - 8;
+    const z1 = RAIL.farZ + 300;
+    const district = DISTRICT_TEMPLATES.findIndex((d) => d.kind === 'industrial');
+    const len = z1 - z0;
+    this.boxes.push({ x: RAIL.x, z: z0 + len / 2, w: 4.2, d: len, h: 0.9, y: -0.6, color: 0x7a7468, district });
+    for (const off of [-0.72, 0.72]) {
+      this.boxes.push({ x: RAIL.x + off, z: z0 + len / 2, w: 0.14, d: len, h: 0.18, y: 0.3, color: 0x5e5a55, district });
+    }
+  }
+
+  /** The rail yard: gravel, two sidings beside the main line, a goods shed and a gantry. */
+  private buildRailYard(district: number, lot: Lot): void {
+    this.pad(lot, 0x8a8477, district, 0.24, SIDEWALK);
+    for (const off of [-7, 7]) {
+      for (const r of [-0.72, 0.72]) {
+        this.boxes.push({ x: RAIL.x + off + r, z: lot.cz, w: 0.14, d: lot.d - 2 * SIDEWALK, h: 0.18, y: 0.24, color: 0x5e5a55, district });
+      }
+    }
+    this.building(district, RAIL.x - 26, lot.cz, 16, lot.d - 20, 9, 0x8d7f6a, false);
+    // Gantry crane straddling the tracks.
+    for (const dx of [-12, 12]) this.cylinders.push({ x: RAIL.x + dx, z: lot.cz, r: 0.6, h: 14, color: 0xd09a2a });
+    this.boxes.push({ x: RAIL.x, z: lot.cz, w: 26, d: 2, h: 1.6, y: 14, color: 0xd09a2a, district });
   }
 
   /**

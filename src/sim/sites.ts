@@ -176,9 +176,11 @@ export function createSites(s: CityState): void {
     const stores = here.filter((x) => x.kind === 'supermarket');
     const shelters = here.filter((x) => x.kind === 'shelter');
     const pharmacies = here.filter((x) => x.kind === 'pharmacy');
-    const food = d.rations * (stores.length ? 0.5 : 0) + d.rations * (shelters.length ? 0.1 : 0);
-    for (const x of stores) x.rations = (d.rations * 0.5) / stores.length;
-    for (const x of shelters) x.rations = (d.rations * 0.1) / shelters.length;
+    // The district's own food, not the city stock in the Market District warehouse.
+    const own = Math.min(d.rations, (d.population + d.troops.strength) * 2.5);
+    const food = own * (stores.length ? 0.5 : 0) + own * (shelters.length ? 0.1 : 0);
+    for (const x of stores) x.rations = (own * 0.5) / stores.length;
+    for (const x of shelters) x.rations = (own * 0.1) / shelters.length;
     d.rations -= food;
     if (pharmacies.length && !d.features.hospital) {
       for (const x of pharmacies) x.medicine = (d.medicine * 0.6) / pharmacies.length;

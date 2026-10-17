@@ -91,6 +91,18 @@ troops pulled off the barricade → breach.
 
 **The light dilemma:** lit districts are calmer but draw hordes at night.
 
+**Food supply** (`src/sim/supply.ts`): trucks and trains have fixed routes and timetables
+(`truckPose`, `trainPose`), so the client draws them at the smooth game time.
+- **Trains:** one every 240 minutes, carrying 60k rations, while the industrial district is free of
+  infection.
+- **Dispatch:** every hour, trucks of 6,000 rations go to districts below two days of food, from the
+  nearest depot with stock: the rail yard, or the warehouse above its own two days.
+- **Clean districts:** they get regional trucks from the city edge when the depots are dry, and a
+  shelf floor of 0.3 days.
+- **Losses:** each hour, trucks on contested ground are lost 4% of the time and on overrun ground
+  25%; rioters hijack 8%.
+- **What it replaces:** the old outside-supply trickle and the warehouse's direct transfers.
+
 **Sealed base** (`src/sim/quarantine.ts`): until every other district is overrun, the base takes
 no zombie drift. Hordes skip it as a target and route around it, refugees arrive without the
 bitten, and bitten evacuees are put down at the gate. `flags.baseOpen` breaks the seal for good.
