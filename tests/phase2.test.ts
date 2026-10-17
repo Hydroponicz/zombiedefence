@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { CitySim, createCity } from '../src/sim/CitySim';
-import { districtCenter, DISTRICT_TEMPLATES } from '../src/sim/layout';
+import { districtCenter, DISTRICT_SIZE, DISTRICT_TEMPLATES } from '../src/sim/layout';
 import type { CityState } from '../src/sim/types';
 import { ACTIVE_RADIUS, Agents } from '../src/world/Agents';
 import type { Effects } from '../src/world/Effects';
@@ -62,7 +62,7 @@ describe('street scene', () => {
     run(agents, cityWith(60), 4, 200);
     const census = agents.census();
     // Most of Downtown is inside the active circle, so most of its 60 zombies should be on screen.
-    const share = (Math.PI * ACTIVE_RADIUS * ACTIVE_RADIUS) / (640 * 640);
+    const share = (Math.PI * ACTIVE_RADIUS * ACTIVE_RADIUS) / (DISTRICT_SIZE * DISTRICT_SIZE);
     expect(census.zombies).toBeGreaterThan(60 * Math.min(1, share) * 0.5);
     // Local bites can briefly add a few before the next reconciliation trims them.
     expect(census.zombies).toBeLessThanOrEqual(66);

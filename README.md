@@ -42,6 +42,16 @@ Add `?seed=1234` to the URL to replay a specific city and outbreak.
 
 Any controller using the browser's standard gamepad mapping works (Xbox, PlayStation, most others).
 
+## Scale
+
+Everything is built at real-world size. Districts are 1.44 km across, so the city is 5.8 x 4.3 km
+for 308,000 people, about 1.5 minutes across at full speed. Blocks are 120 m between 18 m streets
+and 30 m avenues; houses sit on lots with gable roofs; apartment slabs run 6–20 floors; downtown
+towers rise toward a 470 m supertall with a rooftop helipad; the port stacks real 40 ft containers
+under ship-to-shore cranes; the airbase has a 1.4 km runway. People are life size (about 1.75 m),
+cars are 4.5 m, and the helicopter matches a Black Hawk (16 m rotor, about 245 km/h flat out).
+Streetlights burn at night while a district has grid power.
+
 ## What's in phase 1
 
 - **Arcade helicopter** in the GTA V style: the stick sets the attitude and the aircraft self-levels

@@ -21,12 +21,12 @@ export class Environment {
     cam.left = cam.bottom = -SHADOW_EXTENT;
     cam.right = cam.top = SHADOW_EXTENT;
     cam.near = 10;
-    cam.far = 1600;
+    cam.far = 2600;
     this.sun.shadow.bias = -0.0005;
     this.sun.shadow.normalBias = 0.5;
     scene.add(this.sun, this.sun.target, this.hemi);
 
-    scene.fog = new THREE.Fog(DAY_SKY, 500, 3200);
+    scene.fog = new THREE.Fog(DAY_SKY, 900, 9000);
     scene.background = this.sky;
 
     const starGeo = new THREE.BufferGeometry();
@@ -35,7 +35,7 @@ export class Environment {
     for (let i = 0; i < 1500; i++) {
       v.randomDirection();
       v.y = Math.abs(v.y) * 0.9 + 0.1;
-      v.normalize().multiplyScalar(4000);
+      v.normalize().multiplyScalar(15000);
       positions.set([v.x, v.y, v.z], i * 3);
     }
     starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -60,7 +60,7 @@ export class Environment {
     const duskness = sun ? Math.max(0, 1 - Math.sin(angle) * 3) : 0;
     this.sky.copy(DAY_SKY).lerp(DUSK_SKY, duskness * 0.6).lerp(NIGHT_SKY, night);
     (this.scene.fog as THREE.Fog).color.copy(this.sky);
-    (this.scene.fog as THREE.Fog).far = 3200 - night * 1200;
+    (this.scene.fog as THREE.Fog).far = 9000 - night * 4500;
 
     this.sun.intensity = sun ? 0.4 + 1.8 * light : 0.4;
     this.sun.color.setHex(sun ? 0xfff2dd : 0x8fa6d6).lerp(new THREE.Color(0xffb27a), duskness * 0.7);

@@ -7,7 +7,8 @@ import { districtCenter, DISTRICT_TEMPLATES } from '../sim/layout';
 import type { CityState, Pilot } from '../sim/types';
 import type { Helipad } from './City';
 
-const CRUISE = 110;
+/** Cruise above the 470 m supertall so routes never pass through the skyline. */
+const CRUISE = 520;
 /** Share of a flight spent climbing out and descending in. */
 const CLIMB = 0.18;
 

@@ -49,8 +49,8 @@ describe('helicopter flight model', () => {
     const h = airborne();
     fly(h, 20, input({ pitch: 1 }));
     // Heading 0 faces -Z.
-    expect(h.velocity.z).toBeLessThan(-40);
-    expect(h.speed).toBeLessThan(55);
+    expect(h.velocity.z).toBeLessThan(-55);
+    expect(h.speed).toBeLessThan(75);
     expect(Math.abs(h.position.y - 100)).toBeLessThan(3);
   });
 

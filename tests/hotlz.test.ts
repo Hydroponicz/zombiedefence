@@ -15,7 +15,8 @@ describe('hot landing zone', () => {
   function horde() {
     const state = createCity('lz');
     for (const d of state.districts) d.zombies = 0;
-    state.districts[index].zombies = 250;
+    // A dense horde: the district is 1.4 km across, so it takes numbers to crowd a landing zone.
+    state.districts[index].zombies = 1200;
     state.districts[index].troops.strength = 0;
     return state;
   }

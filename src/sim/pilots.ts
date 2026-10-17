@@ -15,8 +15,8 @@ export const JOB_LABELS: Record<JobKind, string> = {
   fuel: 'Fuel run',
 };
 
-/** AI cruise speed converted to game time: metres per game minute (40 m/s at the daytime clock rate). */
-const METRES_PER_GAME_MINUTE = 57;
+/** AI cruise speed converted to game time: metres per game minute (60 m/s at the daytime clock rate). */
+const METRES_PER_GAME_MINUTE = 86;
 const TAKEOFF_MINUTES = 5;
 const GROUND_MINUTES = 15;
 const TURNAROUND_MINUTES = 20;

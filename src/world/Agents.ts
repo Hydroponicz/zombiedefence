@@ -10,7 +10,7 @@ import { DISTRICT_SIZE, DISTRICT_TEMPLATES, districtAt } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
 import type { CityState, DistrictState } from '../sim/types';
 import type { Effects } from './Effects';
-import { nearestNode, neighbors, nodeX, nodeZ, NODES_X, NODES_Z, stepToward } from './streets';
+import { BLOCKS_PER_DISTRICT, nearestNode, neighbors, nodeX, nodeZ, NODES_X, NODES_Z, stepToward } from './streets';
 
 const enum Kind {
   Zombie,
@@ -78,16 +78,17 @@ const GRAB_RANGE = 3.5;
 const DOOR_RANGE = 9;
 const DOOR_GUN_RANGE = 70;
 const DOOR_GUN_SHOTS_PER_TROOP = 0.8;
-/** People are drawn larger than life so they read from the air. */
-const FIGURE_SCALE = 1.35;
+/** People are drawn at real size (the figure model is about 1.75 m tall). */
+const FIGURE_SCALE = 1;
 
 /** Zombies are shown one-for-one while few, then compressed so a horde stays drawable. */
 function visibleZombies(z: number): number {
   return z <= 300 ? z : 300 + (z - 300) * 0.12;
 }
 
+/** Roughly 4% of a district's people are out on the streets by day. */
 function visibleCivilians(d: DistrictState, night: boolean): number {
-  const base = Math.min(d.population / 100, 380);
+  const base = Math.min(d.population * 0.04, 1600);
   const indoors = d.status === 'overrun' ? 0.04 : night ? (d.power === 'dark' ? 0.3 : 0.55) : 1;
   return base * indoors;
 }
@@ -291,8 +292,8 @@ export class Agents {
         nj,
         pi: i,
         pj: j,
-        ox: (this.rand() - 0.5) * 9,
-        oz: (this.rand() - 0.5) * 9,
+        ox: (this.rand() - 0.5) * 16,
+        oz: (this.rand() - 0.5) * 16,
         speed: zombie ? 0.8 + this.rand() * 0.5 : 1.2 + this.rand() * 0.5,
         phase: this.rand() * 10,
         timer: 0,
@@ -552,8 +553,8 @@ export class Agents {
     DISTRICT_TEMPLATES.forEach((tpl, district) => {
       const rand = makeRandom(`posts-${seed}-${district}`);
       for (let k = 0; k < POSTS_PER_DISTRICT; k++) {
-        const i = Math.min(NODES_X - 1, tpl.col * 8 + 2 + Math.floor(rand() * 5));
-        const j = Math.min(NODES_Z - 1, tpl.row * 8 + 2 + Math.floor(rand() * 5));
+        const i = Math.min(NODES_X - 1, tpl.col * BLOCKS_PER_DISTRICT + 3 + Math.floor(rand() * 7));
+        const j = Math.min(NODES_Z - 1, tpl.row * BLOCKS_PER_DISTRICT + 3 + Math.floor(rand() * 7));
         this.posts.push({ x: nodeX(i), z: nodeZ(j), district });
         this.postVisible.push(true);
       }

@@ -2,7 +2,7 @@
 // every district is. The city is a 4 x 3 grid of districts; row 0 is the north edge (-z),
 // which faces the sea.
 
-export const DISTRICT_SIZE = 640; // metres
+export const DISTRICT_SIZE = 1440; // metres: twelve 120 m city blocks
 export const GRID_COLS = 4;
 export const GRID_ROWS = 3;
 export const CITY_WIDTH = DISTRICT_SIZE * GRID_COLS;

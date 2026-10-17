@@ -17,11 +17,13 @@ const MAX_YAW_RATE = 1.5; // rad/s
 const BANK_TURN = 0.9;
 const CLIMB_ACCEL = 11;
 const DESCEND_ACCEL = 9;
-const DRAG_LINEAR = 0.08;
-const DRAG_QUAD = 0.0016;
+// Top speed about 68 m/s (245 km/h) at full forward tilt.
+const DRAG_LINEAR = 0.05;
+const DRAG_QUAD = 0.0007;
 const LATERAL_DRAG = 0.35;
 const VERTICAL_DRAG = 0.9;
-const CEILING = 650;
+// Above the 470 m supertall with room to spare.
+const CEILING = 1100;
 const SKID_DEPTH = 1.9; // body centre to skid bottom
 const BODY_RADIUS = 4;
 const SAFE_LANDING_SPEED = 6;

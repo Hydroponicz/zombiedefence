@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { DISTRICT_TEMPLATES } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
 import type { CityState } from '../sim/types';
-import { nodeX, nodeZ, NODES_X, NODES_Z } from './streets';
+import { BLOCKS_PER_DISTRICT, nodeX, nodeZ, NODES_X, NODES_Z } from './streets';
 
 const WIND = new THREE.Vector3(0.7, 0, 0.35).normalize();
 
@@ -132,8 +132,8 @@ export class Effects {
       const rand = makeRandom(`fx-${seed}-${d}`);
       const out: { x: number; z: number }[] = [];
       for (let k = 0; k < 4; k++) {
-        const i = Math.min(NODES_X - 1, tpl.col * 8 + 1 + Math.floor(rand() * 7));
-        const j = Math.min(NODES_Z - 1, tpl.row * 8 + 1 + Math.floor(rand() * 7));
+        const i = Math.min(NODES_X - 1, tpl.col * BLOCKS_PER_DISTRICT + 1 + Math.floor(rand() * 11));
+        const j = Math.min(NODES_Z - 1, tpl.row * BLOCKS_PER_DISTRICT + 1 + Math.floor(rand() * 11));
         out.push({ x: nodeX(i) + (rand() - 0.5) * 30, z: nodeZ(j) + (rand() - 0.5) * 10 });
       }
       return out;
