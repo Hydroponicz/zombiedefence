@@ -87,7 +87,8 @@ describe('city simulation', () => {
       sim.step(DAY * 23);
       expect(sim.state.collapsed).toBe(true);
     }
-  });
+    // A month of simulated city, three times over: give it time.
+  }, 60_000);
 
   it('reports what happens as events', () => {
     const sim = new CitySim('events');

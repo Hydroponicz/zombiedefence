@@ -101,6 +101,20 @@ troops pulled off the barricade → breach.
 - **Morale:** drifts toward 0.85 − 0.08 per day, less losses, fear, riots and darkness. Below 0.35
   officers desert to the civilian population.
 
+**Traffic** (`src/sim/traffic.ts`):
+- **Network:** the lattice edges with capacity (600 vehicles an hour, 1,800 on avenues), hourly load
+  and a blocked share.
+- **Load:** the sum of
+  - local trips spread over each district's streets;
+  - commuter flows between district centres along cached free-flow routes (recomputed every 3 hours,
+    or when a street becomes impassable);
+  - flight and exodus toward calm neighbours and the nearest highway.
+- **Speed:** the BPR curve, 1 / (1 + 0.15 (v/c)^4), scaled down by wrecks; a street more than 90%
+  blocked is impassable.
+- **Wrecks:** grow with gridlock, the dead (more at night) and riots; troop and police tow crews in
+  held districts clear them.
+- **Trucks:** route by Dijkstra on current speeds, with the time to each corner stored for `truckPose`.
+
 **Food supply** (`src/sim/supply.ts`): trucks and trains have fixed routes and timetables
 (`truckPose`, `trainPose`), so the client draws them at the smooth game time.
 - **Trains:** one every 240 minutes, carrying 60k rations, while the industrial district is free of

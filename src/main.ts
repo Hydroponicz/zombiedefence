@@ -17,6 +17,7 @@ import { Environment } from './world/Environment';
 import { Farps } from './world/Farps';
 import { Sites } from './world/Sites';
 import { Traffic } from './world/Traffic';
+import { Cars } from './world/Cars';
 import { siteNear } from './sim/sites';
 
 const params = new URLSearchParams(location.search);
@@ -63,6 +64,8 @@ const sites = new Sites(seed);
 scene.add(sites.group);
 const traffic = new Traffic();
 scene.add(traffic.group);
+const cars = new Cars();
+scene.add(cars.group);
 const fleet = new AiFleet(city.helipads);
 scene.add(fleet.group);
 
@@ -134,7 +137,7 @@ function handleActions(frame: FrameInput): void {
     if (a.has('dpadDown') || a.has('arrowDown')) map.moveSelection(0, 1);
     if (a.has('rtPress')) sim.changeTimeScale(1);
     if (a.has('ltPress')) sim.changeTimeScale(-1);
-    for (let i = 1; i <= 7; i++) if (a.has(`overlay${i}`)) map.setOverlay(i - 1);
+    for (let i = 1; i <= 8; i++) if (a.has(`overlay${i}`)) map.setOverlay(i - 1);
   } else {
     if (a.has('pause')) setPaused(!paused);
     if (paused) return;
@@ -248,6 +251,7 @@ function update(dt: number): void {
   farps.update(dt);
   sites.update(dt, night);
   traffic.update(state, sim.time);
+  cars.update(dt, state, heli.position.x, heli.position.z);
   fleet.update(dt, state, sim.time);
 
   // Ground operations: loading, deploying, evacuating.
@@ -299,7 +303,7 @@ function update(dt: number): void {
     destroyed: heli.destroyed,
     searchlight: heli.searchlight.intensity > 0,
   }, state && districtIndex >= 0 ? state.sites.filter((x) => x.district === districtIndex) : [],
-  state ? siteNear(state, heli.position.x, heli.position.z, SITE_HUD_RADIUS) ?? null : null);
+  state ? siteNear(state, heli.position.x, heli.position.z, SITE_HUD_RADIUS) ?? null : null, state?.traffic ?? null);
 
   if (map.visible) {
     mapTimer -= dt;
@@ -324,4 +328,4 @@ window.addEventListener('resize', () => {
 });
 
 // Handy for debugging from the console.
-Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops, command, fleet, sites, traffic, camera } });
+Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops, command, fleet, sites, traffic, cars, camera } });

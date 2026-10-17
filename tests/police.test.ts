@@ -72,7 +72,8 @@ describe('police', () => {
     const people = d.population;
     sim.step(1440);
     expect(d.police.officers + d.police.riot).toBeLessThan(police * 0.8);
-    expect(d.population).toBeGreaterThan(people - 1);
+    // They join the civilians (some of whom leave the city by road).
+    expect(d.population + sim.state.traffic.fled).toBeGreaterThan(people - 1);
     expect(sim.state.log.some((e) => /walking off the job/.test(e.text))).toBe(true);
   });
 });

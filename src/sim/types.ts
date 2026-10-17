@@ -242,6 +242,8 @@ export interface Truck {
   rations: number;
   /** Street corners along the route, flattened: i0, j0, i1, j1, ... */
   path: number[];
+  /** Game minutes after setting off that it reaches each corner (traffic decides). */
+  times: number[];
   /** Game minutes it set off and will arrive. */
   depart: number;
   arrive: number;
@@ -257,6 +259,20 @@ export interface Train {
   gone: number;
   /** Unloaded (or turned back) at the yard. */
   done: boolean;
+}
+
+/** Traffic on the street grid (see traffic.ts). Arrays are indexed by edge. */
+export interface Traffic {
+  /** Vehicles per hour on each street. */
+  load: Float32Array;
+  /** Share of each street choked with abandoned cars and wrecks, 0..1. */
+  blocked: Float32Array;
+  /** Mean congestion per district (1 = at capacity). */
+  jam: number[];
+  /** Mean share of each district's streets blocked. */
+  blockedShare?: number[];
+  /** People who have left the city by road. */
+  fled: number;
 }
 
 export interface Supply {
@@ -336,6 +352,7 @@ export interface CityState {
   hordeSeq: number;
   sites: Site[];
   supply: Supply;
+  traffic: Traffic;
   pilotSeq: number;
   airframeSeq: number;
   /** Research points earned by scientists at the base. */

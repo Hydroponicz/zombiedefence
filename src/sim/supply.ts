@@ -10,8 +10,9 @@
 import { CITY_DEPTH, districtAt, districtCenter, DISTRICT_TEMPLATES } from './layout';
 import { totalZombies } from './hordes';
 import { nextRandom } from './rng';
-import { blockLot, BLOCKS_PER_DISTRICT, nearestNode, NODES_X, NODES_Z, nodeX, nodeZ, stepToward } from './streets';
+import { blockLot, BLOCKS_PER_DISTRICT, nearestNode, nodeX, nodeZ } from './streets';
 import { siteHolds } from './sites';
+import { EXITS, routesFrom } from './traffic';
 import type { CityState, DistrictState, Severity, Supply, Truck, Train } from './types';
 
 type Emit = (district: number | null, severity: Severity, text: string, radio?: boolean) => void;
@@ -128,7 +129,9 @@ function losses(s: CityState, emit: Emit): void {
     const { x, z } = truckPose(tr, s.t);
     const d = s.districts[districtAt(x, z)];
     if (!d) return true;
-    const risk = d.status === 'overrun' ? 0.25 : d.status === 'contested' ? 0.04 : 0;
+    // A truck stuck in a jam with the dead about is a sitting target.
+    const jam = 1 + Math.min(2, s.traffic.jam[d.id] ?? 0);
+    const risk = (d.status === 'overrun' ? 0.25 : d.status === 'contested' ? 0.04 : 0) * jam;
     if (d.rioting && nextRandom(s) < 0.08) {
       d.rations += tr.rations;
       if (s.t - (d.cooldowns.hijack ?? -Infinity) > 180) {
@@ -195,6 +198,14 @@ function depots(s: CityState): Depot[] {
 }
 
 function dispatch(s: CityState, emit: Emit): void {
+  // One route search per starting point this hour.
+  const searches = new Map<string, ReturnType<typeof routesFrom>>();
+  const routeFrom = (start: [number, number]) => {
+    const key = `${start[0]},${start[1]}`;
+    let search = searches.get(key);
+    if (!search) searches.set(key, (search = routesFrom(s, start)));
+    return search;
+  };
   const inbound = new Map<number, number>();
   for (const tr of s.supply.trucks) inbound.set(tr.to, (inbound.get(tr.to) ?? 0) + tr.rations);
   const sources = depots(s);
@@ -210,11 +221,19 @@ function dispatch(s: CityState, emit: Emit): void {
         .filter((x) => x.stock() >= TRUCK_RATIONS)
         .sort((a, b) => dist(a.node, dest) - dist(b.node, dest))[0];
       if (depot) {
+        if (!send(s, depot.district, d.id, routeFrom(depot.node)(dest))) {
+          blockedIn(s, d, emit);
+          break;
+        }
         depot.take(TRUCK_RATIONS);
-        send(s, depot.district, d.id, depot.node, dest);
       } else if (isClean) {
-        // The city's stocks are spent: regional trucks come in from outside.
-        send(s, -1, d.id, entry(dest), dest);
+        // The city's stocks are spent: regional trucks come in from outside, by the nearest open highway.
+        const sent = EXITS.map((x) => routeFrom(x.node)(dest)).filter((r) => r)
+          .sort((a, b) => a!.times[a!.times.length - 1] - b!.times[b!.times.length - 1])[0];
+        if (!send(s, -1, d.id, sent ?? null)) {
+          blockedIn(s, d, emit);
+          break;
+        }
       } else {
         if (s.t - (d.cooldowns.trucksCut ?? -Infinity) > 720) {
           d.cooldowns.trucksCut = s.t;
@@ -229,48 +248,37 @@ function dispatch(s: CityState, emit: Emit): void {
 
 const dist = (a: [number, number], b: [number, number]) => Math.hypot(nodeX(a[0]) - nodeX(b[0]), nodeZ(a[1]) - nodeZ(b[1]));
 
-/** The nearest road into the city from outside (the north edge is the sea). */
-function entry(dest: [number, number]): [number, number] {
-  const [i, j] = dest;
-  const options: [number, number][] = [[0, j], [NODES_X - 1, j], [i, NODES_Z - 1]];
-  return options.sort((a, b) => dist(a, dest) - dist(b, dest))[0];
+function blockedIn(s: CityState, d: DistrictState, emit: Emit): void {
+  if (s.t - (d.cooldowns.roadsCut ?? -Infinity) < 720) return;
+  d.cooldowns.roadsCut = s.t;
+  emit(d.id, 'warn', `Food trucks can't get through to ${d.name}: the roads are blocked.`);
 }
 
-function send(s: CityState, from: number, to: number, start: [number, number], dest: [number, number]): void {
-  const path = [start[0], start[1]];
-  let [i, j] = start;
-  for (let k = 0; k < 200 && (i !== dest[0] || j !== dest[1]); k++) {
-    [i, j] = stepToward(i, j, nodeX(dest[0]), nodeZ(dest[1]));
-    path.push(i, j);
-  }
-  const truck: Truck = { id: ++s.supply.seq, from, to, rations: TRUCK_RATIONS, path, depart: s.t, arrive: s.t };
-  truck.arrive = s.t + Math.max(5, pathLength(truck) / TRUCK_SPEED);
-  s.supply.trucks.push(truck);
-}
-
-function pathLength(tr: Truck): number {
-  let len = 0;
-  for (let k = 2; k < tr.path.length; k += 2) {
-    len += Math.hypot(nodeX(tr.path[k]) - nodeX(tr.path[k - 2]), nodeZ(tr.path[k + 1]) - nodeZ(tr.path[k - 1]));
-  }
-  return len;
+/** Put a truck on the road along a route through the traffic. Returns false if there is no route. */
+function send(s: CityState, from: number, to: number, drive: { path: number[]; times: number[] } | null): boolean {
+  if (!drive) return false;
+  const last = drive.times[drive.times.length - 1];
+  s.supply.trucks.push({
+    id: ++s.supply.seq, from, to, rations: TRUCK_RATIONS, path: drive.path, times: drive.times,
+    depart: s.t, arrive: s.t + Math.max(5, last),
+  });
+  return true;
 }
 
 /** Where a truck is at game minute t, and which way it faces (radians, 0 facing -Z). */
 export function truckPose(tr: Truck, t: number): { x: number; z: number; heading: number } {
-  let travelled = Math.max(0, t - tr.depart) * TRUCK_SPEED;
   const p = tr.path;
-  for (let k = 2; k < p.length; k += 2) {
-    const ax = nodeX(p[k - 2]);
-    const az = nodeZ(p[k - 1]);
-    const bx = nodeX(p[k]);
-    const bz = nodeZ(p[k + 1]);
-    const len = Math.hypot(bx - ax, bz - az);
-    if (travelled <= len || k === p.length - 2) {
-      const u = len > 0 ? Math.min(1, travelled / len) : 1;
+  const elapsed = Math.max(0, t - tr.depart);
+  for (let k = 1; k < tr.times.length; k++) {
+    if (elapsed <= tr.times[k] || k === tr.times.length - 1) {
+      const ax = nodeX(p[k * 2 - 2]);
+      const az = nodeZ(p[k * 2 - 1]);
+      const bx = nodeX(p[k * 2]);
+      const bz = nodeZ(p[k * 2 + 1]);
+      const span = tr.times[k] - tr.times[k - 1];
+      const u = span > 0 ? Math.min(1, Math.max(0, (elapsed - tr.times[k - 1]) / span)) : 1;
       return { x: ax + (bx - ax) * u, z: az + (bz - az) * u, heading: Math.atan2(-(bx - ax), -(bz - az)) };
     }
-    travelled -= len;
   }
   return { x: nodeX(p[0]), z: nodeZ(p[1]), heading: 0 };
 }

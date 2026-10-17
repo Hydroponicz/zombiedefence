@@ -6,9 +6,11 @@ import { CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE, DISTRICT_TEMPLATES, GRID_COLS, G
 import { totalZombies } from '../sim/hordes';
 import { guardsNeeded } from '../sim/sites';
 import { RAIL, trainPose, truckPose } from '../sim/supply';
+import { congestion, EDGES, edgeEnds, EXITS, isAvenue, roadStatus } from '../sim/traffic';
+import { nodeX, nodeZ } from '../sim/streets';
 import type { CityState, DistrictState, SiteKind, SiteStatus } from '../sim/types';
 
-const OVERLAYS = ['Status', 'Infection', 'Power', 'Order', 'Supplies', 'Troops', 'Fuel'] as const;
+const OVERLAYS = ['Status', 'Infection', 'Power', 'Order', 'Supplies', 'Troops', 'Fuel', 'Traffic'] as const;
 type Overlay = (typeof OVERLAYS)[number];
 
 const STATUS_COLOR = { held: '#3f8f5a', contested: '#c98a2b', overrun: '#a8322d' } as const;
@@ -133,7 +135,7 @@ export class DebugMap {
     );
     const tabs = OVERLAYS.map((o, i) => (o === this.overlay ? `[${i + 1} ${o}]` : `${i + 1} ${o}`)).join('   ');
     this.text(tabs, W - pad, 30, 14, '#e8ecdf', 'right');
-    this.text('D-pad/arrows: select   ·   LB/RB or 1–7: overlay   ·   LT/RT or [ ]: time   ·   Y/P: flight command   ·   View/B or M/Esc: close', W - pad, 54, 12, '#a5ad9c', 'right');
+    this.text('D-pad/arrows: select   ·   LB/RB or 1–8: overlay   ·   LT/RT or [ ]: time   ·   Y/P: flight command   ·   View/B or M/Esc: close', W - pad, 54, 12, '#a5ad9c', 'right');
   }
 
   private districtColor(d: DistrictState): string {
@@ -154,10 +156,12 @@ export class DebugMap {
       case 'Fuel':
         // Log scale: a few thousand litres at petrol stations up to hundreds of thousands at a depot.
         return ramp(Math.log10(Math.max(1, d.fuel)) / 5.5);
+      case 'Traffic':
+        return '#2a2e33';
     }
   }
 
-  private overlayValue(d: DistrictState): string {
+  private overlayValue(d: DistrictState, s: CityState): string {
     const people = d.population + d.troops.strength + d.infected;
     switch (this.overlay) {
       case 'Status':
@@ -172,6 +176,8 @@ export class DebugMap {
         return `food ${(d.rations / Math.max(1, people)).toFixed(1)} days`;
       case 'Troops':
         return `${fmt(d.troops.strength)} · fat ${(d.troops.fatigue * 100).toFixed(0)}% · mor ${(d.troops.morale * 100).toFixed(0)}%`;
+      case 'Traffic':
+        return `roads ${roadStatus(s.traffic, d.id)}`;
       case 'Fuel':
         return `${fmt(d.fuel)} L${d.features.fuelDepot && d.kind !== 'airbase' ? (d.flags.convoyStopped ? ' · convoys stopped' : ' · convoys running') : ''}`;
     }
@@ -196,7 +202,7 @@ export class DebugMap {
       const size = Math.max(11, Math.min(15, cell / 14));
       this.text(d.name, x + 10, y + 10 + size, size + 1, light, 'left', true);
       this.text(`pop ${fmt(d.population)}`, x + 10, y + 14 + size * 2.4, size - 1, light);
-      this.text(this.overlayValue(d), x + 10, y + 14 + size * 3.6, size - 1, light);
+      this.text(this.overlayValue(d, s), x + 10, y + 14 + size * 3.6, size - 1, light);
       const icons = [d.features.hospital && '✚', d.features.lab && '⚗', d.features.fuelDepot && '⛽', d.features.warehouse && '▦', d.features.powerPlant && '⚡', d.features.substation && 'ϟ']
         .filter(Boolean)
         .join(' ');
@@ -213,6 +219,37 @@ export class DebugMap {
       g.fillRect(fx - 6, fy - 6, 12, 12);
       g.strokeRect(fx - 6, fy - 6, 12, 12);
       this.text(`FARP ${fmt(f.fuel)} L`, fx + 9, fy + 4, 11, '#f3d2a8');
+    }
+
+    // Traffic overlay: every street by how it flows; wrecked streets dark purple.
+    if (this.overlay === 'Traffic') {
+      g.lineCap = 'butt';
+      for (let e = 0; e < EDGES; e++) {
+        const [i, j, ni, nj] = edgeEnds(e);
+        const blocked = s.traffic.blocked[e];
+        const jam = Math.min(1.5, congestion(s.traffic, e));
+        g.strokeStyle = blocked > 0.5 ? `rgba(90,30,110,${0.5 + blocked * 0.5})` : ramp(1 - jam / 1.5);
+        g.lineWidth = isAvenue(e) ? 3 : 1.5;
+        g.beginPath();
+        g.moveTo(mx + (nodeX(i) + CITY_WIDTH / 2) * scale, my + (nodeZ(j) + CITY_DEPTH / 2) * scale);
+        g.lineTo(mx + (nodeX(ni) + CITY_WIDTH / 2) * scale, my + (nodeZ(nj) + CITY_DEPTH / 2) * scale);
+        g.stroke();
+      }
+      for (const x of EXITS) {
+        const ex = mx + (nodeX(x.node[0]) + CITY_WIDTH / 2) * scale;
+        const ey = my + (nodeZ(x.node[1]) + CITY_DEPTH / 2) * scale;
+        const east = x.node[0] > 0 && x.node[1] < 30;
+        this.text(`⇢ ${x.name}`, east ? ex - 6 : ex + 6, ey - 6, 11, '#e8ecdf', east ? 'right' : 'left', true);
+      }
+      // District names back on top of the streets.
+      for (const d of s.districts) {
+        const x = mx + d.col * cell;
+        const y = my + d.row * cell;
+        g.fillStyle = 'rgba(13,15,14,0.75)';
+        g.fillRect(x + 6, y + 6, cell * 0.72, 46);
+        this.text(d.name, x + 10, y + 22, 13, '#e8ecdf', 'left', true);
+        this.text(this.overlayValue(d, s), x + 10, y + 42, 11, '#c9cfc0');
+      }
     }
 
     // The freight line and the food chain: trains on the rail, trucks on the roads.
@@ -346,6 +383,7 @@ export class DebugMap {
       ['Food & water', `${(d.rations / Math.max(1, people)).toFixed(1)} days`],
       ['Medicine', `${(d.medicine / Math.max(1, people)).toFixed(2)} days`],
       ['Fuel', `${fmt(d.fuel)} L`],
+      ['Roads', roadStatus(s.traffic, d.id)],
     ];
     this.text(d.name, x + 14, y + 28, 18, '#e8ecdf', 'left', true);
     rows.forEach(([k, v], i) => {

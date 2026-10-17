@@ -9,6 +9,7 @@ import { applyHordeLosses, countHordes, formHordes, moveHordes, totalZombies } f
 import { initialFleet, payday, updatePilots } from './pilots';
 import { createSites, siteHolds, updateSites } from './sites';
 import { createSupply, updateSupply } from './supply';
+import { createTraffic, roadFlow, updateTraffic } from './traffic';
 import { baseSealed, checkSeal, isBase } from './quarantine';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
@@ -130,6 +131,7 @@ export function createCity(seed: number | string): CityState {
     hordeSeq: 0,
     sites: [],
     supply: createSupply(),
+    traffic: createTraffic(),
     pilotSeq: 0,
     airframeSeq: 0,
   };
@@ -217,6 +219,8 @@ function tick(s: CityState, out: SimEvent[]): void {
   for (const d of ds) applyHordeLosses(s, d.id, updateDistrict(s, d, day, night, emit));
 
   migrate(s, night);
+  // Traffic first, so the hour's trucks route through the streets as they are.
+  if (hourly) updateTraffic(s, night, emit);
   updateSupply(s, hourly, emit);
   if (hourly) fuelConvoys(s, emit);
   if (hourly) formHordes(s, emit);
@@ -262,10 +266,12 @@ function fuelConvoys(s: CityState, emit: Emit): void {
     if (!d.features.fuelDepot || d === base) continue;
     // The industrial park's fuel goes out through its terminal.
     const terminal = d.kind !== 'industrial' || siteHolds(s, 'fuelTerminal');
-    const running = terminal && d.status !== 'overrun' && !d.rioting && d.troops.strength >= TUNING.convoyGuards && d.fuel > 0;
+    // And it needs a road to the base: jams slow it, wrecks can cut it.
+    const road = roadFlow(s, d.id, base.id);
+    const running = terminal && road > 0 && d.status !== 'overrun' && !d.rioting && d.troops.strength >= TUNING.convoyGuards && d.fuel > 0;
     const key = 'convoyStopped';
     if (running) {
-      const litres = Math.min(TUNING.convoyLitres, d.fuel);
+      const litres = Math.min(TUNING.convoyLitres * Math.min(1, road * 1.5), d.fuel);
       d.fuel -= litres;
       base.fuel += litres;
       if (d.flags[key]) {
@@ -398,7 +404,9 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const exposure = d.status === 'overrun' ? 0.08 : 1;
   // Civilians inside held shelters are mostly out of reach.
   const sheltered = P > 0 ? Math.min(d.sheltered, P) / P : 0;
-  const encounters = Math.min(P * 0.5, biteRate * crowd * exposure * (1 - 0.9 * sheltered) * freeZ * (P / (P + T + 10)) * H);
+  // People stuck in jammed streets are easy prey.
+  const jammed = 1 + 0.4 * Math.min(1.5, s.traffic.jam[d.id] ?? 0);
+  const encounters = Math.min(P * 0.5, biteRate * crowd * exposure * jammed * (1 - 0.9 * sheltered) * freeZ * (P / (P + T + 10)) * H);
   const bitten = encounters * 0.75;
   let civDeaths = encounters * 0.1;
   const civKills = Math.min(Z, encounters * 0.15);

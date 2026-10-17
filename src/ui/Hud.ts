@@ -6,7 +6,8 @@ import type { PadReading } from '../input/Input';
 import { totalZombies } from '../sim/hordes';
 import { CRATES, SEATS } from '../sim/operations';
 import { SITE_LABELS } from '../sim/sites';
-import type { Cargo, DistrictState, PlayerStats, SimEvent, Site } from '../sim/types';
+import { roadStatus } from '../sim/traffic';
+import type { Cargo, DistrictState, PlayerStats, SimEvent, Site, Traffic } from '../sim/types';
 
 const RADIO_LIMIT = 6;
 const RADIO_SECONDS = 25;
@@ -186,8 +187,10 @@ export class Hud {
   /**
    * @param sites the district's strategic sites
    * @param nearby the site the helicopter is over, if any
+   * @param traffic the city's traffic, for the district's roads
    */
-  update(dt: number, t: number, timeScale: number, district: DistrictState | null, flight: FlightReadout, sites: Site[] = [], nearby: Site | null = null): void {
+  update(dt: number, t: number, timeScale: number, district: DistrictState | null, flight: FlightReadout, sites: Site[] = [], nearby: Site | null = null,
+    traffic: Traffic | null = null): void {
     const scale = timeScale > 1 ? ` <small>Time ×${timeScale}</small>` : '';
     this.clock.innerHTML = `${isDaytime(t) ? '☀' : '☾'} ${formatClock(t)}${scale}`;
 
@@ -205,8 +208,9 @@ export class Hud {
       ? `${nearby.name} · ${nearby.status === 'besieged' ? 'under siege' : nearby.status} · ${Math.round(nearby.guards)} guards` +
         (nearby.capacity && nearby.status !== 'fallen' ? ` · ${approx(nearby.sheltered)} sheltered` : '')
       : '';
+    const roads = district && traffic && district.kind !== 'airbase' ? roadStatus(traffic, district.id) : '';
     const key = district
-      ? `${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${siteLine}|${near}`
+      ? `${roads}|${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${siteLine}|${near}`
       : 'none';
     if (key !== this.lastDistrictKey) {
       this.lastDistrictKey = key;
@@ -216,6 +220,7 @@ export class Hud {
            <div class="meta">${POWER_LABEL[district.power]} · Order ${Math.round(district.order)}${district.rioting ? ' · Rioting' : ''}</div>
            <div class="meta">Zombies ${zombies} · Troops ${troops}${police ? ` · Police ${police}` : ''}</div>
            ${siteLine ? `<div class="meta">Sites: ${siteLine}</div>` : ''}
+           ${roads ? `<div class="meta">Roads: ${roads}</div>` : ''}
            ${near ? `<div class="meta site ${nearby!.status}">${SITE_LABELS[nearby!.kind]}: ${near}</div>` : ''}`
         : `<div class="name">Outside the city</div>`;
     }

@@ -181,6 +181,30 @@ narrow windows.
 - **Where to see them:** the HUD shows "Police N" for the district, and the map sidebar shows officers,
   riot police and morale.
 
+## Traffic
+
+The whole street grid (about 3,500 street segments) carries simulated traffic:
+- **Demand:** every hour people drive. They commute between districts on a rush-hour curve, flee
+  toward calmer districts when afraid, and leave the city by the highways (Highway 9 west and east,
+  Routes 4 and 7 south). Trips take the quickest route; avenues carry three times what side streets
+  do, and each street slows as it fills.
+- **Breakdown:** gridlock and the dead nearby make drivers abandon their cars, more at night. The
+  wrecks stay, choking streets until they're impassable, and rioters burn cars. Soldiers and police
+  tow wrecks clear in districts they hold.
+- **Logistics:**
+  - Food trucks route around wrecked streets and crawl through jams.
+  - Trucks stuck in a jam in an infected district are easy targets.
+  - With no route left, a district can't be supplied by road: "Food trucks can't get through to …".
+  - Fuel convoys need a road to the base and slow down in traffic.
+- **People:** jammed streets in infected districts mean more bites. While the highways flow, some
+  residents escape the city; when they're jammed, people are trapped in their cars.
+- **What you see:**
+  - **Around the helicopter:** cars stream along the streets, crawl bumper to bumper in jams, and
+    lie abandoned at angles across lanes and sidewalks, some burnt out.
+  - **Traffic map overlay (8):** each street coloured by flow, wrecked streets purple, plus the
+    highways.
+  - **HUD and map sidebar:** each district's roads, e.g. "jammed · 30% wrecked".
+
 ## Food trucks and trains
 
 - **Freight trains** run every four hours into the rail yard in Industrial Park, on a line from the
