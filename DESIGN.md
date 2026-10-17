@@ -220,6 +220,14 @@ throttle, light assists. Deadzones and sensitivity are configurable. Uses the Ga
 
 ## Build order
 
+Status: phase 1 is done (see README). Phase 1 also wired district window lights to the
+simulation's power grid, an early piece of phase 2.
+
+Phase 1 tuning note: with no player, the baseline run is a slow outbreak on days 1–4, shortages
+and riots on days 4–6, most districts falling on days 6–9, and the base falling around day 14–16.
+The main breakdown is still fairly compressed (about two days); revisit once the player can
+reinforce districts.
+
 1. **In parallel:**
    - Heli flight feel over a generated city, with controller and keyboard.
    - Headless city sim with a 2D debug map: watch the cascades and tune them.

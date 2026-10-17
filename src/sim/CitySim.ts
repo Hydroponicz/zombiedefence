@@ -1,0 +1,540 @@
+// The abstract city simulation. One tick = one game minute. Every rate below is written per
+// game hour and multiplied by H. The simulation is deterministic for a given seed: all
+// randomness comes from the RNG state stored inside CityState.
+
+import { dayNumber, isDaytime, START_MINUTE } from './clock';
+import { DISTRICT_TEMPLATES, neighborsOf } from './layout';
+import { hashSeed, nextRandom } from './rng';
+import type { CityState, DistrictState, Severity, SimEvent } from './types';
+
+const H = 1 / 60;
+const LOG_LIMIT = 200;
+
+const clamp = (v: number, lo = 0, hi = 1) => (v < lo ? lo : v > hi ? hi : v);
+
+export const TUNING = {
+  /** Encounters per free zombie per hour, by day and by night. */
+  biteRateDay: 0.08,
+  biteRateNight: 0.14,
+  /** Average hours from bite to turning. */
+  turnHours: 4,
+  /** Kills per effective soldier per hour when fully engaged. */
+  soldierKillRate: 2,
+  /**
+   * Zombie count at which soldiers find targets at half their full rate (zombies are spread out
+   * across the district). Grows with population: more people to search through.
+   */
+  huntHalfSaturation: 700,
+  huntPerCivilian: 0.02,
+  /** Zombies a single effective soldier can screen civilians from. */
+  soldierScreen: 15,
+  /** Civilians one effective soldier can cover. */
+  soldierCoverage: 250,
+  /** Soldier casualties per zombie per hour (before effectiveness). */
+  troopLossRate: 0.012,
+  roundsPerKill: 6,
+  roundsPerSoldier: 300,
+  zombieWanderRate: 0.01,
+  hordeWanderRate: 0.2,
+  /** Rations each district starts with, in days. */
+  startingRationDays: 2,
+  warehouseDays: 1.5,
+  /** Truck deliveries per hour, as a share of daily need, divided by grid distance from the warehouse. */
+  truckRate: 0.08,
+  /** Grid decay per hour from staff not turning up (scaled by city disorder). */
+  gridDecay: 0.0045,
+  /** Extra decay per hour from maintenance backlog, from day 3. */
+  gridBacklog: 0.0015,
+  outbreakStartInfected: 25,
+};
+
+export class CitySim {
+  state: CityState;
+  private pending: SimEvent[] = [];
+
+  constructor(seedOrState: number | string | CityState) {
+    this.state = typeof seedOrState === 'object' ? seedOrState : createCity(seedOrState);
+  }
+
+  step(ticks = 1): void {
+    for (let i = 0; i < ticks; i++) tick(this.state, this.pending);
+  }
+
+  /** Events produced since the last call. */
+  takeEvents(): SimEvent[] {
+    const out = this.pending;
+    this.pending = [];
+    return out;
+  }
+}
+
+export function createCity(seed: number | string): CityState {
+  const state: CityState = {
+    seed,
+    t: START_MINUTE,
+    rng: hashSeed(seed),
+    grid: 1,
+    districts: [],
+    history: [],
+    log: [],
+    eventSeq: 0,
+    collapsed: false,
+    collapsedAt: null,
+    flags: {},
+  };
+  const rand = () => nextRandom(state);
+  const totalPop = DISTRICT_TEMPLATES.reduce((s, d) => s + d.population, 0);
+
+  state.districts = DISTRICT_TEMPLATES.map((tpl, id) => {
+    const people = tpl.population + tpl.troops;
+    const d: DistrictState = {
+      id,
+      name: tpl.name,
+      kind: tpl.kind,
+      col: tpl.col,
+      row: tpl.row,
+      neighbors: neighborsOf(id),
+      features: tpl.features,
+      population: tpl.population,
+      infected: 0,
+      zombies: 0,
+      dead: 0,
+      troops: { strength: tpl.troops, fatigue: 0, morale: 0.85, ammo: tpl.troops * TUNING.roundsPerSoldier },
+      rations: people * TUNING.startingRationDays * (0.75 + rand() * 0.5),
+      medicine: tpl.medicine ?? people * 0.05,
+      fuel: tpl.fuel ?? 0,
+      power: 'on',
+      powerThreshold: tpl.powerThreshold ?? 0.35 + rand() * 0.45,
+      order: 80,
+      rioting: false,
+      status: 'held',
+      noise: 0,
+      killRate: 0,
+      flags: {},
+      cooldowns: {},
+    };
+    if (tpl.features.warehouse) d.rations += totalPop * TUNING.warehouseDays;
+    if (tpl.kind === 'airbase') d.troops.ammo += 500000; // armoury
+    return d;
+  });
+
+  // Patient zero: a random populated district that isn't the base.
+  const candidates = state.districts.filter((d) => d.kind !== 'airbase' && d.population > 5000);
+  const first = candidates[Math.floor(rand() * candidates.length)];
+  first.infected = TUNING.outbreakStartInfected;
+  first.population -= TUNING.outbreakStartInfected;
+
+  sampleHistory(state);
+  return state;
+}
+
+function tick(s: CityState, out: SimEvent[]): void {
+  const t = s.t;
+  const day = dayNumber(t);
+  const night = !isDaytime(t);
+  const hourly = Math.floor(t) % 60 === 0;
+  const ds = s.districts;
+  const emit = (district: number | null, severity: Severity, text: string) => {
+    const e: SimEvent = { id: ++s.eventSeq, t, district, severity, text };
+    out.push(e);
+    s.log.push(e);
+    if (s.log.length > LOG_LIMIT) s.log.shift();
+  };
+
+  if (Math.floor(t) % 1440 === 360) emit(null, 'info', `Day ${day} begins.`);
+
+  if (hourly) spontaneousOutbreaks(s, day, emit);
+  updatePower(s, day, night, emit);
+
+  for (const d of ds) updateDistrict(s, d, day, night, emit);
+
+  migrate(s, night);
+  if (hourly) distributeRations(s, emit);
+  for (const d of ds) updateStatus(d, emit);
+
+  const base = ds.find((d) => d.kind === 'airbase');
+  if (base && !s.collapsed && base.status === 'overrun') {
+    s.collapsed = true;
+    s.collapsedAt = t;
+    emit(base.id, 'critical', `${base.name} has fallen. The city has collapsed.`);
+  }
+
+  s.t = t + 1;
+  if (hourly) sampleHistory(s);
+}
+
+type Emit = (district: number | null, severity: Severity, text: string) => void;
+
+function spontaneousOutbreaks(s: CityState, day: number, emit: Emit): void {
+  if (day > 3 || nextRandom(s) > 0.03) return;
+  const options = s.districts.filter((d) => d.kind !== 'airbase' && d.population > 1000 && d.zombies < 5);
+  if (!options.length) return;
+  const d = options[Math.floor(nextRandom(s) * options.length)];
+  const n = Math.min(d.population, 5 + Math.floor(nextRandom(s) * 15));
+  d.population -= n;
+  d.infected += n;
+  if (d.flags.outbreak) emit(d.id, 'warn', `New infections reported in ${d.name}.`);
+}
+
+function updatePower(s: CityState, day: number, night: boolean, emit: Emit): void {
+  const ds = s.districts;
+  let weight = 0;
+  let orderSum = 0;
+  for (const d of ds) {
+    if (d.status === 'overrun') continue;
+    weight += d.population;
+    orderSum += d.order * d.population;
+  }
+  const cityOrder = weight > 0 ? orderSum / weight : 0;
+  const before = s.grid;
+  let decay = TUNING.gridDecay * (1 - cityOrder / 100) + (day >= 3 ? TUNING.gridBacklog : 0);
+  for (const d of ds) if (d.features.substation && d.rioting) decay += 0.003;
+  s.grid = clamp(s.grid - decay * H);
+
+  let cap = 1;
+  for (const d of ds) {
+    if (d.features.substation && d.status === 'overrun') cap -= 0.1;
+    if (d.features.powerPlant && d.status === 'overrun') cap -= 0.45;
+  }
+  s.grid = Math.min(s.grid, clamp(cap));
+
+  for (const mark of [0.75, 0.5, 0.25]) {
+    if (before >= mark && s.grid < mark) {
+      emit(null, mark > 0.5 ? 'warn' : 'critical', `City power grid down to ${Math.round(mark * 100)}%.`);
+    }
+  }
+
+  for (const d of ds) {
+    const prev = d.power;
+    const gridOk = s.grid >= d.powerThreshold && !(d.features.substation && d.status === 'overrun');
+    if (gridOk) d.power = 'on';
+    else if (d.features.generator && d.fuel > 0) d.power = 'backup';
+    else d.power = 'dark';
+
+    if (d.power === 'backup') d.fuel = Math.max(0, d.fuel - (d.features.generator ?? 0) * H);
+
+    if (prev !== d.power) {
+      if (d.power === 'backup') emit(d.id, 'warn', `${d.name} has lost grid power and is running on generators.`);
+      else if (d.power === 'dark') {
+        const why = prev === 'backup' ? 'Generators are out of fuel. ' : '';
+        emit(d.id, night ? 'critical' : 'warn', `${why}${d.name} has gone dark.`);
+      } else emit(d.id, 'info', `Power restored in ${d.name}.`);
+    }
+  }
+}
+
+function effectiveness(d: DistrictState, night: boolean): number {
+  const tr = d.troops;
+  if (tr.strength < 0.5) return 0;
+  const ammoF = clamp(tr.ammo / Math.max(1, tr.strength * 60), 0.1, 1);
+  const light = night ? (d.power === 'dark' ? 0.6 : 0.85) : 1;
+  return ammoF * (1 - 0.6 * tr.fatigue) * (0.35 + 0.65 * tr.morale) * light * (d.rioting ? 0.6 : 1);
+}
+
+function updateDistrict(s: CityState, d: DistrictState, day: number, night: boolean, emit: Emit): void {
+  const tr = d.troops;
+  const P = d.population;
+  const T = tr.strength;
+  const Z = d.zombies;
+  const e = effectiveness(d, night);
+  const fort = d.features.fortified ? 2 : 1;
+
+  // --- Outbreak and combat ---
+  // Soldiers only protect the part of the district they can cover.
+  const strength = T * e * TUNING.soldierScreen * fort;
+  const coverage = clamp((T * e * TUNING.soldierCoverage * fort) / Math.max(1, P));
+  const screen = T > 0 ? coverage * (strength / (strength + Z + 1)) : 0;
+  const freeZ = Z * (1 - 0.85 * screen);
+  const biteRate = night ? TUNING.biteRateNight : TUNING.biteRateDay;
+  const crowd = (d.rioting ? 1.5 : 1) * (d.power === 'dark' ? 1.2 : 1);
+  // In an overrun district the survivors left are barricaded holdouts.
+  const exposure = d.status === 'overrun' ? 0.08 : 1;
+  const encounters = Math.min(P * 0.5, biteRate * crowd * exposure * freeZ * (P / (P + T + 10)) * H);
+  const bitten = encounters * 0.75;
+  let civDeaths = encounters * 0.1;
+  const civKills = Math.min(Z, encounters * 0.15);
+
+  const soldierKills = Math.min(
+    Z - civKills,
+    T * e * TUNING.soldierKillRate * H * (Z / (Z + TUNING.huntHalfSaturation + P * TUNING.huntPerCivilian)),
+  );
+  const troopLoss = T > 0 ? Math.min(T * 0.2, Z * TUNING.troopLossRate * (1 - 0.7 * e) * H / fort) : 0;
+
+  const medicineShort = d.medicine <= 0;
+  if (medicineShort) civDeaths += encounters * 0.1;
+
+  d.population = Math.max(0, P - bitten - civDeaths);
+  d.infected += bitten + troopLoss * 0.5;
+  d.dead += civDeaths + troopLoss * 0.5 + civKills + soldierKills;
+  d.zombies = Math.max(0, Z - civKills - soldierKills);
+  tr.strength = Math.max(0, T - troopLoss);
+  tr.ammo = Math.max(0, tr.ammo - soldierKills * TUNING.roundsPerKill);
+  if (tr.strength < 0.5) {
+    tr.strength = 0;
+  }
+
+  const turned = d.infected * (H / TUNING.turnHours);
+  d.infected -= turned;
+  d.zombies += turned;
+
+  const kills = civKills + soldierKills;
+  d.killRate = d.killRate * 0.95 + (kills / H) * 0.05;
+  d.noise = d.noise * 0.9 + clamp(d.killRate / 50, 0, 2) * 0.1;
+
+  if (!d.flags.outbreak && d.zombies > 15) {
+    d.flags.outbreak = true;
+    emit(d.id, 'warn', `Outbreak confirmed in ${d.name}.`);
+  }
+
+  // --- Supplies ---
+  const people = d.population + tr.strength + d.infected;
+  const fear = 1 - d.order / 100;
+  const hoarding = day <= 4 ? 1 + 0.8 * fear : 1;
+  const water = d.power === 'dark' ? 1.3 : 1;
+  d.rations = Math.max(0, d.rations - (people / 1440) * hoarding * water);
+  d.medicine = Math.max(0, d.medicine - encounters * 0.5 - (people / 1440) * 0.02);
+  if (Math.floor(s.t) % 60 === 0) {
+    // Outside supply dries up after day 2; after that people scavenge, with less to find each day.
+    const outside = d.status === 'overrun' ? 0 : Math.max(0, 0.6 - 0.3 * (day - 1));
+    const scavenged = d.rations <= 0 ? Math.max(0.1, 0.5 - 0.03 * day) : 0;
+    d.rations += (people * (outside + scavenged)) / 24;
+  }
+  if (d.rioting) {
+    d.rations *= 1 - 0.03 * H;
+    d.medicine *= 1 - 0.03 * H;
+    d.fuel *= 1 - 0.02 * H;
+    if (d.features.fuelDepot && Math.floor(s.t) % 60 === 0 && nextRandom(s) < 0.03 && d.fuel > 1000) {
+      d.fuel *= 0.7;
+      d.noise = 2;
+      emit(d.id, 'critical', `Fuel depot fire in ${d.name}. The blaze is drawing the dead.`);
+    }
+  }
+  if (d.rations <= 0) {
+    const starving = d.population * 0.0004 * H;
+    d.population -= starving;
+    d.dead += starving;
+  }
+  const supplyDays = d.rations / Math.max(1, people);
+  const shortage = clamp((1.5 - supplyDays) / 1.5);
+  if (people > 200) {
+    if (!d.flags.foodLow && supplyDays < 0.5) {
+      d.flags.foodLow = true;
+      emit(d.id, 'warn', `${d.name} is running low on food and water.`);
+    }
+    if (!d.flags.foodOut && d.rations <= 0) {
+      d.flags.foodOut = true;
+      emit(d.id, 'critical', `${d.name} has run out of food.`);
+    }
+  }
+
+  // --- Social order ---
+  const threat = clamp(d.zombies / (d.population * 0.01 + tr.strength * 2 + 20));
+  let neighborThreat = 0;
+  for (const n of d.neighbors) {
+    const st = s.districts[n].status;
+    neighborThreat = Math.max(neighborThreat, st === 'overrun' ? 0.5 : st === 'contested' ? 0.25 : 0);
+  }
+  const fearNow = clamp(threat + neighborThreat * 0.6);
+  const security = clamp(tr.strength / Math.max(1, d.population / 400));
+  const dread = Math.min(15, (day - 1) * 2);
+  const dark = d.power === 'dark' ? (night ? 18 : 10) : 0;
+  const target = clamp(
+    85 - 25 * shortage - 30 * fearNow - dark - dread + 15 * security - (medicineShort ? 5 : 0),
+    0,
+    100,
+  );
+  const rate = target < d.order ? 4 : 2;
+  d.order += clamp(target - d.order, -rate * H, rate * H);
+
+  if (!d.rioting && d.order < 25 && d.population > 500) {
+    d.rioting = true;
+    emit(d.id, 'critical', `Riots have broken out in ${d.name}.`);
+  } else if (d.rioting && (d.order > 35 || d.population <= 500)) {
+    d.rioting = false;
+    emit(d.id, 'info', `Rioting in ${d.name} has died down.`);
+  }
+  if (!d.flags.anarchy && d.order < 10 && d.population > 500) {
+    d.flags.anarchy = true;
+    emit(d.id, 'critical', `Civil order has collapsed in ${d.name}. People are fleeing.`);
+  }
+
+  // --- Military ---
+  if (tr.strength > 0) {
+    const engaged = d.zombies > 5;
+    // Heavy fighting exhausts troops in about a day; patrolling an infected district takes about two weeks.
+    const intensity = clamp(d.zombies / (tr.strength * 8 + 200));
+    const strain = (0.04 * intensity + (d.flags.outbreak ? 0.003 : 0)) * (night ? 1.3 : 1);
+    tr.fatigue = clamp(tr.fatigue + (intensity < 0.05 ? -0.01 : strain) * H);
+    const lossFrac = troopLoss / H / tr.strength;
+    const ammoF = tr.ammo / Math.max(1, tr.strength * 60);
+    const moraleTarget = clamp(
+      0.85 - 0.45 * tr.fatigue - Math.min(0.3, lossFrac * 6) - (d.rioting ? 0.1 : 0) -
+        (ammoF < 0.5 ? 0.2 : 0) - (night && d.power === 'dark' ? 0.1 : 0),
+    );
+    tr.morale += clamp(moraleTarget - tr.morale, -0.1 * H, 0.1 * H);
+    if (!d.flags.tired && tr.fatigue > 0.7) {
+      d.flags.tired = true;
+      emit(d.id, 'warn', `Troops in ${d.name} are exhausted and need relief.`);
+    }
+    if (tr.morale < 0.12 && engaged && s.t - (d.cooldowns.rout ?? -Infinity) > 360) rout(s, d, emit);
+  }
+}
+
+function safety(d: DistrictState): number {
+  const statusPenalty = d.status === 'overrun' ? 2 : d.status === 'contested' ? 0.5 : 0;
+  return d.order / 100 - clamp(d.zombies / (d.population * 0.01 + d.troops.strength * 2 + 20)) - statusPenalty;
+}
+
+function safestNeighbor(s: CityState, d: DistrictState): DistrictState | null {
+  let best: DistrictState | null = null;
+  for (const n of d.neighbors) {
+    const c = s.districts[n];
+    if (c.status === 'overrun') continue;
+    if (!best || safety(c) > safety(best)) best = c;
+  }
+  return best;
+}
+
+function rout(s: CityState, d: DistrictState, emit: Emit): void {
+  const to = safestNeighbor(s, d);
+  const tr = d.troops;
+  if (!to || safety(to) <= safety(d)) return;
+  d.cooldowns.rout = s.t;
+  to.cooldowns.rout = s.t;
+  const moving = tr.strength * 0.7;
+  const survivors = moving * 0.7;
+  const ammo = tr.ammo * 0.7 * 0.7;
+  mergeTroops(to, survivors, tr.fatigue, 0.4, ammo);
+  d.dead += moving - survivors;
+  tr.strength -= moving;
+  tr.ammo -= tr.ammo * 0.7;
+  tr.morale = 0.3;
+  emit(d.id, 'critical', `Troops in ${d.name} have broken and are falling back to ${to.name}.`);
+}
+
+function mergeTroops(to: DistrictState, strength: number, fatigue: number, morale: number, ammo: number): void {
+  const tr = to.troops;
+  const total = tr.strength + strength;
+  if (total <= 0) return;
+  tr.fatigue = (tr.fatigue * tr.strength + fatigue * strength) / total;
+  tr.morale = (tr.morale * tr.strength + morale * strength) / total;
+  tr.strength = total;
+  tr.ammo += ammo;
+}
+
+function migrate(s: CityState, night: boolean): void {
+  const ds = s.districts;
+  const dz = new Float64Array(ds.length);
+  const dp = new Float64Array(ds.length);
+  const di = new Float64Array(ds.length);
+
+  const hospital = ds.find((d) => d.features.hospital && d.status !== 'overrun');
+
+  for (const d of ds) {
+    // Zombies wander toward people, light and noise. Hordes move on once prey runs out.
+    const humans = d.population + d.troops.strength;
+    if (d.zombies > 1) {
+      const horde = d.zombies > 300 && humans < d.zombies * 0.05;
+      let rate = horde ? TUNING.hordeWanderRate : TUNING.zombieWanderRate;
+      if (!horde && humans / (d.zombies + 1) > 0.2) rate *= 0.3;
+      const outflow = d.zombies * rate * H;
+      let total = 0;
+      const pull = d.neighbors.map((n) => {
+        const c = ds[n];
+        const a = Math.sqrt(c.population + c.troops.strength + 1) * (night && c.power !== 'dark' ? 1.6 : 1) * (1 + c.noise);
+        total += a;
+        return a;
+      });
+      d.neighbors.forEach((n, i) => {
+        dz[n] += (outflow * pull[i]) / total;
+      });
+      dz[d.id] -= outflow;
+    }
+
+    // Civilians flee from danger or collapse. The bitten hide among them.
+    if (d.population > 10) {
+      const threat = clamp(d.zombies / (d.population * 0.01 + d.troops.strength * 2 + 20));
+      let rate = d.status === 'overrun' ? 0.15 : d.order < 10 ? 0.06 : clamp((threat - 0.4) * 0.05, 0, 0.04);
+      const to = rate > 0 ? safestNeighbor(s, d) : null;
+      if (to && safety(to) > safety(d)) {
+        const p = d.population * rate * H;
+        const inf = d.infected * rate * H;
+        dp[d.id] -= p;
+        di[d.id] -= inf;
+        dp[to.id] += p * 0.97;
+        di[to.id] += inf + p * 0.03;
+      } else rate = 0;
+    }
+
+    // The bitten seek treatment, turning the hospital into a hot spot.
+    if (hospital && d !== hospital && d.infected > 1) {
+      const moving = d.infected * 0.015 * H;
+      di[d.id] -= moving;
+      di[hospital.id] += moving;
+    }
+  }
+
+  ds.forEach((d, i) => {
+    d.zombies = Math.max(0, d.zombies + dz[i]);
+    d.population = Math.max(0, d.population + dp[i]);
+    d.infected = Math.max(0, d.infected + di[i]);
+  });
+}
+
+function distributeRations(s: CityState, emit: Emit): void {
+  const wh = s.districts.find((d) => d.features.warehouse);
+  if (!wh) return;
+  const working = wh.status !== 'overrun' && !wh.rioting && wh.order > 30;
+  if (!working) {
+    if (!s.flags.warehouseCut) {
+      s.flags.warehouseCut = true;
+      emit(wh.id, 'critical', `Food trucks from the ${wh.name} warehouse have stopped running.`);
+    }
+    return;
+  }
+  for (const d of s.districts) {
+    if (d === wh || d.status === 'overrun') continue;
+    const reserve = (wh.population + wh.troops.strength) * 1;
+    const available = wh.rations - reserve;
+    if (available <= 0) return;
+    const people = d.population + d.troops.strength + d.infected;
+    if (d.rations / Math.max(1, people) >= 2) continue;
+    const distance = Math.abs(d.col - wh.col) + Math.abs(d.row - wh.row);
+    const shipment = Math.min(available, (people * TUNING.truckRate) / distance);
+    wh.rations -= shipment;
+    d.rations += shipment;
+  }
+}
+
+function updateStatus(d: DistrictState, emit: Emit): void {
+  const humans = d.population + d.troops.strength;
+  const defense = d.troops.strength * 0.8 * TUNING.soldierScreen * (d.features.fortified ? 2 : 1) + d.population * 0.03;
+  const pressure = d.zombies / (defense + 1);
+  const prev = d.status;
+  if (prev === 'held') {
+    if (humans < 50 && d.zombies > 20) d.status = 'overrun';
+    else if (d.zombies > 30 && pressure > 0.2) d.status = 'contested';
+  } else if (prev === 'contested') {
+    if (pressure > 3 || (humans < 100 && d.zombies > 20)) d.status = 'overrun';
+    else if (d.zombies < 15 || pressure < 0.05) d.status = 'held';
+  } else if (humans > 200 && pressure < 1.5) {
+    d.status = 'contested';
+  }
+  if (prev === d.status) return;
+  if (d.status === 'overrun') emit(d.id, 'critical', `${d.name} has been overrun.`);
+  else if (d.status === 'contested') {
+    emit(d.id, 'warn', prev === 'held' ? `${d.name} is under attack.` : `Survivors are fighting back in ${d.name}.`);
+  } else emit(d.id, 'info', `${d.name} is secure again.`);
+}
+
+function sampleHistory(s: CityState): void {
+  let population = 0, infected = 0, zombies = 0, troops = 0, dead = 0;
+  for (const d of s.districts) {
+    population += d.population;
+    infected += d.infected;
+    zombies += d.zombies;
+    troops += d.troops.strength;
+    dead += d.dead;
+  }
+  s.history.push({ t: s.t, population, infected, zombies, troops, dead, grid: s.grid });
+}
