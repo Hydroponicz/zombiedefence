@@ -11,6 +11,7 @@ import { CITY_DEPTH, districtAt, districtCenter, DISTRICT_TEMPLATES } from './la
 import { totalZombies } from './hordes';
 import { nextRandom } from './rng';
 import { blockLot, BLOCKS_PER_DISTRICT, nearestNode, NODES_X, NODES_Z, nodeX, nodeZ, stepToward } from './streets';
+import { siteHolds } from './sites';
 import type { CityState, DistrictState, Severity, Supply, Truck, Train } from './types';
 
 type Emit = (district: number | null, severity: Severity, text: string, radio?: boolean) => void;
@@ -160,12 +161,23 @@ interface Depot {
 function depots(s: CityState): Depot[] {
   const out: Depot[] = [];
   const yard = s.districts[INDUSTRIAL];
-  if (yard.status !== 'overrun' && !yard.rioting) {
+  // Trucks load at the rail yard only through the distribution depot.
+  if (yard.status !== 'overrun' && !yard.rioting && siteHolds(s, 'depot')) {
     out.push({
       district: yard.id,
       node: nearestNode(RAIL.x, RAIL.stopZ + 60),
       stock: () => s.supply.yard,
       take: (n) => (s.supply.yard -= n),
+    });
+  }
+  // The depot's own stock goes out by truck too.
+  const depot = s.sites.find((x) => x.kind === 'depot' && x.status !== 'fallen');
+  if (depot) {
+    out.push({
+      district: depot.district,
+      node: nearestNode(depot.x, depot.z),
+      stock: () => depot.rations,
+      take: (n) => (depot.rations -= n),
     });
   }
   const wh = s.districts.find((d) => d.features.warehouse);

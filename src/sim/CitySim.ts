@@ -7,7 +7,7 @@ import { DISTRICT_TEMPLATES, neighborsOf } from './layout';
 import { applyCommand, baseOf, emptyCargo, mergeTroops, type PlayerCommand } from './operations';
 import { applyHordeLosses, countHordes, formHordes, moveHordes, totalZombies } from './hordes';
 import { initialFleet, payday, updatePilots } from './pilots';
-import { createSites, updateSites } from './sites';
+import { createSites, siteHolds, updateSites } from './sites';
 import { createSupply, updateSupply } from './supply';
 import { baseSealed, checkSeal, isBase } from './quarantine';
 import { hashSeed, nextRandom } from './rng';
@@ -260,7 +260,9 @@ function fuelConvoys(s: CityState, emit: Emit): void {
   if (base.status === 'overrun') return;
   for (const d of s.districts) {
     if (!d.features.fuelDepot || d === base) continue;
-    const running = d.status !== 'overrun' && !d.rioting && d.troops.strength >= TUNING.convoyGuards && d.fuel > 0;
+    // The industrial park's fuel goes out through its terminal.
+    const terminal = d.kind !== 'industrial' || siteHolds(s, 'fuelTerminal');
+    const running = terminal && d.status !== 'overrun' && !d.rioting && d.troops.strength >= TUNING.convoyGuards && d.fuel > 0;
     const key = 'convoyStopped';
     if (running) {
       const litres = Math.min(TUNING.convoyLitres, d.fuel);
@@ -462,7 +464,9 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const people = d.population + tr.strength + d.infected;
   const fear = 1 - d.order / 100;
   const hoarding = day <= 4 ? 1 + 0.8 * fear : 1;
-  const water = d.power === 'dark' ? 1.3 : 1;
+  // Pumps stop without power; with the waterworks lost the taps run dry everywhere.
+  const thirst = !siteHolds(s, 'waterworks');
+  const water = (d.power === 'dark' ? 1.3 : 1) * (thirst ? 1.25 : 1);
   d.rations = Math.max(0, d.rations - (people / 1440) * hoarding * water);
   d.medicine = Math.max(0, d.medicine - encounters * 0.5 - (people / 1440) * 0.02);
   if (Math.floor(s.t) % 60 === 0) {
@@ -515,7 +519,8 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   // Guarded police stations, shelters and food points steady people.
   const outposts = Math.min(10, d.outposts * 3);
   const target = clamp(
-    85 - 25 * shortage - 30 * fearNow - dark - dread + 15 * security + outposts + quell - (medicineShort ? 5 : 0),
+    85 - 25 * shortage - 30 * fearNow - dark - dread + 15 * security + outposts + quell - (medicineShort ? 5 : 0) -
+      (thirst ? 5 : 0),
     0,
     100,
   );

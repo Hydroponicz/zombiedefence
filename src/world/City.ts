@@ -121,6 +121,9 @@ interface Lot {
 /** Facade styles the window shader draws. */
 const WINDOW = { punched: 1, glass: 2, residential: 3, stone: 4 } as const;
 
+const POLICE_CARS = [0xf2f2f2, 0x16181c];
+const SHOPPER_CARS = [0x7d2a24, 0x2b4a72, 0xb9b9b4, 0x3c3c3c, 0x6d6f4a];
+
 const COLLISION_CELL = 40;
 const LAMP_SPACING = 32;
 const LAMP_HEIGHT = 8.5;
@@ -341,15 +344,132 @@ export class City {
       }
     };
     switch (site.variant) {
-      case 'station':
-      case 'hq': {
-        const big = site.variant === 'hq';
+      case 'station': {
+        // Suburban station: a low block with a car park.
         this.boxes.push({ x: cx, z: cz + 24, w: lot.w - 2 * SIDEWALK, d: 40, h: 0.22, color: asphalt, district });
-        this.building(district, cx, cz - 18, big ? 70 : 56, 34, big ? 26 : 11, 0x46566e);
+        this.building(district, cx, cz - 18, 56, 34, 11, 0x46566e);
         // White band under the roofline and a radio mast.
-        this.building(district, cx, cz - 18, big ? 71 : 57, 35, 1.4, 0xe6e6e0, false, big ? 22 : 8);
-        this.cylinders.push({ x: cx + (big ? 30 : 23), z: cz - 30, r: 0.5, h: 34, y: big ? 26 : 11, color: 0xb8bcc0 });
-        parked(6, cz + 8, [0xf2f2f2, 0x16181c]);
+        this.building(district, cx, cz - 18, 57, 35, 1.4, 0xe6e6e0, false, 8);
+        this.cylinders.push({ x: cx + 23, z: cz - 30, r: 0.5, h: 34, y: 11, color: 0xb8bcc0 });
+        parked(6, cz + 8, POLICE_CARS);
+        lz(0xd7d2c4);
+        break;
+      }
+      case 'precinct': {
+        // Urban precinct: five storeys of brick, a blue canopy, and a walled vehicle yard.
+        this.building(district, cx, cz - 18, 66, 34, 18, 0x8a4b3a);
+        this.building(district, cx, cz - 0.4, 16, 3, 0.6, 0x2a4f8a, false, 4);
+        this.cylinders.push({ x: cx + 26, z: cz - 28, r: 0.5, h: 26, y: 18, color: 0xb8bcc0 });
+        this.boxes.push({ x: cx, z: cz + 26, w: lot.w - 2 * SIDEWALK, d: 38, h: 0.22, color: asphalt, district });
+        for (const [x, z, w, d] of [[cx - 38, cz + 26, 0.6, 36], [cx + 38, cz + 26, 0.6, 36], [cx - 24, cz + 44, 28, 0.6], [cx + 24, cz + 44, 28, 0.6]]) {
+          this.building(district, x, z, w, d, 3, 0x9a948a, false);
+        }
+        parked(6, cz + 10, POLICE_CARS);
+        lz(0xd7d2c4);
+        break;
+      }
+      case 'hq': {
+        // Police headquarters: a stone podium, a sixteen-storey tower and a plaza.
+        this.building(district, cx, cz - 16, 72, 38, 12, 0xa79f90, 4);
+        this.building(district, cx - 8, cz - 20, 36, 26, 64, 0x46566e, 4, 12);
+        this.building(district, cx - 8, cz - 20, 37, 27, 2, 0x2a4f8a, false, 70);
+        this.cylinders.push({ x: cx - 8, z: cz - 20, r: 0.6, h: 30, y: 76, color: 0xb8bcc0 });
+        this.boxes.push({ x: cx, z: cz + 26, w: lot.w - 2 * SIDEWALK, d: 40, h: 0.24, color: 0xbdb8ac, district });
+        parked(8, cz + 8, POLICE_CARS);
+        lz(0xd7d2c4);
+        break;
+      }
+      case 'market': {
+        // Corner supermarket under four floors of flats, with a loading yard.
+        this.building(district, cx, cz - 16, lot.w - 16, 40, 6, 0xcfc6b2, false);
+        this.building(district, cx, cz - 16, lot.w - 16, 40, 16, 0xc4b19a, 3, 6);
+        this.building(district, cx, cz + 4.3, 34, 0.8, 2.2, 0xc23b2e, false, 3.4);
+        this.boxes.push({ x: cx, z: cz + 26, w: lot.w - 2 * SIDEWALK, d: 40, h: 0.22, color: asphalt, district });
+        this.building(district, cx + 30, cz + 24, 2.5, 12, 3.6, 0xe9e7e0, false, 1);
+        parked(6, cz + 12, SHOPPER_CARS);
+        lz(0xd7d2c4);
+        break;
+      }
+      case 'mall': {
+        // Downtown mall: a big box with a glass atrium, banners and a plaza.
+        this.building(district, cx, cz - 14, lot.w - 14, 48, 18, 0xbcb3a3, 2);
+        this.building(district, cx, cz - 14, 26, 26, 7, 0x5b7488, 2, 18);
+        this.building(district, cx, cz + 10.4, 40, 0.8, 3, 0xc23b2e, false, 12);
+        this.boxes.push({ x: cx, z: cz + 30, w: lot.w - 2 * SIDEWALK, d: 30, h: 0.24, color: 0xbdb8ac, district });
+        for (let k = 0; k < 6; k++) this.trees.push({ x: cx - 36 + k * 14.4, z: cz + 42, s: 0.8 });
+        lz(0xd7d2c4);
+        break;
+      }
+      case 'clinic': {
+        // Walk-in clinic: three white storeys, a green cross, an ambulance bay.
+        this.boxes.push({ x: cx, z: cz + 14, w: lot.w - 2 * SIDEWALK, d: 56, h: 0.22, color: asphalt, district });
+        this.building(district, cx - 16, cz - 18, 46, 34, 12, 0xe9e7e2);
+        this.building(district, cx - 16, cz - 0.6, 4, 0.8, 4, 0x2e9e5b, false, 6);
+        this.building(district, cx - 30, cz + 4, 12, 8, 0.6, 0xd0d0cc, false, 4);
+        this.building(district, cx + 26, cz - 26, 26, 22, 10 + rand() * 8, 0xb0a58f);
+        this.cars.push({ x: cx - 30, z: cz + 6, yaw: 0, color: 0xf2f2f2 });
+        lz(0xd7d2c4);
+        break;
+      }
+      case 'highschool': {
+        // City high school: four storeys of brick in an L round a paved yard.
+        this.building(district, cx - 24, cz - 8, 34, 70, 16, 0x9a5a44);
+        this.building(district, cx + 8, cz - 32, 52, 18, 16, 0x9a5a44);
+        this.boxes.push({ x: site.x, z: site.z, w: 46, d: 46, h: 0.24, color: 0x6b6d70, district });
+        this.boxes.push({ x: site.x, z: site.z, w: 24, d: 14, h: 0.28, color: 0xa65a3c, district });
+        lz(0x8a8d90);
+        break;
+      }
+      case 'depot': {
+        // Food distribution depot: a long warehouse, loading docks, trailers waiting.
+        this.building(district, cx, cz - 16, lot.w - 14, 40, 12, 0xa9a294, false);
+        this.boxes.push({ x: cx, z: cz + 6, w: lot.w - 20, d: 4, h: 0.6, y: 5, color: 0x6b6d70, district });
+        for (let k = 0; k < 8; k++) {
+          this.boxes.push({ x: cx - 36 + k * 10.3, z: cz + 4.2, w: 4, d: 0.3, h: 4, color: 0x3b3d40, district });
+        }
+        this.boxes.push({ x: cx, z: cz + 26, w: lot.w - 2 * SIDEWALK, d: 40, h: 0.22, color: asphalt, district });
+        for (const dx of [-30, -20, 22, 32]) this.building(district, cx + dx, cz + 16, 2.6, 12, 3.6, 0xe9e7e0, false, 1);
+        lz(0xd7d2c4);
+        break;
+      }
+      case 'factory': {
+        // Ration plant: saw-tooth production halls, silos and a stack.
+        const hallW = lot.w - 14;
+        this.building(district, cx, cz - 14, hallW, 46, 10, 0x8d8a82, false);
+        for (let k = 0; k < 5; k++) {
+          this.roofs.push({ x: cx, z: cz - 32 + k * 9, w: hallW, d: 9, h: 4, y: 10, yaw: 0, color: 0x6a6e72 });
+        }
+        for (let k = 0; k < 3; k++) this.cylinders.push({ x: cx + 26 + k * 9, z: cz + 14, r: 4, h: 18, color: 0xc9c7c0 });
+        this.cylinders.push({ x: cx - 34, z: cz - 34, r: 1.6, h: 42, color: 0x8a5a44 });
+        this.boxes.push({ x: cx, z: cz + 30, w: lot.w - 2 * SIDEWALK, d: 32, h: 0.22, color: asphalt, district });
+        lz(0xd7d2c4);
+        break;
+      }
+      case 'waterworks': {
+        // Treatment basins, a pump house and a water tower.
+        this.pad(lot, GRASS, district, 0.22, SIDEWALK);
+        for (const [dx, dz] of [[12, -24], [34, -24], [12, 2], [34, 2]]) {
+          this.cylinders.push({ x: cx + dx, z: cz + dz, r: 10, h: 1.6, color: 0x9a9a94 });
+          this.cylinders.push({ x: cx + dx, z: cz + dz, r: 9.2, h: 1.7, color: 0x3d6f8a });
+        }
+        this.building(district, cx - 22, cz - 6, 22, 14, 7, 0x8a4b3a, true);
+        for (const [dx, dz] of [[-4, -4], [4, -4], [-4, 4], [4, 4]]) {
+          this.cylinders.push({ x: cx - 30 + dx, z: cz - 30 + dz, r: 0.4, h: 22, color: 0x8f9396 });
+        }
+        this.cylinders.push({ x: cx - 30, z: cz - 30, r: 6.5, h: 8, y: 22, color: 0xcfd3d6 });
+        lz(0x9aa58e);
+        break;
+      }
+      case 'fuelTerminal': {
+        // Fuel terminal: storage tanks, a pipe rack and a tanker loading rack.
+        this.pad(lot, 0x8a8477, district, 0.22, SIDEWALK);
+        for (const [dx, dz] of [[-26, -26], [-4, -26], [-26, -2], [-4, -2]]) {
+          this.cylinders.push({ x: cx + dx, z: cz + dz, r: 9, h: 14, color: 0xdcd9d2 });
+        }
+        this.fuelSites.push({ district, x: cx - 15, z: cz - 14 });
+        this.boxes.push({ x: cx + 14, z: cz - 14, w: 1.2, d: 50, h: 1.2, y: 3, color: 0x8f9396, district });
+        this.building(district, cx + 28, cz - 12, 14, 22, 0.6, 0xd09a2a, false, 6);
+        for (const dz of [-18, -6]) this.building(district, cx + 28, cz + dz, 2.6, 11, 3, 0xd8d8d2, false, 1);
         lz(0xd7d2c4);
         break;
       }

@@ -35,10 +35,28 @@ describe('site planning', () => {
         expect(here).toHaveLength(0);
         return;
       }
-      expect(here.some((p) => p.kind === 'supermarket')).toBe(true);
-      expect(here.some((p) => p.kind === 'shelter')).toBe(true);
-      if (tpl.kind !== 'industrial') expect(here.some((p) => p.kind === 'police')).toBe(true);
+      const kinds = new Set(here.map((p) => p.kind));
+      if (tpl.kind === 'industrial') {
+        // Works, not shelters and shops.
+        expect([...kinds].sort()).toEqual(['depot', 'factory', 'fuelTerminal', 'waterworks']);
+        return;
+      }
+      expect(kinds.has('supermarket')).toBe(true);
+      expect(kinds.has('shelter')).toBe(true);
+      expect(kinds.has('police')).toBe(true);
     });
+  });
+
+  it('builds each kind to suit how dense its district is', () => {
+    const variant = (district: string, kind: string) =>
+      plans.find((p) => DISTRICT_TEMPLATES[p.district].name === district && p.kind === kind)!.variant;
+    expect(variant('Westfield', 'police')).toBe('station');
+    expect(variant('Riverside', 'police')).toBe('precinct');
+    expect(variant('Downtown', 'police')).toBe('hq');
+    expect(variant('Westfield', 'supermarket')).toBe('store');
+    expect(variant('Riverside', 'supermarket')).toBe('market');
+    expect(variant('Downtown', 'supermarket')).toBe('mall');
+    expect(variant('Riverside', 'pharmacy')).toBe('clinic');
   });
 
   it('puts each site on its own block inside its district, off the landmark', () => {
@@ -187,5 +205,34 @@ describe('player at a site', () => {
     const pharmacy = siteOf(s, 'pharmacy');
     pharmacy.medicine = 100;
     expect(applyCommand(s, { type: 'loadCrate', kind: 'medicine', site: pharmacy.id }, quiet)).toBe(false);
+  });
+});
+
+describe('industrial works', () => {
+  const industrial = (s: CityState) => s.districts.find((d) => d.kind === 'industrial')!;
+  const work = (s: CityState, kind: Site['kind']) => s.sites.find((x) => x.kind === kind)!;
+
+  it('the ration factory packs food for the rail yard while it holds', () => {
+    const s = city();
+    const before = s.supply.yard;
+    hours(s, 2);
+    expect(s.supply.yard).toBeGreaterThan(before);
+    work(s, 'factory').status = 'fallen';
+    const after = s.supply.yard;
+    hours(s, 2);
+    expect(s.supply.yard).toBe(after);
+    expect(industrial(s).kind).toBe('industrial');
+  });
+
+  it('losing the waterworks makes food go faster everywhere', () => {
+    const eaten = (fallen: boolean) => {
+      const s = city();
+      if (fallen) work(s, 'waterworks').status = 'fallen';
+      const d = s.districts.find((x) => x.name === 'Westfield')!;
+      d.rations = 1e6;
+      new CitySim(s).step(30);
+      return 1e6 - d.rations;
+    };
+    expect(eaten(true)).toBeGreaterThan(eaten(false) * 1.15);
   });
 });

@@ -14,8 +14,23 @@ import type { CityState, DistrictState, Severity, Site, SiteKind } from './types
 
 type Emit = (district: number | null, severity: Severity, text: string, radio?: boolean) => void;
 
-/** How a site is built: decides its footprint, its landing zone and how many it can shelter. */
-export type SiteVariant = 'station' | 'hq' | 'store' | 'school' | 'hall' | 'arena' | 'pharmacy';
+/**
+ * How a site is built: decides its footprint, its landing zone and how many it can shelter. Each
+ * kind has a suburban, an urban and a downtown form.
+ */
+export type SiteVariant =
+  | 'station' | 'precinct' | 'hq'
+  | 'store' | 'market' | 'mall'
+  | 'pharmacy' | 'clinic'
+  | 'school' | 'highschool' | 'hall' | 'arena'
+  | 'depot' | 'factory' | 'waterworks' | 'fuelTerminal';
+
+/** How built-up a district is, which decides what its sites look like. */
+type Density = 'suburb' | 'urban' | 'downtown';
+
+function densityOf(kind: DistrictKind): Density {
+  return kind === 'residential' ? 'suburb' : kind === 'downtown' ? 'downtown' : 'urban';
+}
 
 export interface SitePlan {
   id: number;
@@ -37,6 +52,10 @@ export const SITE_LABELS: Record<SiteKind, string> = {
   supermarket: 'supermarket',
   shelter: 'shelter',
   pharmacy: 'pharmacy',
+  depot: 'supply depot',
+  factory: 'ration factory',
+  waterworks: 'waterworks',
+  fuelTerminal: 'fuel terminal',
 };
 
 /** Sites per district kind. */
@@ -47,7 +66,8 @@ const COUNTS: Record<DistrictKind, Partial<Record<SiteKind, number>>> = {
   commercial: { police: 1, supermarket: 3, shelter: 1, pharmacy: 1 },
   university: { police: 1, supermarket: 1, shelter: 1, pharmacy: 1 },
   harbor: { police: 1, supermarket: 1, shelter: 1 },
-  industrial: { supermarket: 1, shelter: 1 },
+  // No schools or shops: the works that keep food, water and fuel flowing to the rest of the city.
+  industrial: { depot: 1, factory: 1, waterworks: 1, fuelTerminal: 1 },
   hospital: { police: 1, supermarket: 1, shelter: 1, pharmacy: 1 },
   airbase: {},
 };
@@ -55,8 +75,17 @@ const COUNTS: Record<DistrictKind, Partial<Record<SiteKind, number>>> = {
 /** Landing zone offset from the block centre, by variant (the 3D city builds around it). */
 export const LZ_OFFSET: Record<SiteVariant, [number, number]> = {
   station: [0, 26],
-  hq: [0, 26],
+  precinct: [0, 30],
+  hq: [0, 30],
   store: [0, 26],
+  market: [0, 30],
+  mall: [0, 32],
+  clinic: [16, 24],
+  highschool: [20, 18],
+  depot: [0, 30],
+  factory: [0, 32],
+  waterworks: [-22, 28],
+  fuelTerminal: [24, 30],
   school: [22, 10],
   hall: [14, 22],
   arena: [0, 32],
@@ -65,8 +94,17 @@ export const LZ_OFFSET: Record<SiteVariant, [number, number]> = {
 
 const CAPACITY: Record<SiteVariant, number> = {
   station: 300,
+  precinct: 400,
   hq: 600,
   store: 0,
+  market: 0,
+  mall: 0,
+  clinic: 0,
+  highschool: 2500,
+  depot: 0,
+  factory: 0,
+  waterworks: 0,
+  fuelTerminal: 0,
   school: 1500,
   hall: 800,
   arena: 6000,
@@ -114,8 +152,9 @@ export function planSites(seed: number | string): SitePlan[] {
     }
     core.sort((a, b) => a.score - b.score);
     const counts = COUNTS[tpl.kind];
-    // The police and the shelters take the most central blocks.
-    for (const kind of ['police', 'shelter', 'supermarket', 'pharmacy'] as SiteKind[]) {
+    const density = densityOf(tpl.kind);
+    // The police and the shelters (or the depot and the waterworks) take the most central blocks.
+    for (const kind of ['police', 'shelter', 'depot', 'waterworks', 'supermarket', 'pharmacy', 'factory', 'fuelTerminal'] as SiteKind[]) {
       for (let n = 0; n < (counts[kind] ?? 0); n++) {
         const block = core.shift();
         if (!block) continue;
@@ -124,8 +163,9 @@ export function planSites(seed: number | string): SitePlan[] {
         let name: string;
         switch (kind) {
           case 'police':
-            variant = tpl.kind === 'downtown' ? 'hq' : 'station';
-            name = tpl.kind === 'downtown' ? 'Central Police HQ' : tpl.kind === 'university' ? 'Campus Police' : `${tpl.name} Police Station`;
+            variant = density === 'downtown' ? 'hq' : density === 'urban' ? 'precinct' : 'station';
+            name = tpl.kind === 'downtown' ? 'Central Police HQ' : tpl.kind === 'university' ? 'Campus Police'
+              : density === 'urban' ? `${tpl.name} Precinct` : `${tpl.name} Police Station`;
             break;
           case 'shelter':
             if (tpl.kind === 'downtown') {
@@ -134,21 +174,40 @@ export function planSites(seed: number | string): SitePlan[] {
             } else if (tpl.kind === 'university') {
               variant = 'arena';
               name = 'University Arena';
-            } else if (n === 1 || tpl.kind === 'harbor' || tpl.kind === 'industrial') {
+            } else if (n === 1 || tpl.kind === 'harbor') {
               variant = 'hall';
               name = halls.pop() ?? 'Community Center';
+            } else if (density === 'urban') {
+              variant = 'highschool';
+              name = `${schools.pop() ?? tpl.name} High School`;
             } else {
               variant = 'school';
               name = `${schools.pop() ?? tpl.name} ${pick(SCHOOL_TYPES)}`;
             }
             break;
           case 'supermarket':
-            variant = 'store';
-            name = `${pick(STORES)}, ${street()}`;
+            variant = density === 'downtown' ? 'mall' : density === 'urban' ? 'market' : 'store';
+            name = density === 'downtown' ? 'Metro Center Mall' : `${pick(STORES)}, ${street()}`;
             break;
           case 'pharmacy':
-            variant = 'pharmacy';
-            name = `${pick(PHARMACIES)}, ${street()}`;
+            variant = density === 'suburb' ? 'pharmacy' : 'clinic';
+            name = density === 'suburb' ? `${pick(PHARMACIES)}, ${street()}` : `${pick(['City', 'Eastgate', 'Mercy', 'Riverside'])} Clinic, ${street()}`;
+            break;
+          case 'depot':
+            variant = 'depot';
+            name = `${tpl.name} Food Distribution Depot`;
+            break;
+          case 'factory':
+            variant = 'factory';
+            name = 'Kessler Foods Ration Plant';
+            break;
+          case 'waterworks':
+            variant = 'waterworks';
+            name = 'City Waterworks';
+            break;
+          case 'fuelTerminal':
+            variant = 'fuelTerminal';
+            name = `${tpl.name} Fuel Terminal`;
             break;
         }
         const i = tpl.col * BLOCKS_PER_DISTRICT + bi;
@@ -169,7 +228,8 @@ export function createSites(s: CityState): void {
   s.sites = planSites(s.seed).map((p) => ({
     id: p.id, district: p.district, kind: p.kind, name: p.name, x: p.x, z: p.z,
     status: 'held', integrity: 100, guards: 0, pinned: 0, sheltered: 0, capacity: p.capacity,
-    rations: 0, medicine: 0, ammo: p.kind === 'police' ? (p.capacity >= 600 ? 50000 : 20000) : 0, looted: false,
+    rations: p.kind === 'depot' ? DEPOT_RATIONS : 0, medicine: 0,
+    ammo: p.kind === 'police' ? (p.capacity >= 600 ? 50000 : 20000) : 0, looted: false,
   }));
   for (const d of s.districts) {
     const here = s.sites.filter((x) => x.district === d.id);
@@ -212,10 +272,33 @@ export function guardsNeeded(site: Site): number {
   return NEED[site.kind] + (site.kind === 'shelter' ? site.sheltered / 150 : 0);
 }
 
-const NEED: Record<SiteKind, number> = { police: 12, supermarket: 10, shelter: 8, pharmacy: 5 };
-const PRIORITY: Record<SiteKind, number> = { police: 3, shelter: 3, supermarket: 2, pharmacy: 1 };
+const NEED: Record<SiteKind, number> = {
+  police: 12, supermarket: 10, shelter: 8, pharmacy: 5, depot: 10, factory: 8, waterworks: 8, fuelTerminal: 10,
+};
+const PRIORITY: Record<SiteKind, number> = {
+  police: 3, shelter: 3, supermarket: 2, pharmacy: 1, depot: 3, waterworks: 3, factory: 2, fuelTerminal: 2,
+};
 /** How strongly each kind draws the dead (people and the smell of food). */
-const DRAW: Record<SiteKind, number> = { police: 0.8, shelter: 1.4, supermarket: 1.1, pharmacy: 0.7 };
+const DRAW: Record<SiteKind, number> = {
+  police: 0.8, shelter: 1.4, supermarket: 1.1, pharmacy: 0.7, depot: 0.7, factory: 0.6, waterworks: 0.5, fuelTerminal: 0.6,
+};
+/** Rations the factory packs into the rail yard's stock each hour while it runs. */
+export const FACTORY_RATIONS = 3000;
+/** Food waiting at the distribution depot at the start. */
+const DEPOT_RATIONS = 40000;
+/** What the city loses when an industrial site falls, for the radio. */
+const LOST: Partial<Record<SiteKind, string>> = {
+  depot: 'Food trucks can no longer load at the rail yard.',
+  factory: 'Ration production has stopped.',
+  waterworks: "The city's taps are running dry.",
+  fuelTerminal: 'Fuel convoys from the industrial park have stopped.',
+};
+
+/** Whether the city's site of this kind (the depot, the waterworks...) still stands. */
+export function siteHolds(s: CityState, kind: SiteKind): boolean {
+  const here = s.sites.filter((x) => x.kind === kind);
+  return here.length === 0 || here.some((x) => x.status !== 'fallen');
+}
 /** The military posts at most this share of a district's soldiers at its sites. */
 const POSTED_SHARE = 0.6;
 /** A horde within this distance of a site throws itself at it. */
@@ -239,6 +322,12 @@ export function updateSites(s: CityState, night: boolean, emit: Emit, effectiven
     postGuards(d, here);
     const e = effectiveness(d);
     for (const site of here) siege(s, d, site, e, night, emit);
+    // The ration plant packs food for the rail yard while it holds, has power and has hands.
+    for (const site of here) {
+      if (site.kind === 'factory' && site.status !== 'fallen' && d.power !== 'dark' && (site.guards >= 1 || d.order > 40)) {
+        s.supply.yard += FACTORY_RATIONS;
+      }
+    }
     fillShelters(d, here, night);
     handOut(d, here, emit);
     recount(d, here);
@@ -334,7 +423,8 @@ function siege(s: CityState, d: DistrictState, site: Site, e: number, night: boo
     site.guards -= lost;
     site.pinned = Math.min(site.pinned, site.guards);
     const who = inside >= 10 ? ` ${Math.round(inside).toLocaleString('en-US')} civilians were sheltering inside.` : '';
-    emit(d.id, 'critical', `${name} has fallen.${who}`);
+    const cost = LOST[site.kind] ? ` ${LOST[site.kind]}` : '';
+    emit(d.id, 'critical', `${name} has fallen.${who}${cost}`);
   } else if (site.status === 'held' && site.integrity < 60) {
     site.status = 'besieged';
     emit(d.id, site.sheltered >= 100 ? 'critical' : 'warn', `${name} is under siege${site.sheltered >= 100 ? ` with ${Math.round(site.sheltered).toLocaleString('en-US')} civilians inside` : ''}.`);

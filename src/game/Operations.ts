@@ -327,7 +327,8 @@ export class Operations {
       });
     }
     // Take stock away: food from a supermarket, ammunition from an armoury, medicine from a pharmacy.
-    const kinds: CrateKind[] = site.kind === 'police' ? ['ammo'] : site.kind === 'pharmacy' ? ['medicine'] : site.kind === 'supermarket' ? ['rations'] : ['rations', 'medicine'];
+    const kinds: CrateKind[] = site.kind === 'police' ? ['ammo'] : site.kind === 'pharmacy' ? ['medicine']
+      : site.kind === 'supermarket' || site.kind === 'depot' ? ['rations'] : site.kind === 'shelter' ? ['rations', 'medicine'] : [];
     for (const kind of kinds) {
       const stock = siteStock(site, kind);
       if (stock < 1 && site.kind === 'shelter') continue;

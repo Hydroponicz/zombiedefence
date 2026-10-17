@@ -35,7 +35,9 @@ export interface MapContext {
 }
 
 const SITE_COLOR: Record<SiteStatus, string> = { held: '#5fc46b', besieged: '#e8a83a', fallen: '#5a2a26' };
-const SITE_LETTER: Record<SiteKind, string> = { police: 'P', supermarket: 'S', shelter: 'H', pharmacy: '+' };
+const SITE_LETTER: Record<SiteKind, string> = {
+  police: 'P', supermarket: 'S', shelter: 'H', pharmacy: '+', depot: 'D', factory: 'M', waterworks: 'W', fuelTerminal: 'F',
+};
 
 export class DebugMap {
   visible = false;
@@ -362,7 +364,9 @@ export class DebugMap {
       const name = site.name.length > 26 ? `${site.name.slice(0, 25)}…` : site.name;
       this.text(name, x + 28, yy, 12, '#e8ecdf');
       const stock = site.kind === 'police' ? `ammo ${fmt(site.ammo)}` : site.kind === 'pharmacy' ? `med ${fmt(site.medicine)}`
-        : site.kind === 'shelter' ? `${fmt(site.sheltered)}/${fmt(site.capacity)} in` : `food ${fmt(site.rations)}`;
+        : site.kind === 'shelter' ? `${fmt(site.sheltered)}/${fmt(site.capacity)} in`
+          : site.kind === 'waterworks' ? 'water' : site.kind === 'fuelTerminal' ? 'fuel'
+            : site.kind === 'factory' ? 'packing food' : `food ${fmt(site.rations)}`;
       const info = site.status === 'fallen' ? 'fallen' : `${Math.round(site.guards)}/${Math.ceil(guardsNeeded(site))} gd · ${stock}`;
       this.text(info, x + w - 14, yy, 12, site.status === 'held' ? '#a5ad9c' : SITE_COLOR[site.status], 'right');
     });

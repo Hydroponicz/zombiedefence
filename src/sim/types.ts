@@ -83,7 +83,11 @@ export interface DistrictState {
   cooldowns: Record<string, number>;
 }
 
-export type SiteKind = 'police' | 'supermarket' | 'shelter' | 'pharmacy';
+/**
+ * City sites: police stations, supermarkets, shelters, pharmacies. Industrial sites keep the city
+ * supplied: the food distribution depot, the ration factory, the waterworks and the fuel terminal.
+ */
+export type SiteKind = 'police' | 'supermarket' | 'shelter' | 'pharmacy' | 'depot' | 'factory' | 'waterworks' | 'fuelTerminal';
 export type SiteStatus = 'held' | 'besieged' | 'fallen';
 
 /**

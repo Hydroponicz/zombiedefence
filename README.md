@@ -222,6 +222,23 @@ Every district has key buildings the military holds: about 54 in all. They're cl
   reach of the dead.
 
 How sites change over time:
+- **Sites suit their district:**
+  - **Police:** in the suburbs, a small station with a car park; in denser districts, a brick
+    precinct with a walled yard; downtown, the police HQ tower on a plaza.
+  - **Supermarkets:** big-box stores in the suburbs, corner markets under flats in the city, and the
+    mall downtown.
+  - **Pharmacies:** strip pharmacies in the suburbs, clinics in the city.
+  - **Shelters:** schools and churches in the suburbs, multi-storey high schools and community halls
+    in the city, arenas downtown and on campus.
+- **Industrial Park has works, not shelters or shops,** and each keeps something flowing to the city:
+  - **Food Distribution Depot:** trucks load at the rail yard only through it, and it holds 40,000
+    rations of its own.
+  - **Ration plant:** packs 3,000 rations an hour into the yard while it holds, has power and has
+    hands.
+  - **Waterworks:** if it falls, the taps run dry. Food goes 25% faster everywhere and order drops.
+  - **Fuel terminal:** the park's fuel convoys to the base stop if it falls.
+
+  The radio says what the city loses when one falls.
 - **Guards:** the military posts up to 60% of a district's soldiers at its sites: police stations and
   shelters first, then food, then pharmacies. Unguarded stores are looted in a riot.
 - **Sieges:** the dead besiege sites, a settled horde hardest. Barricades hold for hours, longer with
