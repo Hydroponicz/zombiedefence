@@ -1,6 +1,7 @@
 // DOM heads-up display: clock, district under the helicopter, flight instruments, radio log.
 
 import { formatClock, isDaytime } from '../sim/clock';
+import type { PadReading } from '../input/Input';
 import type { DistrictState, SimEvent } from '../sim/types';
 
 const RADIO_LIMIT = 6;
@@ -19,7 +20,9 @@ export const CONTROLS_HTML = `
   <tr><td>Time speed</td><td>D-pad ◀ ▶</td><td><kbd>[</kbd> / <kbd>]</kbd></td></tr>
   <tr><td>Pause</td><td>Menu</td><td><kbd>Esc</kbd></td></tr>
   <tr><td>Show / hide controls</td><td></td><td><kbd>H</kbd></td></tr>
-</table>`;
+  <tr><td>Controller readout</td><td></td><td><kbd>G</kbd></td></tr>
+</table>
+<div class="controller-status"></div>`;
 
 const POWER_LABEL = { on: 'Grid power', backup: 'On generators', dark: 'No power' } as const;
 
@@ -44,10 +47,36 @@ export class Hud {
   private toastTimer = 0;
   private radio: { li: HTMLLIElement; age: number }[] = [];
   private lastDistrictKey = '';
+  private pad = el('hud-pad');
+  private lastStatus = '';
 
   constructor() {
     this.help.innerHTML = CONTROLS_HTML;
     el('pause-controls').innerHTML = CONTROLS_HTML;
+  }
+
+  setControllerStatus(text: string, ok: boolean): void {
+    if (text === this.lastStatus) return;
+    this.lastStatus = text;
+    for (const s of document.querySelectorAll<HTMLElement>('.controller-status')) {
+      s.textContent = text;
+      s.classList.toggle('ok', ok);
+    }
+  }
+
+  togglePadReadout(): void {
+    this.pad.hidden = !this.pad.hidden;
+  }
+
+  /** Live raw controller values, to check what the browser reports. */
+  showPad(reading: PadReading | null, status: string): void {
+    if (this.pad.hidden) return;
+    if (!reading) {
+      this.pad.textContent = `Controller readout (G to hide)\n\n${status}`;
+      return;
+    }
+    const axes = reading.axes.map((v, i) => `  axis ${i}: ${v >= 0 ? ' ' : ''}${v.toFixed(2)}`).join('\n');
+    this.pad.textContent = `Controller readout (G to hide)\n\n${reading.id}\nlayout: ${reading.layout}\n\n${axes}\n\n  buttons held: ${reading.pressed.join(', ') || 'none'}`;
   }
 
   toggleHelp(): void {

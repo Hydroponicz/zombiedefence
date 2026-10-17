@@ -131,6 +131,17 @@ html, body {
   line-height: 1.6;
 }
 #hud-help[hidden] { display: none; }
+.controller-status { margin-top: 6px; color: var(--warn); }
+.controller-status.ok { color: var(--held); }
+
+#hud-pad {
+  top: 80px;
+  right: 16px;
+  margin: 0;
+  font: 12px/1.5 ui-monospace, Consolas, monospace;
+  white-space: pre;
+}
+#hud-pad[hidden] { display: none; }
 
 table.controls { border-collapse: collapse; }
 table.controls td, table.controls th { padding: 1px 10px 1px 0; text-align: left; }

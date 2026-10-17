@@ -45,7 +45,7 @@ const pauseEl = document.getElementById('pause')!;
 const sim = new SimClient(seed);
 sim.onEvents = (events) => hud.addEvents(events);
 
-input.onGamepadChange = (name) => hud.toast(name ? 'Controller connected' : 'Controller disconnected');
+input.onGamepadChange = (name) => hud.toast(name ? 'Controller connected' : 'Controller disconnected', 2);
 
 let paused = false;
 let respawnTimer = 0;
@@ -83,6 +83,7 @@ function handleActions(frame: FrameInput): void {
   }
   if (paused) return;
   if (a.has('help')) hud.toggleHelp();
+  if (a.has('padDebug')) hud.togglePadReadout();
   if (a.has('camera')) chase.cycleDistance();
   if (a.has('searchlight')) hud.toast(heli.toggleSearchlight() ? 'Searchlight on' : 'Searchlight off', 1.2);
   if (a.has('timeFaster')) sim.changeTimeScale(1);
@@ -92,6 +93,9 @@ function handleActions(frame: FrameInput): void {
 function update(dt: number): void {
   const frame = input.poll();
   handleActions(frame);
+  const controllerStatus = input.controllerStatus();
+  hud.setControllerStatus(controllerStatus, input.lastPad !== null);
+  hud.showPad(input.lastPad, controllerStatus);
   if (!firstInput && (frame.collective || frame.pitch || frame.roll || frame.yaw)) {
     firstInput = true;
     setTimeout(() => hud.hideHelp(), 6000);
@@ -163,4 +167,4 @@ window.addEventListener('resize', () => {
 });
 
 // Handy for debugging from the console.
-Object.assign(window, { game: { sim, heli, city, seed } });
+Object.assign(window, { game: { sim, heli, city, seed, input } });

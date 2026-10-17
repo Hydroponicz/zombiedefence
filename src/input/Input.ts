@@ -43,6 +43,7 @@ export type Action =
   | 'up'
   | 'down'
   | 'back'
+  | 'padDebug'
   | `overlay${number}`;
 
 const KEY_ACTIONS: Record<string, Action> = {
@@ -52,6 +53,7 @@ const KEY_ACTIONS: Record<string, Action> = {
   KeyH: 'help',
   KeyL: 'searchlight',
   KeyC: 'camera',
+  KeyG: 'padDebug',
   BracketRight: 'timeFaster',
   BracketLeft: 'timeSlower',
   Tab: 'next',
@@ -75,6 +77,44 @@ const PAD_ACTIONS: [number, Action][] = [
 
 const STICK_DEADZONE = 0.15;
 const TRIGGER_DEADZONE = 0.05;
+/** Chromium sometimes reports huge pointer-lock jumps; ignore anything bigger than this. */
+const MOUSE_SPIKE = 200;
+
+/**
+ * How a pad's raw axes and buttons map onto the standard Xbox layout.
+ * - standard: the browser already remapped it (most Xbox/PlayStation pads on Windows).
+ * - xinput: the common unmapped Xbox layout (Linux and some Bluetooth connections), where
+ *   the triggers are axes and the right stick is on axes 3 and 4.
+ */
+type Layout = 'standard' | 'xinput';
+
+interface PadState {
+  id: string;
+  layout: Layout;
+  /** An axis only counts once it has been seen at rest, so stuck or uncalibrated axes can't spin the camera. */
+  armed: boolean[];
+  /** Action buttons last frame, for press edges. */
+  prev: boolean[];
+  /** All buttons last frame, to notice a pad being picked up. */
+  held: boolean[];
+}
+
+export interface PadReading {
+  id: string;
+  layout: Layout;
+  axes: readonly number[];
+  pressed: number[];
+}
+
+interface LogicalPad {
+  lx: number;
+  ly: number;
+  rx: number;
+  ry: number;
+  lt: number;
+  rt: number;
+  buttons: boolean[];
+}
 
 /** Radial deadzone, rescaled so output still starts at 0 and reaches 1. */
 function stick(x: number, y: number): [number, number] {
@@ -94,9 +134,11 @@ export class Input {
   private mouseX = 0;
   private mouseY = 0;
   private wheel = 0;
-  private padPrev: boolean[] = [];
-  private padIndex: number | null = null;
+  private pads = new Map<number, PadState>();
+  private activePad: number | null = null;
   private usingGamepad = false;
+  /** Raw view of the active pad, for the on-screen controller readout. */
+  lastPad: PadReading | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => {
@@ -121,29 +163,123 @@ export class Input {
       if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
     });
     window.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement === canvas) {
-        this.mouseX += e.movementX;
-        this.mouseY += e.movementY;
-        this.usingGamepad = false;
-      }
+      if (document.pointerLockElement !== canvas) return;
+      if (Math.abs(e.movementX) > MOUSE_SPIKE || Math.abs(e.movementY) > MOUSE_SPIKE) return;
+      this.mouseX += e.movementX;
+      this.mouseY += e.movementY;
+      this.usingGamepad = false;
     });
     canvas.addEventListener('wheel', (e) => {
       this.wheel += Math.sign(e.deltaY);
       e.preventDefault();
     }, { passive: false });
 
-    window.addEventListener('gamepadconnected', (e) => {
-      if (this.padIndex === null) {
-        this.padIndex = e.gamepad.index;
-        this.onGamepadChange(e.gamepad.id);
-      }
-    });
+    // Pads are also found by polling every frame (see readPad), so a controller that was
+    // connected before the page loaded is picked up as soon as it is touched.
     window.addEventListener('gamepaddisconnected', (e) => {
-      if (e.gamepad.index === this.padIndex) {
-        this.padIndex = null;
+      this.pads.delete(e.gamepad.index);
+      if (e.gamepad.index === this.activePad) {
+        this.activePad = null;
+        this.lastPad = null;
         this.onGamepadChange(null);
       }
     });
+  }
+
+  /** One-line description of controller support, for the help and pause screens. */
+  controllerStatus(): string {
+    if (!window.isSecureContext) {
+      return `Controllers need a secure page: open the game on http://localhost, not ${location.host}`;
+    }
+    if (!navigator.getGamepads) return 'This browser does not expose controllers (Gamepad API missing)';
+    if (this.lastPad) return `Controller: ${this.lastPad.id}${this.lastPad.layout === 'standard' ? '' : ' (unmapped layout)'}`;
+    return 'No controller yet: press any button on it while this tab is focused';
+  }
+
+  private readPad(): LogicalPad | null {
+    const list = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
+    for (const p of list) {
+      if (!p || !p.connected) continue;
+      let st = this.pads.get(p.index);
+      if (!st || st.id !== p.id) {
+        st = {
+          id: p.id,
+          layout: p.mapping === 'standard' ? 'standard' : 'xinput',
+          armed: p.axes.map(() => false),
+          prev: [],
+          held: [],
+        };
+        this.pads.set(p.index, st);
+      }
+      const logical = this.mapPad(p, st);
+      const newPress = logical.buttons.some((down, i) => down && !st.held[i]);
+      st.held = logical.buttons.slice();
+      const moved = [logical.lx, logical.ly, logical.rx, logical.ry, logical.lt, logical.rt].some((v) => Math.abs(v) > 0.5);
+      // Whichever pad was last picked up is the one we read, so a stray device can't hold the slot.
+      if ((newPress || moved) && this.activePad !== p.index) {
+        this.activePad = p.index;
+        this.onGamepadChange(p.id);
+      }
+    }
+    if (this.activePad === null || !list[this.activePad]) return null;
+    const pad = list[this.activePad]!;
+    const st = this.pads.get(pad.index)!;
+    const logical = this.mapPad(pad, st);
+    this.lastPad = {
+      id: pad.id,
+      layout: st.layout,
+      axes: pad.axes,
+      pressed: pad.buttons.flatMap((b, i) => (b.pressed ? [i] : [])),
+    };
+    return logical;
+  }
+
+  private mapPad(p: Gamepad, st: PadState): LogicalPad {
+    const axis = (i: number) => {
+      const v = p.axes[i] ?? 0;
+      if (!st.armed[i] && Math.abs(v) < 0.2) st.armed[i] = true;
+      return st.armed[i] ? v : 0;
+    };
+    // Trigger axes rest at -1; they count once seen there.
+    const triggerAxis = (i: number) => {
+      const v = p.axes[i] ?? -1;
+      if (!st.armed[i] && v < -0.8) st.armed[i] = true;
+      return st.armed[i] ? (v + 1) / 2 : 0;
+    };
+    const raw = (i: number) => p.buttons[i]?.pressed ?? false;
+
+    if (st.layout === 'standard') {
+      return {
+        lx: axis(0), ly: axis(1), rx: axis(2), ry: axis(3),
+        lt: p.buttons[PAD.LT]?.value ?? 0,
+        rt: p.buttons[PAD.RT]?.value ?? 0,
+        buttons: Array.from({ length: 16 }, (_, i) => raw(i)),
+      };
+    }
+
+    // Unmapped Xbox layout: A B X Y LB RB View Menu Guide L3 R3; d-pad on axes 6 and 7.
+    const dx = p.axes.length > 7 ? axis(6) : 0;
+    const dy = p.axes.length > 7 ? axis(7) : 0;
+    const buttons: boolean[] = [];
+    buttons[PAD.A] = raw(0);
+    buttons[PAD.B] = raw(1);
+    buttons[PAD.X] = raw(2);
+    buttons[PAD.Y] = raw(3);
+    buttons[PAD.LB] = raw(4);
+    buttons[PAD.RB] = raw(5);
+    buttons[PAD.VIEW] = raw(6);
+    buttons[PAD.MENU] = raw(7);
+    buttons[PAD.L3] = raw(9);
+    buttons[PAD.R3] = raw(10);
+    buttons[PAD.UP] = dy < -0.5;
+    buttons[PAD.DOWN] = dy > 0.5;
+    buttons[PAD.LEFT] = dx < -0.5;
+    buttons[PAD.RIGHT] = dx > 0.5;
+    const lt = triggerAxis(2);
+    const rt = triggerAxis(5);
+    buttons[PAD.LT] = lt > 0.5;
+    buttons[PAD.RT] = rt > 0.5;
+    return { lx: axis(0), ly: axis(1), rx: axis(3), ry: axis(4), lt, rt, buttons };
   }
 
   releasePointer(): void {
@@ -165,13 +301,12 @@ export class Input {
     let lookX = 0;
     let lookY = 0;
 
-    const pad = this.padIndex !== null ? navigator.getGamepads?.()[this.padIndex] : null;
+    const pad = this.readPad();
     if (pad) {
-      const b = (i: number) => pad.buttons[i]?.pressed ?? false;
-      const v = (i: number) => pad.buttons[i]?.value ?? 0;
-      const [lx, ly] = stick(pad.axes[0] ?? 0, pad.axes[1] ?? 0);
-      const [rx, ry] = stick(pad.axes[2] ?? 0, pad.axes[3] ?? 0);
-      const padCollective = trigger(v(PAD.RT)) - trigger(v(PAD.LT));
+      const b = (i: number) => pad.buttons[i] ?? false;
+      const [lx, ly] = stick(pad.lx, pad.ly);
+      const [rx, ry] = stick(pad.rx, pad.ry);
+      const padCollective = trigger(pad.rt) - trigger(pad.lt);
       const padYaw = (b(PAD.RB) ? 1 : 0) - (b(PAD.LB) ? 1 : 0);
 
       const active = lx || ly || rx || ry || padCollective || padYaw;
@@ -184,13 +319,14 @@ export class Input {
       lookX = rx;
       lookY = ry;
 
+      const prev = this.pads.get(this.activePad!)!.prev;
       PAD_ACTIONS.forEach(([button, action]) => {
         const now = b(button);
-        if (now && !this.padPrev[button]) {
+        if (now && !prev[button]) {
           actions.add(action);
           this.usingGamepad = true;
         }
-        this.padPrev[button] = now;
+        prev[button] = now;
       });
     }
 
