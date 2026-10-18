@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CitySim, createCity } from '../src/sim/CitySim';
-import { nextPlatoon } from '../src/sim/command';
+import { hubOf, nextPlatoon } from '../src/sim/command';
 import { issueRequests, openRequests, streetName } from '../src/sim/requests';
 import type { CityState } from '../src/sim/types';
 
@@ -17,10 +17,26 @@ function calm(seed: string): CityState {
     d.rations = 1e7;
   }
   s.supply.trucks = [];
+  // Command tasks the player once the JOC is up.
+  s.flags.joc = true;
   return s;
 }
 
 describe('Command requests', () => {
+  it('only come once the JOC is set up at the airport', () => {
+    const s = calm('before');
+    s.flags.joc = false;
+    const d = named(s, 'Westfield');
+    d.flags.outbreak = true;
+    d.medicine = 0;
+    d.infected = 50;
+    issueRequests(s, quietEmit);
+    expect(s.requests).toHaveLength(0);
+    s.flags.joc = true;
+    issueRequests(s, quietEmit);
+    expect(s.requests).toHaveLength(1);
+  });
+
   it('asks for medicine where an outbreak has emptied the shelves, and rewards the delivery', () => {
     const s = calm('medicine');
     const d = named(s, 'Westfield');
@@ -35,8 +51,8 @@ describe('Command requests', () => {
     expect(r.title).toMatch(/out of medicine/);
 
     const sim = new CitySim(s);
-    const camp = s.army;
-    const troops = camp.troops.strength;
+    const hub = hubOf(s);
+    const troops = hub.troops.strength;
     // Medicine goes to the place that asked: a pharmacy or shelter.
     expect(r.site).not.toBeNull();
     for (let k = 0; k < r.needed; k++) {
@@ -44,7 +60,7 @@ describe('Command requests', () => {
       expect(sim.command({ type: 'dropCrate', district: d.id, site: r.site! })).toBe(true);
     }
     expect(r.status).toBe('done');
-    expect(camp.troops.strength).toBe(troops + 15);
+    expect(hub.troops.strength).toBe(troops + 15);
   });
 
   it('fails a request that runs out of time, and does not repeat it straight away', () => {
@@ -101,13 +117,20 @@ describe('Command requests', () => {
 
   it('asks for overwatch of a food truck in danger, which keeps it safe and earns a helicopter', () => {
     const s = createCity('overwatch');
+    s.flags.joc = true;
     const sim = new CitySim(s);
     // Wait for a truck with a way still to go, then make the city dangerous.
     for (let k = 0; k < 1440 && !s.supply.trucks.some((t) => t.arrive - s.t > 40); k++) sim.step(1);
     const truck = s.supply.trucks.find((t) => t.arrive - s.t > 40)!;
     s.requests = [];
     expect(truck).toBeTruthy();
-    for (const d of s.districts) if (d.kind !== 'airbase') d.status = 'contested';
+    // Contested, but with soldiers enough not to call for reinforcements.
+    for (const d of s.districts) {
+      if (d.kind === 'airbase') continue;
+      d.status = 'contested';
+      d.troops.strength = Math.max(d.troops.strength, 100);
+      d.troops.ammo = d.troops.strength * 300;
+    }
     for (let k = 0; k < 5; k++) issueRequests(s, quietEmit);
     const r = openRequests(s).find((x) => x.kind === 'overwatch' && x.truck === truck.id)!;
     expect(r.title).toMatch(/(Avenue|Street)/);

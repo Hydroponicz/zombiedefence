@@ -165,6 +165,8 @@ const keyOf = (c: { kind: RequestKind; district: number; site: number | null; tr
 /** Every couple of hours: Command puts out the most urgent new request. */
 export function issueRequests(s: CityState, emit: Emit): void {
   if (s.campaign.outcome !== 'running' && !s.flags.freePlay) return;
+  // Command tasks the player once there's a Joint Operations Command at the airport to run it from.
+  if (!s.flags.joc) return;
   if (openRequests(s).length >= MAX_OPEN) return;
   const recent = new Set(
     s.requests.filter((r) => r.status === 'open' ||

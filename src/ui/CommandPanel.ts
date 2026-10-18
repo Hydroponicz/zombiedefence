@@ -177,7 +177,10 @@ export class CommandPanel {
     const rows = open.map((r, i) => this.requestRow(s, r, i)).join('');
     const past = closed.map((r) => `<div class="cmd-row gone"><div class="cmd-line"><span>${r.title}</span>
       <span class="cmd-status">${r.status === 'done' ? '<span class="good">Done</span>' : '<span class="warn">Failed</span>'}</span></div></div>`).join('');
-    return `${head}<div class="cmd-rows">${rows || '<p>No requests right now.</p>'}${past}</div>`;
+    const none = s.flags.joc ? '<p>No requests right now.</p>'
+      : '<p class="warn">Command will start tasking you once the Joint Operations Command is set up at Kessler Airport. ' +
+        'Fly the command team in from Camp Ridgeway when it\'s authorized.</p>';
+    return `${head}<div class="cmd-rows">${rows || none}${past}</div>`;
   }
 
   private requestRow(s: CityState, r: Request, i: number): string {

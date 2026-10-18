@@ -159,8 +159,9 @@ The city can't be saved, only emptied.
 
 ## Command requests
 
-Every couple of hours Command puts out what the city needs most, as a request with a deadline and a
-reward. There are more than one helicopter can do: triage is the game.
+Once the Joint Operations Command is set up at Kessler Airport, every couple of hours Command puts
+out what the city needs most, as a request with a deadline and a reward. (Until then, the job is
+getting the command team there.) There are more than one helicopter can do: triage is the game.
 
 - **What comes up:**
   - **Supplies:** a pharmacy or shelter out of medicine, a supermarket or depot running out of food,
