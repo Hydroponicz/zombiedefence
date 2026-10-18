@@ -200,8 +200,11 @@ The whole street grid (about 3,500 street segments) carries simulated traffic:
 - **People:** jammed streets in infected districts mean more bites. While the highways flow, some
   residents escape the city; when they're jammed, people are trapped in their cars.
 - **What you see:**
-  - **Around the helicopter:** cars stream along the streets, crawl bumper to bumper in jams, and
-    lie abandoned at angles across lanes and sidewalks, some burnt out.
+  - **Around the helicopter:** every car is driven: it keeps its lane and its distance, waits at
+    the lights where avenues cross (they go dark with the power), and drives on through each
+    intersection or turns into the cross street, so you can follow one across the city. Cars join
+    and leave out at the edge of view, as many as each street's flow calls for, and queue bumper to
+    bumper in jams. Abandoned cars lie at angles across lanes and sidewalks, some burnt out.
   - **Traffic map overlay (8):** each street coloured by flow, wrecked streets purple, plus the
     highways.
   - **HUD and map sidebar:** each district's roads, e.g. "jammed · 30% wrecked".
@@ -324,8 +327,11 @@ How sites change over time:
   map shows them (red discs, dashed line to their target), and the district panel shows how much of
   its count is horde.
 - **Thousands on screen.** Up to 9,000 zombies are drawn at once: residents around you plus the
-  hordes within about 1.2 km, laid out as a column along the streets they walked, or a dense disc
-  when they've settled. Hover low and the whole mass pours toward you through the streets.
+  hordes within about 1.2 km. A marching horde is a column laid along the corners it actually
+  walked, spread across the street's width, with its head easing smoothly along between the
+  simulation's ticks, so you can hover over it and follow it from one end of the city to the other at
+  any time speed. A settled horde floods out along the four streets from its corner. Hover low and
+  the whole mass pours toward you through the streets.
 - **How it stays fast:**
   - **One draw call.** The crowd is a single instanced mesh. Each zombie is four floats of position
     and pose, and the vertex shader animates the limbs (walk, feed, claw, dead), so the CPU never

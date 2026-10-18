@@ -30,6 +30,8 @@ const NOTABLE = 800;
 /** A horde only changes course for a clearly stronger draw. */
 const RETARGET_MARGIN = 1.3;
 const ANNOUNCE_EVERY = 180;
+/** Corners remembered per horde: enough for the longest column (about 3 km of streets). */
+const TRAIL_NODES = 24;
 
 export const totalZombies = (d: DistrictState) => d.zombies + d.hordeZombies;
 
@@ -173,6 +175,12 @@ export function moveHordes(s: CityState, night: boolean, emit: Emit): void {
       h.x = tx;
       h.z = tz;
       budget -= dist;
+      // Remember the corner, so the column can be laid out along the streets it came by.
+      const trail = (h.trail ??= []);
+      if (trail[trail.length - 2] !== h.ni || trail[trail.length - 1] !== h.nj) {
+        trail.push(h.ni, h.nj);
+        if (trail.length > TRAIL_NODES * 2) trail.splice(0, 2);
+      }
       // At the next corner: on to the target's centre, or settle in to attack.
       const t = DISTRICT_TEMPLATES[h.target];
       const c = districtCenter(t.col, t.row);

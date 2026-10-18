@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { districtAt, districtCenter, DISTRICT_SIZE } from '../sim/layout';
+import { nodeX, nodeZ, roadWidth, SIDEWALK, STREET_SPACING } from '../sim/streets';
 import type { CityState, Horde } from '../sim/types';
 import { walkable, type WalkGrid } from './City';
 
@@ -29,8 +30,8 @@ const SPAWNS_PER_RECONCILE = 700;
 /** Space each zombie takes in a packed horde, m². */
 const PACKING = 1.3;
 const HORDE_WIDTH = 22;
-const TRACK_STEP = 2;
-const TRACK_POINTS = 400;
+/** The longest column drawn, metres of street. */
+const MAX_COLUMN = 800;
 
 const SIGHT = 18;
 const BITE = 1.1;
@@ -89,23 +90,28 @@ export interface CrowdFrame {
 /** A horde as drawn: where it is, the path behind it, and its formation. */
 interface Track {
   id: number;
+  /** Members drawn. */
+  size: number;
+  settled: boolean;
+  /** Column length along the streets, metres. */
+  length: number;
+  /** The column's path, from the head back along the streets it came by (flattened x, z). */
+  path: number[];
+  /** Cumulative distance along the path to each of its points. */
+  arcs: number[];
+  /** How far behind the simulation's head the drawn head is, metres: eased to 0 between ticks. */
+  lag: number;
+  /** Metres per game minute the horde walks. */
+  speed: number;
+  /** Where it has settled (a street corner). */
+  nodeI: number;
+  nodeJ: number;
+  /** Head now, and the direction it's walking. */
   cx: number;
   cz: number;
   heading: number;
-  size: number;
-  settled: boolean;
-  /** Path behind the head, newest first, every TRACK_STEP metres. */
-  xs: Float32Array;
-  zs: Float32Array;
-  points: number;
-  length: number;
-  /** Two simulation fixes, for smooth motion between ticks. */
-  fixT0: number;
-  fixX0: number;
-  fixZ0: number;
-  fixT1: number;
-  fixX1: number;
-  fixZ1: number;
+  fixT: number;
+  lastTime: number;
   seen: boolean;
 }
 
@@ -170,6 +176,7 @@ export class Crowd {
   private sealed: { x0: number; x1: number; z0: number; z1: number } | null = null;
   private slotX = 0;
   private slotZ = 0;
+  private simTime = 0;
 
   private near = new SpatialHash(2, 1 << 15, CROWD_CAPACITY);
   private far = new SpatialHash(16, 1 << 12, CROWD_CAPACITY);
@@ -326,7 +333,7 @@ export class Crowd {
     const sum = visible.reduce((n, h) => n + h.size, 0);
     for (const t of this.tracks.values()) t.seen = false;
     for (const h of visible) {
-      const t = this.track(h, state.t);
+      const t = this.track(h, state.t, this.simTime);
       t.seen = true;
       t.size = Math.min(h.size, HORDE_MEMBER_CAP, sum > room ? (room * h.size) / sum : h.size);
     }
@@ -345,44 +352,99 @@ export class Crowd {
     for (const h of visible) {
       const t = this.tracks.get(h.id)!;
       const have = members.get(h.id) ?? [];
+      // Only change the count for a real difference, so members don't flicker in and out.
       const target = Math.round(t.size);
+      if (Math.abs(have.length - target) < Math.max(12, target * 0.06)) continue;
       if (have.length > target) {
-        for (let n = target; n < have.length; n++) this.remove[have[n]] = 1;
+        // Thin from the tail of the column.
+        have.sort((a, b) => this.slotS[b] - this.slotS[a]);
+        for (let n = 0; n < have.length - target; n++) this.remove[have[n]] = 1;
       } else {
         for (let n = have.length; n < target && budget > 0; n++, budget--) this.spawnMember(t);
       }
     }
   }
 
-  private track(h: Horde, simT: number): Track {
+  private track(h: Horde, simT: number, time: number): Track {
     let t = this.tracks.get(h.id);
+    const fresh = !t;
     if (!t) {
       t = {
-        id: h.id, cx: h.x, cz: h.z, heading: h.heading, size: 0, settled: h.settle > 0,
-        xs: new Float32Array(TRACK_POINTS), zs: new Float32Array(TRACK_POINTS), points: 0, length: 0,
-        fixT0: simT, fixX0: h.x, fixZ0: h.z, fixT1: simT, fixX1: h.x, fixZ1: h.z, seen: true,
+        id: h.id, size: 0, settled: false, length: 0, path: [], arcs: [], lag: 0, speed: 0,
+        nodeI: h.ni, nodeJ: h.nj, cx: h.x, cz: h.z, heading: h.heading, fixT: -1, lastTime: time, seen: true,
       };
-      // No history yet: lay the path out straight behind the head.
-      const bx = Math.sin(h.heading);
-      const bz = Math.cos(h.heading);
-      for (let k = 0; k < TRACK_POINTS; k++) {
-        t.xs[k] = h.x + bx * k * TRACK_STEP;
-        t.zs[k] = h.z + bz * k * TRACK_STEP;
-      }
-      t.points = TRACK_POINTS;
       this.tracks.set(h.id, t);
-    } else if (simT !== t.fixT1) {
-      t.fixT0 = t.fixT1;
-      t.fixX0 = t.fixX1;
-      t.fixZ0 = t.fixZ1;
-      t.fixT1 = simT;
-      t.fixX1 = h.x;
-      t.fixZ1 = h.z;
     }
-    t.heading = h.heading;
+    if (simT !== t.fixT) {
+      // Where the column's head is drawn now, before the new fix moves it.
+      const shownX = t.cx;
+      const shownZ = t.cz;
+      t.fixT = simT;
+      // The path: the head, then the corners it came through, newest first.
+      const path = [h.x, h.z];
+      const trail = h.trail ?? [];
+      for (let k = trail.length - 2; k >= 0; k -= 2) {
+        const x = nodeX(trail[k]);
+        const z = nodeZ(trail[k + 1]);
+        if (Math.hypot(x - path[path.length - 2], z - path[path.length - 1]) > 0.01) path.push(x, z);
+      }
+      if (path.length < 4) {
+        // No history yet: lay it out straight back the way it faces.
+        path.push(h.x + Math.sin(h.heading) * MAX_COLUMN, h.z + Math.cos(h.heading) * MAX_COLUMN);
+      }
+      t.path = path;
+      t.arcs = [0];
+      for (let k = 2; k < path.length; k += 2) t.arcs.push(t.arcs[t.arcs.length - 1] + Math.hypot(path[k] - path[k - 2], path[k + 1] - path[k - 1]));
+      // Ease from where the head was drawn to the new fix along the streets, never jumping.
+      t.lag = fresh ? 0 : Math.min(this.arcOf(t, shownX, shownZ), MAX_COLUMN);
+      t.nodeI = h.ni;
+      t.nodeJ = h.nj;
+    }
     t.settled = h.settle > 0;
+    t.speed = t.settled ? 0 : h.hunting ? 7 : 3.5;
+    t.heading = h.heading;
     t.length = formationLength(Math.min(h.size, HORDE_MEMBER_CAP));
     return t;
+  }
+
+  /** Arc distance along a track's path to the point nearest (x, z). */
+  private arcOf(t: Track, x: number, z: number): number {
+    let best = 0;
+    let bestD = Infinity;
+    for (let k = 2; k < t.path.length; k += 2) {
+      const ax = t.path[k - 2];
+      const az = t.path[k - 1];
+      const dx = t.path[k] - ax;
+      const dz = t.path[k + 1] - az;
+      const len2 = dx * dx + dz * dz || 1;
+      const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
+      const d = dist2(ax + dx * u, az + dz * u, x, z);
+      if (d < bestD) {
+        bestD = d;
+        best = t.arcs[k / 2 - 1] + u * Math.sqrt(len2);
+      }
+    }
+    return best;
+  }
+
+  /** The point `arc` metres back along a track's path (past its end, straight on), into slotX/slotZ, with its direction. */
+  private pointAt(t: Track, arc: number): { dx: number; dz: number; half: number } {
+    const p = t.path;
+    const n = t.arcs.length;
+    let k = 1;
+    while (k < n - 1 && t.arcs[k] < arc) k++;
+    const ax = p[(k - 1) * 2];
+    const az = p[(k - 1) * 2 + 1];
+    const bx = p[k * 2];
+    const bz = p[k * 2 + 1];
+    const len = t.arcs[k] - t.arcs[k - 1] || 1;
+    const u = (arc - t.arcs[k - 1]) / len;
+    this.slotX = ax + (bx - ax) * u;
+    this.slotZ = az + (bz - az) * u;
+    // Direction of travel (toward the head), and how wide the street is here.
+    const dx = (ax - bx) / len;
+    const dz = (az - bz) / len;
+    return { dx, dz, half: streetHalf(ax, az, bx, bz) };
   }
 
   private spawnInDistrict(district: number, cx: number, cz: number): void {
@@ -435,7 +497,8 @@ export class Crowd {
     this.grabbers = 0;
     this.near.build(this.x, this.z, this.live, this.count);
     this.far.build(this.x, this.z, this.live, this.count);
-    this.advanceTracks(time);
+    this.simTime = time;
+    this.advanceTracks(time, f.dt);
 
     if (f.attract) {
       this.flowTimer -= f.dt;
@@ -454,7 +517,8 @@ export class Crowd {
       const toHeli = Math.hypot(f.heliX - this.x[i], f.heliZ - this.z[i]);
       // Distant agents update less often, catching up on the time they skipped.
       this.lag[i] += f.dt;
-      const every = toHeli < LOD_NEAR ? 1 : toHeli < LOD_MID ? 2 : 4;
+      // Horde followers are cheap and always on the move: every frame, so a column glides.
+      const every = mode === Mode.Follow ? 1 : toHeli < LOD_NEAR ? 1 : toHeli < LOD_MID ? 2 : 4;
       if ((i + this.frame) % every !== 0) continue;
       const dt = this.lag[i];
       this.lag[i] = 0;
@@ -520,13 +584,7 @@ export class Crowd {
       if (this.horde[i]) {
         const t = this.tracks.get(this.horde[i]);
         if (!t) continue;
-        this.slotTarget(i, t);
-        const tx = this.slotX;
-        const tz = this.slotZ;
-        const d = Math.hypot(tx - this.x[i], tz - this.z[i]);
-        // Shamble at the horde's pace; hurry to catch up when left behind.
-        const pace = t.settled ? 0.6 : 1.3;
-        this.steer(i, tx, tz, Math.min(d * 0.8, d > 15 ? 2.6 : pace * this.speed[i] + 0.4), dt);
+        this.follow(i, t, dt);
       } else {
         this.wander(i, dt);
       }
@@ -537,49 +595,82 @@ export class Crowd {
     this.render();
   }
 
-  /** Move hordes between simulation ticks and extend the path behind them. */
-  private advanceTracks(time: number): void {
+  /** Ease each column's head forward along its streets between simulation ticks. */
+  private advanceTracks(time: number, dt: number): void {
     for (const t of this.tracks.values()) {
-      const span = t.fixT1 - t.fixT0;
-      const u = span > 0 ? Math.min(1.5, (time - t.fixT0) / span) : 1;
-      t.cx = t.fixX0 + (t.fixX1 - t.fixX0) * u;
-      t.cz = t.fixZ0 + (t.fixZ1 - t.fixZ0) * u;
-      const dx = t.cx - t.xs[0];
-      const dz = t.cz - t.zs[0];
-      const moved = Math.hypot(dx, dz);
-      if (moved >= TRACK_STEP) {
-        // Shift the path back one step and add the new head.
-        t.xs.copyWithin(1, 0, TRACK_POINTS - 1);
-        t.zs.copyWithin(1, 0, TRACK_POINTS - 1);
-        t.xs[0] = t.cx;
-        t.zs[0] = t.cz;
-      }
+      const minutes = Math.max(0, time - t.lastTime);
+      t.lastTime = time;
+      // At the horde's own pace, and quicker when far behind (after a time-scale change or a jump).
+      t.lag = Math.max(0, t.lag - Math.max(t.speed * minutes, t.lag * Math.min(1, dt * 1.5)));
+      this.pointAt(t, t.lag);
+      t.cx = this.slotX;
+      t.cz = this.slotZ;
     }
   }
 
-  /** Where a horde member belongs (into slotX/slotZ): a spot in the column behind the head, or around it when settled. */
+  /**
+   * Where a horde member belongs (into slotX/slotZ): a place in the column strung out along the
+   * streets behind the head, or, once settled, flooding the streets around the corner it holds.
+   * Either way it's in the street, never in a building.
+   */
   private slotTarget(i: number, t: Track): void {
     if (t.settled) {
-      const radius = Math.sqrt((t.size * PACKING * 1.6) / Math.PI);
-      const r = radius * Math.sqrt(this.slotS[i]);
-      const a = (this.slotA[i] + 0.5) * Math.PI * 2;
-      this.slotX = t.cx + Math.cos(a) * r;
-      this.slotZ = t.cz + Math.sin(a) * r;
+      // Four arms out along the streets from the corner, thickest near it.
+      const s = this.slotS[i] * 4;
+      const arm = Math.floor(s) % 4;
+      const reach = Math.max(15, Math.min(MAX_COLUMN * 0.6, (t.size * PACKING) / (4 * HORDE_WIDTH)));
+      const r = reach * Math.pow(s - Math.floor(s), 1.4);
+      const dx = arm === 0 ? 1 : arm === 1 ? -1 : 0;
+      const dz = arm === 2 ? 1 : arm === 3 ? -1 : 0;
+      const half = dx !== 0 ? roadWidth(t.nodeJ) / 2 + SIDEWALK - 1 : roadWidth(t.nodeI) / 2 + SIDEWALK - 1;
+      const across = this.slotA[i] * 2 * half;
+      this.slotX = nodeX(t.nodeI) + dx * r - dz * across;
+      this.slotZ = nodeZ(t.nodeJ) + dz * r + dx * across;
       return;
     }
-    const along = this.slotS[i] * t.length;
-    const k = Math.min(TRACK_POINTS - 2, Math.floor(along / TRACK_STEP));
-    const f = along / TRACK_STEP - k;
-    const px = t.xs[k] + (t.xs[k + 1] - t.xs[k]) * f;
-    const pz = t.zs[k] + (t.zs[k + 1] - t.zs[k]) * f;
-    let dx = t.xs[k] - t.xs[k + 1];
-    let dz = t.zs[k] - t.zs[k + 1];
-    const len = Math.hypot(dx, dz) || 1;
-    dx /= len;
-    dz /= len;
-    const across = this.slotA[i] * HORDE_WIDTH;
-    this.slotX = px - dz * across;
-    this.slotZ = pz + dx * across;
+    const { dx, dz, half } = this.pointAt(t, t.lag + this.slotS[i] * t.length);
+    const across = this.slotA[i] * 2 * half;
+    this.slotX += -dz * across;
+    this.slotZ += dx * across;
+  }
+
+  /**
+   * Keep to a place in the horde. Slots are always out in the street, so members walk straight to
+   * them; one pulled off the street (by the rotors, say) finds its way back around buildings, and
+   * only cuts through a wall if it's truly stuck.
+   */
+  private follow(i: number, t: Track, dt: number): void {
+    this.slotTarget(i, t);
+    // A little sway of its own, so the column isn't drilled.
+    const sway = Math.sin(this.phase[i] * 0.37 + i) * 0.5;
+    const tx = this.slotX + sway;
+    const tz = this.slotZ - sway;
+    const dx = tx - this.x[i];
+    const dz = tz - this.z[i];
+    const d = Math.hypot(dx, dz);
+    if (d < 0.2) {
+      if (t.speed > 0) this.heading[i] = t.heading;
+      return;
+    }
+    // Shamble at the horde's pace; hurry to catch up when left behind.
+    const speed = Math.min(d * 2, d > 20 ? Math.max(6, d * 0.5) : 1.2 + this.speed[i] * 0.8 + (t.speed / 1.43) * 0.5);
+    const step = Math.min(d, speed * dt);
+    const mx = (dx / d) * step;
+    const mz = (dz / d) * step;
+    this.heading[i] = Math.atan2(-dx, -dz);
+    const x0 = this.x[i];
+    const z0 = this.z[i];
+    if (d > 6 && this.timer[i] < 1) {
+      // Off the street: go round buildings, and note when that gets nowhere.
+      this.move(i, mx, mz, false, false);
+      const moved = Math.hypot(this.x[i] - x0, this.z[i] - z0);
+      this.timer[i] = moved < step * 0.3 ? this.timer[i] + dt : 0;
+    } else {
+      this.x[i] = x0 + mx;
+      this.z[i] = z0 + mz;
+      this.phase[i] += step * 2.4;
+      if (d < 3) this.timer[i] = 0;
+    }
   }
 
   private wander(i: number, dt: number): void {
@@ -809,7 +900,16 @@ function visibleResidents(z: number): number {
 }
 
 function formationLength(size: number): number {
-  return Math.max(20, Math.min((TRACK_POINTS - 2) * TRACK_STEP, (Math.min(size, HORDE_MEMBER_CAP) * PACKING) / HORDE_WIDTH));
+  return Math.max(20, Math.min(MAX_COLUMN, (Math.min(size, HORDE_MEMBER_CAP) * PACKING) / HORDE_WIDTH));
+}
+
+/** Half the usable width of the street between two points (curb to curb plus sidewalks). */
+function streetHalf(ax: number, az: number, bx: number, bz: number): number {
+  const horizontal = Math.abs(bx - ax) >= Math.abs(bz - az);
+  const index = horizontal
+    ? Math.round((az - nodeZ(0)) / STREET_SPACING)
+    : Math.round((ax - nodeX(0)) / STREET_SPACING);
+  return roadWidth(index) / 2 + SIDEWALK - 1;
 }
 
 const dist2 = (x: number, z: number, cx: number, cz: number) => (x - cx) * (x - cx) + (z - cz) * (z - cz);

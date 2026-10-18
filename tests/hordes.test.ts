@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CitySim, createCity } from '../src/sim/CitySim';
 import { applyHordeLosses, countHordes, formHordes, moveHordes, totalZombies } from '../src/sim/hordes';
 import { districtAt, districtCenter, DISTRICT_TEMPLATES } from '../src/sim/layout';
-import { nearestNode, nodeX, nodeZ } from '../src/sim/streets';
+import { nearestNode, nodeX, nodeZ, roadWidth, SIDEWALK, STREET_SPACING } from '../src/sim/streets';
 import type { CityState, Horde } from '../src/sim/types';
 import { Agents } from '../src/world/Agents';
 import { CROWD_CAPACITY } from '../src/world/Crowd';
@@ -157,5 +157,58 @@ describe('crowd', () => {
     expect(crowd.count).toBe(before.length);
     const moved = before.reduce((sum, [x, z], i) => sum + Math.hypot(crowd.posX(i) - x, crowd.posZ(i) - z), 0) / before.length;
     expect(moved).toBeGreaterThan(8);
+  });
+
+  it('marches a horde along the streets at 20x time without anyone leaving the street or jumping', () => {
+    const s = emptyCity();
+    const from = districtCenter(DISTRICT_TEMPLATES[4].col, DISTRICT_TEMPLATES[4].row);
+    const h = horde(s, 1, from.x, from.z, 3000);
+    const prey = s.districts.find((d) => d.kind === 'hospital')!;
+    // Nobody about to shoot or be bitten: the crowd is the horde alone, so members keep their places.
+    for (const d of s.districts) {
+      if (d !== prey) d.population = 0;
+      d.police.officers = 0;
+      d.police.riot = 0;
+      d.troops.strength = 0;
+    }
+    h.target = prey.id;
+    const agents = new Agents('march', effects);
+    const crowd = agents.crowd;
+    const onStreet = (x: number, z: number) => {
+      const i = Math.round((x - nodeX(0)) / STREET_SPACING);
+      const j = Math.round((z - nodeZ(0)) / STREET_SPACING);
+      return Math.abs(x - nodeX(i)) <= roadWidth(i) / 2 + SIDEWALK + 1.5 || Math.abs(z - nodeZ(j)) <= roadWidth(j) / 2 + SIDEWALK + 1.5;
+    };
+    let time = s.t;
+    let worstJump = 0;
+    let offStreet = 0;
+    let samples = 0;
+    // 20x: the horde walks 3.5 m a game minute; a game minute is 1.43 s, so 14 m of street a second.
+    const dt = 1 / 30;
+    const perFrame = (dt / 1.43) * 20;
+    let before: number[] = [];
+    // Settle in first, then watch it march for a game hour.
+    for (let f = 0; f < 30 * 60 * 0.3; f++) {
+      time += perFrame;
+      while (s.t + 1 <= time) {
+        s.t++;
+        moveHordes(s, false, quiet);
+      }
+      agents.update(dt, new THREE.Vector3(h.x, 0, h.z), 150, 1, s, 0, 150, time);
+      const now: number[] = [];
+      for (let i = 0; i < crowd.count; i++) now.push(crowd.posX(i), crowd.posZ(i));
+      if (f > 30 * 6 && now.length === before.length) {
+        for (let k = 0; k < now.length; k += 2) {
+          worstJump = Math.max(worstJump, Math.hypot(now[k] - before[k], now[k + 1] - before[k + 1]));
+          samples++;
+          if (!onStreet(now[k], now[k + 1])) offStreet++;
+        }
+      }
+      before = now;
+    }
+    expect(crowd.count).toBeGreaterThan(1000);
+    expect(samples).toBeGreaterThan(10000);
+    expect(offStreet / samples).toBeLessThan(0.02);
+    expect(worstJump).toBeLessThan(2);
   });
 });

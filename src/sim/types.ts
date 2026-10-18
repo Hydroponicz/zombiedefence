@@ -146,6 +146,8 @@ export interface Horde {
   hunting: boolean;
   /** Game minute it was last announced on the radio. */
   announcedAt: number;
+  /** Street corners it has walked through, oldest first (flattened i, j), for drawing its column. */
+  trail?: number[];
 }
 
 export type CrateKind = 'rations' | 'ammo' | 'medicine';
