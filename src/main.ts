@@ -135,6 +135,8 @@ ops.onToast = (text) => hud.toast(text, 2.5);
 input.onGamepadChange = (name) => hud.toast(name ? 'Controller connected' : 'Controller disconnected', 2);
 
 let paused = false;
+/** A radio call was up last frame (to free the mouse once when one appears). */
+let radioWasUp = false;
 let respawnTimer = 0;
 /** Seconds until the crew takes a spare helicopter at the base (after abandoning one), or -1. */
 let respawnDue = -1;
@@ -163,7 +165,9 @@ function handleActions(frame: FrameInput): void {
   const a = frame.actions;
   // The campaign is over: fly on, or start a new city.
   // An incoming radio call takes its answer first (not while a menu is open over it).
-  if (!map.visible && !command.visible && !paused && radio.handle(a)) return;
+  // Left–right from the right stick, or A / D (yaw) on the keyboard.
+  const across = Math.abs(frame.lookX) > Math.abs(frame.yaw) ? frame.lookX : frame.yaw;
+  if (!map.visible && !command.visible && !paused && radio.handle(a, across)) return;
   if (campaignView.endVisible) {
     if (a.has('confirm')) {
       sim.command({ type: 'freePlay' });
@@ -287,6 +291,15 @@ function update(dt: number): void {
     setTimeout(() => hud.hideHelp(), 6000);
   }
   if (paused) return;
+  // An incoming radio call holds the game until it's answered.
+  if (radio.visible) {
+    // Free the mouse to reach the answers.
+    if (!radioWasUp) input.releasePointer();
+    radioWasUp = true;
+    radio.update(dt, sim.state, heli.position, (r) => (sim.state ? requestTarget(sim.state, r, sim.time) : null));
+    return;
+  }
+  radioWasUp = false;
 
   sim.update(dt);
 

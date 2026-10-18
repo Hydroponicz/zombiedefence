@@ -1,7 +1,8 @@
 // Command requests arrive as radio traffic: a transmission card styled as a cockpit radio, with a
-// squelch and a call tone, the message typing out as it's read. It stays until the pilot answers:
-// take it on, open it in Flight Command (to hand it to a pilot), or dismiss it. More than one
-// queues up.
+// squelch and a call tone, the message typing out as it's read. The game holds while it's up, until
+// the pilot answers: take it on, open it in Flight Command (to hand it to a pilot), or dismiss it.
+// The answers are a row: the D-pad, right stick, A / D or the arrow keys move along it (or the mouse,
+// hovering), A or Enter picks one, and B or Backspace turns the call down. More than one queues up.
 
 import { MINUTES_PER_DAY } from '../sim/clock';
 import { describeNeed, rewardText } from '../sim/requests';
@@ -26,6 +27,10 @@ const FREQ: Record<RequestKind, string> = {
 };
 
 export type Answer = 'take' | 'open' | 'dismiss';
+const ANSWERS: Answer[] = ['take', 'open', 'dismiss'];
+/** The right stick moves the choice once it's pushed this far, and again once it's back near centre. */
+const STICK_PUSH = 0.6;
+const STICK_REST = 0.3;
 
 export class Transmission {
   private el = document.getElementById('radio-call')!;
@@ -36,12 +41,28 @@ export class Transmission {
   private typed = 0;
   private message = '';
   private audio: AudioContext | null = null;
+  /** The highlighted answer. */
+  private choice = 0;
+  private stickArmed = true;
 
   /** @param answer what the pilot said to a call (the caller acts on it) */
   constructor(private answer: (request: Request, how: Answer) => void) {
+    // Hovering an answer highlights it.
+    this.el.addEventListener('mouseover', (e) => {
+      const button = (e.target as HTMLElement).closest<HTMLElement>('[data-answer]');
+      if (!button) return;
+      const i = ANSWERS.indexOf(button.dataset.answer as Answer);
+      if (i === this.choice) return;
+      this.choice = i;
+      this.highlight();
+      this.blip(1400, 0.025);
+    });
     this.el.addEventListener('click', (e) => {
       const button = (e.target as HTMLElement).closest<HTMLElement>('[data-answer]');
-      if (button) this.respond(button.dataset.answer as Answer);
+      if (!button) return;
+      this.choice = ANSWERS.indexOf(button.dataset.answer as Answer);
+      this.highlight();
+      this.respond(button.dataset.answer as Answer);
     });
   }
 
@@ -97,14 +118,36 @@ export class Transmission {
     if (waiting) waiting.textContent = this.queue.length ? `+${this.queue.length} MORE IN QUEUE` : '';
   }
 
-  /** Keys while a call is up. Returns true if it took the input. */
-  handle(actions: Set<string>): boolean {
+  /**
+   * Input while a call is up: move along the answers, pick one, or turn the call down.
+   * @param stickX left–right from the right stick, or the A / D keys
+   * @returns true if it took the input
+   */
+  handle(actions: Set<string>, stickX = 0): boolean {
     if (this.shown === null) return false;
-    if (actions.has('confirm')) this.respond('take');
+    let step = (actions.has('dpadRight') || actions.has('arrowRight') ? 1 : 0) - (actions.has('dpadLeft') || actions.has('arrowLeft') ? 1 : 0);
+    if (this.stickArmed && Math.abs(stickX) > STICK_PUSH) {
+      step = Math.sign(stickX);
+      this.stickArmed = false;
+    } else if (Math.abs(stickX) < STICK_REST) {
+      this.stickArmed = true;
+    }
+    if (step) {
+      this.choice = Math.max(0, Math.min(ANSWERS.length - 1, this.choice + step));
+      this.highlight();
+      this.blip(1400, 0.025);
+      return true;
+    }
+    if (actions.has('confirm')) this.respond(ANSWERS[this.choice]);
     else if (actions.has('command')) this.respond('open');
     else if (actions.has('back') || actions.has('radioDismiss')) this.respond('dismiss');
     else return false;
     return true;
+  }
+
+  /** Mark the highlighted answer. */
+  private highlight(): void {
+    this.el.querySelectorAll<HTMLElement>('.rc-btn').forEach((b) => b.classList.toggle('sel', b.dataset.answer === ANSWERS[this.choice]));
   }
 
   private respond(how: Answer): void {
@@ -166,13 +209,17 @@ export class Transmission {
           <div class="rc-foot"><span class="rc-window"></span><span class="rc-where"></span><span class="rc-queue"></span></div>
         </div>
         <div class="rc-buttons">
-          <span class="rc-btn take" data-answer="take"><kbd>A</kbd><kbd>Enter</kbd> ROGER, TAKING IT</span>
-          <span class="rc-btn" data-answer="open"><kbd>L3</kbd><kbd>P</kbd> HAND OFF…</span>
-          <span class="rc-btn" data-answer="dismiss"><kbd>B</kbd><kbd>⌫</kbd> NEGATIVE</span>
+          <span class="rc-btn take" data-answer="take">ROGER, TAKING IT</span>
+          <span class="rc-btn" data-answer="open">HAND OFF</span>
+          <span class="rc-btn" data-answer="dismiss">NEGATIVE</span>
         </div>
+        <div class="rc-hint"><span>◀ ▶ / <kbd>A</kbd> <kbd>D</kbd> choose</span><span>Ⓐ / <kbd>Enter</kbd> / click select</span>
+          <span>Ⓑ / <kbd>⌫</kbd> negative</span><span class="rc-held">⏸ GAME HELD</span></div>
         <div class="rc-static"></div>
       </div>`;
     this.el.hidden = false;
+    this.choice = 0;
+    this.highlight();
     this.squelch(p.cls === 'flash' ? 3 : p.cls === 'immediate' ? 2 : 1);
   }
 

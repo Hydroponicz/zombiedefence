@@ -174,10 +174,12 @@ reward. There are more than one helicopter can do: triage is the game.
 - **They come in over the radio:** each new request pops up as a transmission on a cockpit radio
   (frequency display, signal bars, a squelch and call tones; one tone for routine traffic, three for a
   FLASH call), typed out as it's read: "DUSTOFF 1-1, KESSLER ACTUAL. Research team in St. Mary's…
-  How copy? Over." It stays until you answer:
-  - <kbd>Enter</kbd> / <kbd>A</kbd> (or click): take it on.
-  - <kbd>P</kbd> / <kbd>L3</kbd>: open it in Flight Command to hand it to a pilot.
-  - <kbd>Backspace</kbd> / <kbd>B</kbd>: turn it down (it stays open in Flight Command).
+  How copy? Over." The game holds until you answer, with one of three: take it on, hand it off (opens
+  it in Flight Command to give to a pilot), or negative (it stays open in Flight Command).
+  - **Choose:** D-pad or right stick left / right, <kbd>A</kbd> / <kbd>D</kbd> or the arrow keys, or
+    hover with the mouse. The highlighted answer glows amber with ▶ ◀ either side.
+  - **Pick it:** <kbd>A</kbd> on the controller, <kbd>Enter</kbd>, or click.
+  - **Turn it down at once:** <kbd>B</kbd> or <kbd>Backspace</kbd>.
 
   The first press finishes the typing. Calls that come in together queue up.
 - **Taking them on:** Flight Command (P) → Requests. "Take it on" puts the request under the clock

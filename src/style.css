@@ -403,7 +403,7 @@ kbd {
 .rc-buttons { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .rc-btn {
   flex: 1;
-  min-width: 150px;
+  min-width: 140px;
   text-align: center;
   padding: 7px 8px;
   border-radius: 5px;
@@ -411,14 +411,29 @@ kbd {
   user-select: none;
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
   background: linear-gradient(180deg, #3a3e2a, #2a2d1e);
   border: 1px solid #1c1e14;
   box-shadow: 0 2px 0 #15170f, inset 0 1px 0 rgba(255,255,255,0.08);
 }
 .rc-btn:hover { filter: brightness(1.25); }
 .rc-btn.take { background: linear-gradient(180deg, #4d7a3a, #355a28); }
-.rc-btn kbd { font-size: 10px; padding: 0 4px; margin-right: 4px; border-radius: 3px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); }
+/* The highlighted answer: lit up, outlined in amber, with a marker either side. */
+.rc-btn.sel {
+  color: #1d1a0c;
+  background: linear-gradient(180deg, #ffd166, #e0a52a);
+  border-color: #fff3c4;
+  box-shadow: 0 0 0 2px #ffd166, 0 0 18px rgba(255, 209, 102, 0.7), 0 2px 0 #15170f;
+  transform: translateY(-1px) scale(1.04);
+}
+.rc-btn.sel::before { content: '▶ '; }
+.rc-btn.sel::after { content: ' ◀'; }
+.rc-btn { transition: transform 0.08s, box-shadow 0.08s; }
+.rc-hint { display: flex; flex-wrap: wrap; gap: 4px 16px; justify-content: center; margin-top: 8px; font-size: 11px; letter-spacing: 0.04em; color: #c8cca8; }
+.rc-hint span { white-space: nowrap; }
+.rc-hint kbd { font-size: 10px; padding: 0 4px; border-radius: 3px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); }
+.rc-held { color: #ffd166; font-weight: 700; }
 .rc-static {
   position: absolute;
   inset: 0;
