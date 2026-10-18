@@ -4,12 +4,13 @@
 
 import { replaceHelicopter } from './campaign';
 import { assignable, credit, overwatch } from './requests';
+import { hasResearch, LURE_CAPACITY, LURE_HOURS, researchBlocked, startResearch } from './research';
 import { airportOf, establishJoc, hubOf, mergeTroops } from './command';
 import { addAirframe, maybeRecruit, validOrder } from './pilots';
 import { nextRandom } from './rng';
 import { screenAtGate } from './quarantine';
 import { siteName } from './sites';
-import type { Cargo, CityState, CrateKind, DistrictState, Farp, JobKind, Order, Request, Severity, Site } from './types';
+import type { Cargo, CityState, CrateKind, DistrictState, Farp, JobKind, Order, Request, ResearchId, Severity, Site } from './types';
 
 export const SEATS = 8;
 export const CRATE_SLOTS = 2;
@@ -24,8 +25,13 @@ export const CRATES: Record<CrateKind, { amount: number; order: number; label: s
   medicine: { amount: 3000, order: 3, label: 'medicine' },
 };
 
-/** Litres in one sling-loaded fuel bladder. */
+/** Litres in one sling-loaded fuel bladder (the heavy sling takes more). */
 export const BLADDER_LITRES = 2000;
+export const HEAVY_BLADDER_LITRES = 3000;
+
+export function bladderLitres(s: CityState): number {
+  return hasResearch(s, 'heavySling') ? HEAVY_BLADDER_LITRES : BLADDER_LITRES;
+}
 /** Soldiers left behind to guard a forward refuelling point. */
 export const FARP_GUARDS = 4;
 /** Minimum distance between forward refuelling points, in metres. */
@@ -35,6 +41,7 @@ const FUEL_KG_PER_LITRE = 0.8;
 const PASSENGER_KG = 100;
 const TROOP_KG = 120;
 const CRATE_KG = 800;
+const LURE_KG = 60;
 export const MAX_PAYLOAD_KG = SEATS * TROOP_KG + CRATE_SLOTS * CRATE_KG;
 
 export type BoardKind = 'civilian' | 'soldier' | 'scientist' | 'pilot';
@@ -85,7 +92,13 @@ export type PlayerCommand =
   /** The helicopter is watching over a request's food truck this minute. */
   | { type: 'overwatch'; request: number }
   /** Where the next army platoon goes (null: Command's choice), or hold them at the airport. */
-  | { type: 'setPlatoon'; target: number | null; hold: boolean };
+  | { type: 'setPlatoon'; target: number | null; hold: boolean }
+  /** Spend research points on a project. */
+  | { type: 'research'; id: ResearchId }
+  /** At a base, once researched: take a noise lure aboard. */
+  | { type: 'loadLure'; at?: BaseId }
+  /** Drop a noise lure (from the air or on the ground) at a place in a district. */
+  | { type: 'dropLure'; district: number; x: number; z: number };
 
 export type FuelSource = { district: number } | { farp: number } | { army: true };
 
@@ -103,7 +116,7 @@ export function farpNear(s: CityState, x: number, z: number, radius: number): Fa
 export type Emit = (district: number | null, severity: Severity, text: string, radio?: boolean) => void;
 
 export function emptyCargo(): Cargo {
-  return { troops: 0, troopFatigue: 0, civilians: 0, infected: 0, tired: 0, tiredFatigue: 0, scientists: 0, crates: [], sling: 0, pilots: [], commandTeam: false };
+  return { troops: 0, troopFatigue: 0, civilians: 0, infected: 0, tired: 0, tiredFatigue: 0, scientists: 0, crates: [], sling: 0, pilots: [], commandTeam: false, lures: 0 };
 }
 
 /** Seats the command team takes. */
@@ -119,7 +132,7 @@ export function passengers(c: Cargo): number {
 
 export function payloadKg(c: Cargo): number {
   return (c.troops + c.tired + (c.commandTeam ? COMMAND_TEAM_SEATS : 0)) * TROOP_KG + (c.civilians + c.infected + c.scientists) * PASSENGER_KG +
-    c.crates.length * CRATE_KG + c.sling * FUEL_KG_PER_LITRE;
+    c.crates.length * CRATE_KG + c.lures * LURE_KG + c.sling * FUEL_KG_PER_LITRE;
 }
 
 /** The military's hub: Camp Ridgeway, then the airport once the JOC is up. */
@@ -186,6 +199,12 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
     }
     case 'overwatch':
       return true;
+    case 'research':
+      return researchBlocked(s, cmd.id) === null;
+    case 'loadLure':
+      return hasResearch(s, 'noiseLures') && c.lures < LURE_CAPACITY;
+    case 'dropLure':
+      return c.lures > 0 && !!s.districts[cmd.district];
     case 'setPlatoon':
       return cmd.target === null || (!!s.districts[cmd.target] && s.districts[cmd.target].kind !== 'airbase' && s.districts[cmd.target].status !== 'overrun');
     case 'setOrder': {
@@ -206,7 +225,7 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
       return cmd.litres > 0 && fuelStock(s, cmd.source) > 0;
     case 'hookBladder': {
       const d = s.districts[cmd.district];
-      return c.sling === 0 && !!d.features.fuelDepot && d.fuel >= BLADDER_LITRES;
+      return c.sling === 0 && !!d.features.fuelDepot && d.fuel >= bladderLitres(s);
     }
     case 'releaseBladder':
       return c.sling > 0 && (cmd.farp === undefined || s.farps.some((f) => f.id === cmd.farp));
@@ -303,7 +322,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
         const site = siteOf(s, cmd.site)!;
         site.sheltered -= 1;
         d.sheltered = Math.max(0, d.sheltered - 1);
-        if (d.infected >= 1 && nextRandom(s) < (0.25 * d.infected) / (d.population + d.infected)) {
+        if (d.infected >= 1 && !hasResearch(s, 'rapidTests') && nextRandom(s) < (0.25 * d.infected) / (d.population + d.infected)) {
           d.infected -= 1;
           c.infected += 1;
         } else {
@@ -313,7 +332,9 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
         credit(s, { what: 'civilians', district: d.id, site: site.id, amount: 1, by: 'player' }, emit);
       } else if (cmd.kind === 'civilian') {
         // The bitten hide among the people you pick up.
-        const infected = nextRandom(s) < d.infected / (d.population + d.infected);
+        // Rapid tests catch them at the door (when there's anyone healthy to take instead).
+        const tested = hasResearch(s, 'rapidTests') && d.population >= 1;
+        const infected = !tested && nextRandom(s) < d.infected / (d.population + d.infected);
         if (infected) {
           d.infected -= 1;
           c.infected += 1;
@@ -355,6 +376,18 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
     }
     case 'overwatch':
       return overwatch(s, cmd.request, emit);
+    case 'research':
+      return startResearch(s, cmd.id, emit);
+    case 'loadLure':
+      c.lures += 1;
+      return true;
+    case 'dropLure': {
+      const d = s.districts[cmd.district];
+      c.lures -= 1;
+      s.lures.push({ id: ++s.lureSeq, district: d.id, x: cmd.x, z: cmd.z, until: s.t + LURE_HOURS * 60 });
+      emit(d.id, 'info', `A noise lure is sounding in ${d.name}. The dead around will come to it for ${LURE_HOURS} hours.`, true);
+      return true;
+    }
     case 'setPlatoon': {
       s.platoonTarget = cmd.target;
       s.flags.holdPlatoons = cmd.hold;
@@ -403,6 +436,12 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
           p.loyalty = Math.min(1, p.loyalty + 0.2);
         }
       }
+      // With the antiviral, the bitten are treated instead of turned away.
+      if (hasResearch(s, 'antiviral') && c.infected > 0) {
+        parts.push(`${c.infected} bitten treated with the antiviral`);
+        c.civilians += c.infected;
+        c.infected = 0;
+      }
       const civilians = c.civilians;
       // From here they're flown (or bussed) out of the city.
       base.population += c.civilians;
@@ -428,8 +467,8 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
     }
     case 'hookBladder': {
       const d = s.districts[cmd.district];
-      d.fuel -= BLADDER_LITRES;
-      c.sling = BLADDER_LITRES;
+      d.fuel -= bladderLitres(s);
+      c.sling = bladderLitres(s);
       return true;
     }
     case 'releaseBladder': {

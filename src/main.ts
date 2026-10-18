@@ -19,6 +19,8 @@ import { Sites } from './world/Sites';
 import { Traffic } from './world/Traffic';
 import { Cars } from './world/Cars';
 import { cityLight } from './world/CityLight';
+import { Lures } from './world/Lures';
+import { hasResearch } from './sim/research';
 import { CampaignView } from './ui/CampaignView';
 import { Joc } from './world/Joc';
 import { siteNear } from './sim/sites';
@@ -39,6 +41,8 @@ const HELIPAD_RADIUS = 12;
 /** The HUD names a strategic site when the helicopter is within this many metres of it. */
 const SITE_HUD_RADIUS = 150;
 const SKID_DEPTH = 1.9;
+/** The door gun fires like this many troops at the doors. */
+const DOOR_GUN_SHOOTERS = 4;
 /** A slung bladder released lower than this (metres) survives the drop. */
 const SLING_SAFE_DROP = 4;
 
@@ -73,6 +77,8 @@ const joc = new Joc();
 scene.add(joc.group);
 const fleet = new AiFleet(city.helipads);
 scene.add(fleet.group);
+const lures = new Lures();
+scene.add(lures.group);
 
 const heli = new Helicopter();
 scene.add(heli.object, heli.slingObject);
@@ -229,7 +235,19 @@ function respawn(): void {
 /** Let go of the slung bladder: set down gently it delivers its fuel, dropped from height it bursts. */
 function releaseSling(): void {
   const state = sim.state;
-  if (!state || state.cargo.sling <= 0 || heli.destroyed) return;
+  if (!state || heli.destroyed) return;
+  // With no bladder on the hook, F / X drops a noise lure.
+  if (state.cargo.sling <= 0) {
+    if (state.cargo.lures <= 0) return;
+    const district = districtAt(heli.position.x, heli.position.z);
+    if (district < 0) {
+      hud.toast('Drop lures over the city', 2);
+      return;
+    }
+    sim.command({ type: 'dropLure', district, x: heli.position.x, z: heli.position.z });
+    hud.toast(`Noise lure dropped in ${state.districts[district].name}`, 2.5);
+    return;
+  }
   const b = heli.bladder;
   const district = districtAt(b.x, b.z);
   if (heli.bladderClearance < SLING_SAFE_DROP && district >= 0) {
@@ -310,13 +328,17 @@ function update(dt: number): void {
     farps.sync(state.farps);
     sites.sync(state.sites);
     joc.sync(state);
+    lures.sync(state.lures);
   }
 
   const surface = city.surfaceHeight(heli.position.x, heli.position.z);
   const altitude = heli.position.y - SKID_DEPTH - surface;
   const clearance = heli.position.y - SKID_DEPTH;
   agents.update(dt, heli.position, altitude, heli.destroyed ? 0 : heli.rotor, state, night, clearance, sim.time);
-  if (!heli.destroyed) agents.doorGunners(dt, heli.position, state?.cargo.troops ?? 0);
+  // The door gun fires as well as a few troops at the doors would.
+  const doorGun = state && hasResearch(state, 'doorGun') ? DOOR_GUN_SHOOTERS : 0;
+  if (!heli.destroyed) agents.doorGunners(dt, heli.position, (state?.cargo.troops ?? 0) + doorGun);
+  lures.update(dt);
   effects.update(dt, night);
   farps.update(dt);
   sites.update(dt, night);

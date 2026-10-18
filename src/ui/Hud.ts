@@ -163,7 +163,8 @@ export class Hud {
       cargo.scientists && `${cargo.scientists} scientists`,
       cargo.pilots.length && `${cargo.pilots.length} rescued pilot${cargo.pilots.length > 1 ? 's' : ''}`,
     ].filter(Boolean).join(' · ') || 'No passengers';
-    const crates = cargo.crates.length ? cargo.crates.map((k) => CRATES[k].label).join(', ') : 'none';
+    const crates = [...cargo.crates.map((k) => CRATES[k].label), cargo.lures && `${cargo.lures} noise lure${cargo.lures > 1 ? 's' : ''}`]
+      .filter(Boolean).join(', ') || 'none';
     this.cargo.innerHTML = `<div class="seats">${seats.map((c) => `<div class="seat ${c}"></div>`).join('')}</div>
       <div class="line">${aboard}</div>
       <div class="line">Crates: ${crates}</div>

@@ -4,7 +4,8 @@
 
 import { districtCenter, DISTRICT_TEMPLATES } from './layout';
 import { credit } from './requests';
-import { BASE_RESERVE_TROOPS, baseOf, BLADDER_LITRES, CRATES, mergeTroops, ROUNDS_PER_TROOP, SEATS, type Emit } from './operations';
+import { hasResearch } from './research';
+import { BASE_RESERVE_TROOPS, baseOf, bladderLitres, CRATES, mergeTroops, ROUNDS_PER_TROOP, SEATS, type Emit } from './operations';
 import { hubPosition } from './command';
 import { totalZombies } from './hordes';
 import { screenAtGate } from './quarantine';
@@ -265,7 +266,8 @@ function land(s: CityState, p: Pilot, d: DistrictState, emit: Emit): void {
     const shelter = s.sites
       .filter((x) => x.district === d.id && x.status !== 'fallen' && x.sheltered >= 1)
       .sort((a, b) => b.sheltered - a.sheltered)[0];
-    const screened = shelter ? 0.25 : 1;
+    // Shelters screen at the door; rapid tests catch them all.
+    const screened = hasResearch(s, 'rapidTests') ? 0 : shelter ? 0.25 : 1;
     for (let i = trip.scientists ?? 0; i < SEATS && d.population + d.infected >= 1; i++) {
       if (shelter && shelter.sheltered >= 1) {
         shelter.sheltered -= 1;
@@ -289,7 +291,7 @@ function land(s: CityState, p: Pilot, d: DistrictState, emit: Emit): void {
     d.troops.strength -= n;
   }
   if (kind === 'fuel') {
-    const litres = Math.min(BLADDER_LITRES, d.fuel);
+    const litres = Math.min(bladderLitres(s), d.fuel);
     d.fuel -= litres;
     trip.fuel = litres;
   }
@@ -299,6 +301,10 @@ function homecoming(s: CityState, p: Pilot, emit: Emit): void {
   const trip = p.trip!;
   const base = baseOf(s);
   const d = s.districts[trip.district];
+  if (hasResearch(s, 'antiviral')) {
+    trip.civilians += trip.infected;
+    trip.infected = 0;
+  }
   base.population += trip.civilians;
   if (trip.scientists) {
     base.scientists += trip.scientists;

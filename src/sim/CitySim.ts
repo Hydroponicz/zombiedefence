@@ -14,6 +14,7 @@ import { createTraffic, roadFlow, updateTraffic } from './traffic';
 import { baseSealed, checkSeal, isBase, screenAtGate } from './quarantine';
 import { compareDay, createCampaign, describeReport, finalEvacuation, updateCampaign } from './campaign';
 import { ISSUE_EVERY, issueRequests, updateRequests } from './requests';
+import { hasResearch, updateLures } from './research';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
 
@@ -162,6 +163,10 @@ export function createCity(seed: number | string): CityState {
     requests: [],
     requestSeq: 0,
     platoonTarget: null,
+    unlocked: [],
+    researchSpent: 0,
+    lures: [],
+    lureSeq: 0,
     stats: { civiliansEvacuated: 0, scientistsEvacuated: 0, troopsDeployed: 0, troopsRelieved: 0, cratesDelivered: 0, lostInCrashes: 0,
       pilotsRecruited: 0, aiTrips: 0, flownOut: 0, requestsDone: 0 },
     pilots: [],
@@ -259,6 +264,7 @@ function tick(s: CityState, out: SimEvent[]): void {
 
   countHordes(s);
   for (const d of ds) applyHordeLosses(s, d.id, updateDistrict(s, d, day, night, emit));
+  updateLures(s, emit);
 
   migrate(s, night);
   // Traffic first, so the hour's trucks route through the streets as they are.
@@ -470,7 +476,9 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
     killers * TUNING.soldierKillRate * H * (Z / (Z + TUNING.huntHalfSaturation + P * TUNING.huntPerCivilian)),
   );
   const soldierKills = killers > 0 ? fighterKills * ((T * e) / killers) : 0;
-  const troopLoss = T > 0 ? Math.min(T * 0.2, Z * TUNING.troopLossRate * (1 - 0.7 * e) * H / fort) : 0;
+  // Vaccinated soldiers take fewer losses, and those bitten don't turn.
+  const vaccinated = hasResearch(s, 'vaccine');
+  const troopLoss = T > 0 ? Math.min(T * 0.2, Z * TUNING.troopLossRate * (1 - 0.7 * e) * H / fort) * (vaccinated ? 0.7 : 1) : 0;
   // Police take worse losses than soldiers (no armour but the riot squads'), shared by who's out there.
   const policeLoss = O + R > 0
     ? Math.min((O + R) * 0.2, Z * TUNING.troopLossRate * 1.5 * (1 - 0.5 * pe) * H * ((O + R) / (T + O + R)))
@@ -491,8 +499,8 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
     }
   }
   d.population = Math.max(0, P - bitten - civDeaths);
-  d.infected += bitten + (troopLoss + policeLoss) * 0.5;
-  d.dead += civDeaths + (troopLoss + policeLoss) * 0.5 + civKills + fighterKills;
+  d.infected += bitten + ((vaccinated ? 0 : troopLoss) + policeLoss) * 0.5;
+  d.dead += civDeaths + (vaccinated ? troopLoss : troopLoss * 0.5) + policeLoss * 0.5 + civKills + fighterKills;
   pol.officers = Math.max(0, O - officerLoss);
   pol.riot = Math.max(0, pol.riot - riotLoss);
   const kills = civKills + fighterKills;
@@ -672,7 +680,8 @@ function updatePolice(s: CityState, d: DistrictState, day: number, night: boolea
 
   // Checkpoints catch the bitten: held in isolation, and put down when they turn.
   if (pol.stage !== 'patrol' && d.infected > 0) {
-    const screened = d.infected * 0.02 * Math.min(1, pol.officers / 40) * pol.morale * H;
+    // Rapid tests catch twice as many.
+    const screened = d.infected * 0.02 * (hasResearch(s, 'rapidTests') ? 2 : 1) * Math.min(1, pol.officers / 40) * pol.morale * H;
     d.infected -= screened;
     d.dead += screened;
   }
@@ -784,7 +793,8 @@ function migrate(s: CityState, night: boolean): void {
       if (to && safety(to) > safety(d)) {
         const p = d.population * rate * H;
         // Police checkpoints hold most of the bitten back.
-        const inf = d.infected * rate * H * (d.police.stage !== 'patrol' && d.police.officers >= 5 ? 0.4 : 1);
+        const held = hasResearch(s, 'rapidTests') ? 0.2 : 0.4;
+        const inf = d.infected * rate * H * (d.police.stage !== 'patrol' && d.police.officers >= 5 ? held : 1);
         dp[d.id] -= p;
         dp[to.id] += p * 0.97;
         di[d.id] -= inf;

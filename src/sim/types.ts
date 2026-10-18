@@ -176,6 +176,8 @@ export interface Cargo {
   pilots: number[];
   /** The Joint Operations Command staff, on their way from Camp Ridgeway to the airport (four seats). */
   commandTeam: boolean;
+  /** Noise lures aboard (once researched). */
+  lures: number;
 }
 
 export type JobKind = 'reinforce' | 'resupply' | 'evacuate' | 'relieve' | 'fuel';
@@ -332,6 +334,17 @@ export interface PlayerStats {
   requestsDone: number;
 }
 
+export type ResearchId = 'rapidTests' | 'noiseLures' | 'loudspeaker' | 'doorGun' | 'heavySling' | 'vaccine' | 'antiviral';
+
+/** A siren the player dropped, pulling the dead and hordes toward its district until it goes quiet. */
+export interface Lure {
+  id: number;
+  district: number;
+  x: number;
+  z: number;
+  until: number;
+}
+
 export type RequestKind = 'supply' | 'reinforce' | 'evacuate' | 'extract' | 'overwatch';
 
 /** What Command sends for a request done (to the base the military works from). */
@@ -471,5 +484,10 @@ export interface CityState {
   requestSeq: number;
   /** Where the next army platoon goes, if the player has chosen (else Command chooses). */
   platoonTarget: number | null;
+  /** Research done, and the points spent on it (of `research` earned). */
+  unlocked: ResearchId[];
+  researchSpent: number;
+  lures: Lure[];
+  lureSeq: number;
   flags: Record<string, boolean>;
 }

@@ -3,10 +3,11 @@
 // operation runs one person, crate or pump-load at a time and pauses while zombies are at the
 // doors. Refuelling at the base or a forward refuelling point happens on its own.
 
+import { hasResearch, LURE_CAPACITY, LURE_HOURS } from '../sim/research';
 import type { Action } from '../input/Input';
 import {
   BASE_RESERVE_TROOPS,
-  BLADDER_LITRES,
+  bladderLitres,
   canApply,
   CRATES,
   FARP_GUARDS,
@@ -87,6 +88,9 @@ interface Option {
 
 /** Stairs are slow: boarding from a rooftop takes this much longer than from the street or a helipad. */
 const ROOF_SLOWDOWN = 2.5;
+
+/** The loudspeaker halves boarding times. */
+const speaker = (s: CityState) => (hasResearch(s, 'loudspeaker') ? 0.5 : 1);
 
 const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.floor(n)));
 
@@ -226,7 +230,7 @@ export class Operations {
       const command: PlayerCommand = { type: 'hookBladder', district: d.id };
       options.push({
         id: 'hook', label: 'Hook up a fuel bladder',
-        detail: `${BLADDER_LITRES.toLocaleString('en-US')} L · ${fmt(d.fuel)} L in the depot`,
+        detail: `${bladderLitres(s).toLocaleString('en-US')} L · ${fmt(d.fuel)} L in the depot`,
         enabled: canApply(s, command), command, interval: 3, repeat: false,
       });
     }
@@ -319,6 +323,14 @@ export class Operations {
       crate('ammo', base.troops.ammo),
       crate('medicine', base.medicine),
     );
+    if (hasResearch(s, 'noiseLures')) {
+      const lure: PlayerCommand = { type: 'loadLure', at };
+      options.push({
+        id: 'load-lure', label: 'Load a noise lure',
+        detail: `${c.lures} of ${LURE_CAPACITY} aboard · drop from the air with F / X`,
+        enabled: canApply(s, lure), command: lure, interval: 1.5, repeat: false,
+      });
+    }
     if (c.troops > 0) {
       options.push({
         id: 'return-troops',
@@ -352,7 +364,7 @@ export class Operations {
         id: 'site-evacuate', label: 'Evacuate the shelter',
         detail: full ? 'Seats full' : site.status === 'fallen' ? 'Nobody left inside' : `${fmt(site.sheltered)} sheltering · screened at the door`,
         // Organised and waiting at the door: quicker than gathering people off the street.
-        enabled: canApply(s, board), command: board, interval: 0.6, repeat: true,
+        enabled: canApply(s, board), command: board, interval: 0.6 * speaker(s), repeat: true,
       });
     }
     // Take stock away: food from a supermarket, ammunition from an armoury, medicine from a pharmacy.
@@ -404,13 +416,18 @@ export class Operations {
         interval: 2,
         repeat: true,
       },
+      ...(c.lures > 0 ? [{
+        id: 'drop-lure', label: 'Set down a noise lure',
+        detail: `${c.lures} aboard · the dead come to it for ${LURE_HOURS} hours`,
+        enabled: true, command: { type: 'dropLure', district: d.id, x: ctx.x, z: ctx.z } as PlayerCommand, interval: 2, repeat: false,
+      }] : []),
       {
         id: 'evacuate',
         label: 'Evacuate civilians',
         detail: full ? 'Seats full' : `${fmt(d.population + d.infected)} still here`,
         enabled: canApply(s, board('civilian')),
         command: board('civilian'),
-        interval: 1 * stairs,
+        interval: 1 * stairs * speaker(s),
         repeat: true,
       },
       {
