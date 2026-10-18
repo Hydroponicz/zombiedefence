@@ -372,7 +372,7 @@ export class Operations {
       const drop: PlayerCommand = { type: 'dropCrate', district: d.id, site: site.id };
       options.push({
         id: 'site-drop', label: `Restock the ${label}`,
-        detail: `${c.crates.map((k) => CRATES[k].label).join(', ')} · handed out from here`,
+        detail: `${c.crates.map((k) => CRATES[k].label).join(', ')} · stocked here, handed out when ${d.name} runs short`,
         enabled: canApply(s, drop), command: drop, interval: 2, repeat: true,
       });
     }
@@ -398,7 +398,7 @@ export class Operations {
       {
         id: 'drop',
         label: 'Unload crates',
-        detail: c.crates.length ? c.crates.map((k) => CRATES[k].label).join(', ') : 'None aboard',
+        detail: c.crates.length ? `${c.crates.map((k) => CRATES[k].label).join(', ')} · straight into ${d.name}'s supplies` : 'None aboard',
         enabled: canApply(s, { type: 'dropCrate', district: d.id }),
         command: { type: 'dropCrate', district: d.id },
         interval: 2,

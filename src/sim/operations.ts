@@ -262,7 +262,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
         else site.ammo += crate.amount;
         d.order = Math.min(100, d.order + crate.order);
         s.stats.cratesDelivered += 1;
-        emit(d.id, 'info', `A crate of ${crate.label} has been delivered to ${siteName(site, d)}.`, true);
+        emit(d.id, 'info', `A crate of ${crate.label} has been delivered to ${siteName(site, d)}, to hand out when ${d.name} runs short.`, true);
         return true;
       }
       if (kind === 'rations') d.rations += crate.amount;

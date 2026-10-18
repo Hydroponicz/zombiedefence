@@ -374,6 +374,10 @@ export class DebugMap {
     g.fillStyle = 'rgba(255,255,255,0.04)';
     g.fillRect(x, y, w, h);
     const people = d.population + d.troops.strength + d.infected;
+    const atSites = (k: 'rations' | 'medicine', digits: number) => {
+      const n = s.sites.reduce((sum, x) => sum + (x.district === d.id && x.status !== 'fallen' ? x[k] : 0), 0);
+      return n >= 1 ? ` (+${(n / Math.max(1, people)).toFixed(digits)} at sites)` : '';
+    };
     const rows: [string, string][] = [
       ['Status', `${d.status}${d.rioting ? ' (rioting)' : ''}`],
       ['Power', d.power === 'backup' ? `generators (${fmt(d.fuel)} L fuel)` : d.power],
@@ -387,8 +391,9 @@ export class DebugMap {
         ? `${fmt(d.police.officers)} + ${fmt(d.police.riot)} riot · ${d.police.stage} · ${(d.police.morale * 100).toFixed(0)}%`
         : 'none'],
       ['Order', d.order.toFixed(0)],
-      ['Food & water', `${(d.rations / Math.max(1, people)).toFixed(1)} days`],
-      ['Medicine', `${(d.medicine / Math.max(1, people)).toFixed(2)} days`],
+      // Stock held at the district's sites is handed out once the district runs short.
+      ['Food & water', `${(d.rations / Math.max(1, people)).toFixed(1)} days${atSites('rations', 1)}`],
+      ['Medicine', `${(d.medicine / Math.max(1, people)).toFixed(2)} days${atSites('medicine', 2)}`],
       ['Fuel', `${fmt(d.fuel)} L`],
       ['Roads', roadStatus(s.traffic, d.id)],
     ];
@@ -408,10 +413,15 @@ export class DebugMap {
       g.fillRect(x + 14, yy - 9, 9, 9);
       const name = site.name.length > 26 ? `${site.name.slice(0, 25)}…` : site.name;
       this.text(name, x + 28, yy, 12, '#e8ecdf');
-      const stock = site.kind === 'police' ? `ammo ${fmt(site.ammo)}` : site.kind === 'pharmacy' ? `med ${fmt(site.medicine)}`
-        : site.kind === 'shelter' ? `${fmt(site.sheltered)}/${fmt(site.capacity)} in`
-          : site.kind === 'waterworks' ? 'water' : site.kind === 'fuelTerminal' ? 'fuel'
-            : site.kind === 'factory' ? 'packing food' : `food ${fmt(site.rations)}`;
+      // What it holds: its own line of goods, and anything else delivered to it.
+      const held = [
+        (site.rations >= 1 || site.kind === 'depot' || site.kind === 'supermarket') && `food ${fmt(site.rations)}`,
+        (site.medicine >= 1 || site.kind === 'pharmacy') && `med ${fmt(site.medicine)}`,
+        (site.ammo >= 1 || site.kind === 'police') && `ammo ${fmt(site.ammo)}`,
+      ].filter(Boolean).join(' · ');
+      const kind = site.kind === 'shelter' ? `${fmt(site.sheltered)}/${fmt(site.capacity)} in`
+        : site.kind === 'waterworks' ? 'water' : site.kind === 'fuelTerminal' ? 'fuel' : site.kind === 'factory' ? 'packing food' : '';
+      const stock = [kind, held].filter(Boolean).join(' · ');
       const info = site.status === 'fallen' ? 'fallen' : `${Math.round(site.guards)}/${Math.ceil(guardsNeeded(site))} gd · ${stock}`;
       this.text(info, x + w - 14, yy, 12, site.status === 'held' ? '#a5ad9c' : SITE_COLOR[site.status], 'right');
     });
