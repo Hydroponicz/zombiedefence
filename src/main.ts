@@ -19,6 +19,8 @@ import { Sites } from './world/Sites';
 import { Traffic } from './world/Traffic';
 import { Cars } from './world/Cars';
 import { cityLight } from './world/CityLight';
+import { MilitaryConvoys } from './world/MilitaryConvoys';
+import { AirportWorks } from './world/AirportWorks';
 import { Lures } from './world/Lures';
 import { RequestTracker, requestTarget } from './game/Requests';
 import { Transmission } from './ui/Transmission';
@@ -81,6 +83,10 @@ const fleet = new AiFleet(city.helipads);
 scene.add(fleet.group);
 const lures = new Lures();
 scene.add(lures.group);
+const convoys = new MilitaryConvoys();
+scene.add(convoys.group);
+const works = new AirportWorks();
+scene.add(works.group);
 const requests = new RequestTracker((cmd) => sim.command(cmd));
 // New requests come in over the radio, and wait for an answer.
 const radio = new Transmission((r, how) => {
@@ -361,6 +367,8 @@ function update(dt: number): void {
     sites.sync(state.sites, state.districts);
     joc.sync(state);
     lures.sync(state.lures);
+    convoys.sync(state.convoys);
+    works.sync(state.airportWorks);
   }
 
   const surface = city.surfaceHeight(heli.position.x, heli.position.z);
@@ -383,6 +391,8 @@ function update(dt: number): void {
   }
   hud.figureScale = agents.scale;
   lures.update(dt);
+  convoys.update(sim.time);
+  works.update(dt);
   requests.update(dt, state, sim.time, heli.position, altitude);
   radio.update(dt, state, heli.position, (r) => (state ? requestTarget(state, r, sim.time) : null));
   effects.update(dt, night);

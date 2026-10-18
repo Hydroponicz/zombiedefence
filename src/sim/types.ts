@@ -345,6 +345,16 @@ export interface Lure {
   until: number;
 }
 
+export type ConvoyKind = 'engineers' | 'fuel' | 'supply';
+
+/** A military convoy between Camp Ridgeway and the airport (see convoys.ts). */
+export interface MilitaryConvoy {
+  id: number;
+  kind: ConvoyKind;
+  depart: number;
+  phase: 'outbound' | 'unloading' | 'return';
+}
+
 export type RequestKind = 'supply' | 'reinforce' | 'evacuate' | 'extract' | 'overwatch';
 
 /** What Command sends for a request done (to the base the military works from). */
@@ -489,5 +499,11 @@ export interface CityState {
   researchSpent: number;
   lures: Lure[];
   lureSeq: number;
+  /** Military convoys on the road between Camp Ridgeway and the airport, and when the next one leaves. */
+  convoys: MilitaryConvoy[];
+  convoySeq: number;
+  nextConvoy: number;
+  /** Fortification stages the engineers have finished at the airport (0..5). */
+  airportWorks: number;
   flags: Record<string, boolean>;
 }

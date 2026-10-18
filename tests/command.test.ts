@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CitySim, createCity } from '../src/sim/CitySim';
 import { airportOf, hubOf } from '../src/sim/command';
+import { fortification, WORKS_STAGES } from '../src/sim/convoys';
 import { AIRPORT_STAFF } from '../src/sim/layout';
 import type { CityState } from '../src/sim/types';
 
@@ -116,5 +117,31 @@ describe('the police response', () => {
       return d.infected;
     };
     expect(run(true)).toBeLessThan(run(false));
+  });
+});
+
+describe('military convoys', () => {
+  it('fortify the airport stage by stage and bring Camp Ridgeway\'s fuel and stores forward', () => {
+    const sim = new CitySim('convoys');
+    const s = sim.state;
+    sim.step(120);
+    expect(s.convoys).toHaveLength(0);
+    spreading(s);
+    sim.step(60);
+    sim.command({ type: 'loadCommandTeam' });
+    sim.command({ type: 'establishJoc' });
+    const airport = airportOf(s);
+    const fuel = airport.fuel;
+    const campFuel = s.army.fuel;
+    sim.step(5);
+    expect(s.convoys.length).toBe(1);
+    expect(s.convoys[0].kind).toBe('engineers');
+    sim.step(12 * 60);
+    expect(s.airportWorks).toBe(WORKS_STAGES);
+    expect(airport.fuel).toBeGreaterThan(fuel);
+    expect(s.army.fuel).toBeLessThan(campFuel);
+    expect(s.log.some((e) => /razor wire/.test(e.text))).toBe(true);
+    // Fortified, it holds better.
+    expect(fortification(s, airport)).toBeGreaterThan(2);
   });
 });

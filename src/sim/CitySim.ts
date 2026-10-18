@@ -15,6 +15,7 @@ import { baseSealed, checkSeal, isBase, screenAtGate } from './quarantine';
 import { compareDay, createCampaign, describeReport, finalEvacuation, updateCampaign } from './campaign';
 import { ISSUE_EVERY, issueRequests, updateRequests } from './requests';
 import { hasResearch, updateLures } from './research';
+import { fortification, updateConvoys } from './convoys';
 import { DOSES_PER_ISOLATION, policeArmed } from './supplies';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
@@ -170,6 +171,10 @@ export function createCity(seed: number | string): CityState {
     researchSpent: 0,
     lures: [],
     lureSeq: 0,
+    convoys: [],
+    convoySeq: 0,
+    nextConvoy: 0,
+    airportWorks: 0,
     stats: { civiliansEvacuated: 0, scientistsEvacuated: 0, troopsDeployed: 0, troopsRelieved: 0, cratesDelivered: 0, lostInCrashes: 0,
       pilotsRecruited: 0, aiTrips: 0, flownOut: 0, requestsDone: 0 },
     pilots: [],
@@ -278,7 +283,7 @@ function tick(s: CityState, out: SimEvent[]): void {
   if (hourly) updateSites(s, night, emit, (d) => effectiveness(d, night));
   moveHordes(s, night, emit);
   countHordes(s);
-  for (const d of ds) updateStatus(d, emit);
+  for (const d of ds) updateStatus(s, d, emit);
   const airport = airportOf(s);
   if (checkSeal(s)) {
     emit(airport.id, 'critical', `Every district has fallen. The dead are at the gates of ${airport.name}.`);
@@ -286,6 +291,7 @@ function tick(s: CityState, out: SimEvent[]): void {
   }
   loseFarps(s, emit);
   updateCommand(s, emit);
+  updateConvoys(s, emit);
   updatePilots(s, emit);
   if (Math.floor(t) % ISSUE_EVERY === 0) issueRequests(s, emit);
   updateRequests(s, emit);
@@ -445,7 +451,7 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   // Residents and any hordes passing through fight as one.
   const Z = totalZombies(d);
   const e = effectiveness(d, night);
-  const fort = d.features.fortified ? 2 : 1;
+  const fort = fortification(s, d);
   const pol = d.police;
   const O = pol.officers;
   // Riot squads only fight once they're called out; in reserve at the station they don't.
@@ -849,9 +855,9 @@ function migrate(s: CityState, night: boolean): void {
   });
 }
 
-function updateStatus(d: DistrictState, emit: Emit): void {
+function updateStatus(s: CityState, d: DistrictState, emit: Emit): void {
   const humans = d.population + d.troops.strength;
-  const defense = d.troops.strength * 0.8 * TUNING.soldierScreen * (d.features.fortified ? 2 : 1) +
+  const defense = d.troops.strength * 0.8 * TUNING.soldierScreen * fortification(s, d) +
     (d.police.officers * 0.3 + d.police.riot * 0.4) * d.police.morale * TUNING.soldierScreen + d.population * 0.03;
   const zombies = totalZombies(d);
   const pressure = zombies / (defense + 1);

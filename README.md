@@ -373,6 +373,32 @@ Keeping Industrial Park clean keeps the trains running, and the trains feed the 
 
   The HUD shows the stage ("Police 28 (checkpoints)").
 
+## Military convoys and the airport's fortifications
+
+Once the JOC is up, convoys drive the camp road from Camp Ridgeway to Kessler Airport's west gate,
+across the apron to the command compound. Each one takes 30 game minutes each way and spends 20
+minutes unloading. You can see them on the road with their headlights on at night.
+
+- **Combat engineers** come first, about one convoy every two hours: Humvees, flatbeds stacked with
+  concrete barriers, a crane truck and a cargo truck. Each convoy completes one of five stages of
+  the airport's defences, and the radio reports it:
+  1. Concrete barriers at the gate, laid as a chicane, and a ring around the JOC.
+  2. A concrete barrier line around the whole airport.
+  3. Razor wire along the perimeter.
+  4. Guard towers at the corners and the gate.
+  5. HESCO bastion walls and floodlight masts, which are lit at night.
+
+  Each stage goes up on screen over about half a minute, and each adds to the airport's defence.
+  When the JOC is set up, the airport defends at 2× its strength. Fully fortified, it defends at
+  3.25×.
+- **Fuel convoys:** Humvees and three tankers move 20,000 L at a time from Camp Ridgeway's fuel farm
+  to the airport.
+- **Supply convoys:** four cargo trucks move rations, medicine and ammunition forward from the camp's
+  stores.
+
+Once the works are finished, a convoy leaves every two to four hours. None leave once the airport
+is overrun.
+
 ## Kessler Airport is sealed
 
 No infection or zombie gets into the airport until every other district has been overrun:
