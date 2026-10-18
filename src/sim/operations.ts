@@ -3,12 +3,13 @@
 // one crate, so the game can pace them (and a hot landing zone can interrupt them).
 
 import { replaceHelicopter } from './campaign';
+import { assignable, credit, overwatch } from './requests';
 import { airportOf, establishJoc, hubOf, mergeTroops } from './command';
 import { addAirframe, maybeRecruit, validOrder } from './pilots';
 import { nextRandom } from './rng';
 import { screenAtGate } from './quarantine';
 import { siteName } from './sites';
-import type { Cargo, CityState, CrateKind, DistrictState, Farp, Order, Severity, Site } from './types';
+import type { Cargo, CityState, CrateKind, DistrictState, Farp, JobKind, Order, Request, Severity, Site } from './types';
 
 export const SEATS = 8;
 export const CRATE_SLOTS = 2;
@@ -76,7 +77,15 @@ export type PlayerCommand =
   /** Make an abandoned helicopter in the district airworthy; it is ferried to the base. */
   | { type: 'salvage'; district: number }
   /** After the campaign has ended: let the city run on and keep flying. */
-  | { type: 'freePlay' };
+  | { type: 'freePlay' }
+  /** Take a Command request on (or drop it): it shows on the HUD and in the world. */
+  | { type: 'trackRequest'; request: number }
+  /** Hand a Command request to an AI pilot as a one-off order. */
+  | { type: 'assignRequest'; request: number; pilot: number }
+  /** The helicopter is watching over a request's food truck this minute. */
+  | { type: 'overwatch'; request: number }
+  /** Where the next army platoon goes (null: Command's choice), or hold them at the airport. */
+  | { type: 'setPlatoon'; target: number | null; hold: boolean };
 
 export type FuelSource = { district: number } | { farp: number } | { army: true };
 
@@ -168,6 +177,17 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
       return true;
     case 'freePlay':
       return s.campaign.outcome !== 'running' && !s.flags.freePlay;
+    case 'trackRequest':
+      return s.requests.some((r) => r.id === cmd.request && r.status === 'open');
+    case 'assignRequest': {
+      const r = s.requests.find((x) => x.id === cmd.request && x.status === 'open');
+      const p = s.pilots.find((x) => x.id === cmd.pilot);
+      return !!r && assignable(r) && !!p && p.hired && !['dead', 'deserted', 'stranded'].includes(p.status) && validOrder(s, requestOrder(r));
+    }
+    case 'overwatch':
+      return true;
+    case 'setPlatoon':
+      return cmd.target === null || (!!s.districts[cmd.target] && s.districts[cmd.target].kind !== 'airbase' && s.districts[cmd.target].status !== 'overrun');
     case 'setOrder': {
       const p = s.pilots.find((x) => x.id === cmd.pilot);
       return !!p && p.hired && !['dead', 'deserted', 'stranded'].includes(p.status) && (cmd.order === null || validOrder(s, cmd.order));
@@ -239,6 +259,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       mergeTroops(d, 1, c.troopFatigue, 0.95, ROUNDS_PER_TROOP);
       c.troops -= 1;
       s.stats.troopsDeployed += 1;
+      credit(s, { what: 'troops', district: d.id, amount: 1, by: 'player' }, emit);
       const site = cmd.site === undefined ? undefined : siteOf(s, cmd.site);
       if (site) {
         site.pinned += 1;
@@ -263,6 +284,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
         d.order = Math.min(100, d.order + crate.order);
         s.stats.cratesDelivered += 1;
         emit(d.id, 'info', `A crate of ${crate.label} has been delivered to ${siteName(site, d)}, to hand out when ${d.name} runs short.`, true);
+        credit(s, { what: 'crate', district: d.id, site: site.id, crate: kind, amount: 1, by: 'player' }, emit);
         return true;
       }
       if (kind === 'rations') d.rations += crate.amount;
@@ -271,6 +293,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       d.order = Math.min(100, d.order + crate.order);
       s.stats.cratesDelivered += 1;
       emit(d.id, 'info', `A relief crate of ${crate.label} has been delivered to ${d.name}.`, true);
+      credit(s, { what: 'crate', district: d.id, crate: kind, amount: 1, by: 'player' }, emit);
       return true;
     }
     case 'board': {
@@ -287,6 +310,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
           d.population = Math.max(0, d.population - 1);
           c.civilians += 1;
         }
+        credit(s, { what: 'civilians', district: d.id, site: site.id, amount: 1, by: 'player' }, emit);
       } else if (cmd.kind === 'civilian') {
         // The bitten hide among the people you pick up.
         const infected = nextRandom(s) < d.infected / (d.population + d.infected);
@@ -312,7 +336,31 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       } else {
         d.scientists -= 1;
         c.scientists += 1;
+        credit(s, { what: 'scientists', district: d.id, amount: 1, by: 'player' }, emit);
       }
+      return true;
+    }
+    case 'trackRequest': {
+      for (const r of s.requests) r.tracked = r.id === cmd.request ? !r.tracked : false;
+      return true;
+    }
+    case 'assignRequest': {
+      const r = s.requests.find((x) => x.id === cmd.request)!;
+      const p = s.pilots.find((x) => x.id === cmd.pilot)!;
+      p.order = requestOrder(r);
+      p.blockedReason = '';
+      r.assigned = p.id;
+      emit(r.district, 'info', `${p.name} is taking on: ${r.title}.`, true);
+      return true;
+    }
+    case 'overwatch':
+      return overwatch(s, cmd.request, emit);
+    case 'setPlatoon': {
+      s.platoonTarget = cmd.target;
+      s.flags.holdPlatoons = cmd.hold;
+      const where = cmd.target === null ? null : s.districts[cmd.target].name;
+      emit(null, 'info', cmd.hold ? 'Army platoons are held at the airport until you send them.'
+        : where ? `The next army platoon will go to ${where}.` : 'Command will choose where the next army platoon goes.', true);
       return true;
     }
     case 'setOrder': {
@@ -479,4 +527,10 @@ function takeBaseStock(base: DistrictState, kind: CrateKind, amount: number): vo
   if (kind === 'rations') base.rations -= amount;
   else if (kind === 'medicine') base.medicine -= amount;
   else base.troops.ammo -= amount;
+}
+
+/** The AI pilot order that answers a request (one trip). */
+export function requestOrder(r: Request): Order {
+  const kind: JobKind = r.kind === 'supply' ? 'resupply' : r.kind === 'reinforce' ? 'reinforce' : 'evacuate';
+  return { kind, district: r.district, crate: r.crate ?? 'rations', repeat: false };
 }

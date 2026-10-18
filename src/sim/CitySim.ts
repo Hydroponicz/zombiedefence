@@ -13,6 +13,7 @@ import { createSupply, updateSupply } from './supply';
 import { createTraffic, roadFlow, updateTraffic } from './traffic';
 import { baseSealed, checkSeal, isBase, screenAtGate } from './quarantine';
 import { compareDay, createCampaign, describeReport, finalEvacuation, updateCampaign } from './campaign';
+import { ISSUE_EVERY, issueRequests, updateRequests } from './requests';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
 
@@ -158,8 +159,11 @@ export function createCity(seed: number | string): CityState {
     farpSeq: 0,
     research: 0,
     campaign: createCampaign(0),
+    requests: [],
+    requestSeq: 0,
+    platoonTarget: null,
     stats: { civiliansEvacuated: 0, scientistsEvacuated: 0, troopsDeployed: 0, troopsRelieved: 0, cratesDelivered: 0, lostInCrashes: 0,
-      pilotsRecruited: 0, aiTrips: 0, flownOut: 0 },
+      pilotsRecruited: 0, aiTrips: 0, flownOut: 0, requestsDone: 0 },
     pilots: [],
     airframes: [],
     hordes: [],
@@ -274,6 +278,8 @@ function tick(s: CityState, out: SimEvent[]): void {
   loseFarps(s, emit);
   updateCommand(s, emit);
   updatePilots(s, emit);
+  if (Math.floor(t) % ISSUE_EVERY === 0) issueRequests(s, emit);
+  updateRequests(s, emit);
   updateCampaign(s, emit);
 
   s.research += (s.army.scientists + airport.scientists) * TUNING.researchPerScientist * H;

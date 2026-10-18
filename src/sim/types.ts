@@ -205,6 +205,8 @@ export interface Trip {
   infected: number;
   tired: number;
   tiredFatigue: number;
+  /** Scientists brought out (an evacuation takes them first). */
+  scientists?: number;
   fuel: number;
   /** Danger at the landing zone when the trip was planned, for the bonus. */
   danger: number;
@@ -327,6 +329,46 @@ export interface PlayerStats {
   aiTrips: number;
   /** Evacuees flown out of the city from the airport (or bussed out from Camp Ridgeway). */
   flownOut: number;
+  requestsDone: number;
+}
+
+export type RequestKind = 'supply' | 'reinforce' | 'evacuate' | 'extract' | 'overwatch';
+
+/** What Command sends for a request done (to the base the military works from). */
+export interface Reward {
+  troops?: number;
+  crates?: Partial<Record<CrateKind, number>>;
+  research?: number;
+  airframe?: boolean;
+  pilot?: boolean;
+  /** Order in the district. */
+  order?: number;
+}
+
+/** A Command request: a job with a deadline and a reward (see requests.ts). */
+export interface Request {
+  id: number;
+  kind: RequestKind;
+  district: number;
+  site: number | null;
+  /** For overwatch: the food truck. */
+  truck: number | null;
+  crate: CrateKind | null;
+  /** Crates, troops, people or minutes of overwatch. */
+  needed: number;
+  progress: number;
+  title: string;
+  issued: number;
+  deadline: number;
+  reward: Reward;
+  status: 'open' | 'done' | 'failed';
+  closedAt: number | null;
+  /** The player has taken it on (shown on the HUD and in the world). */
+  tracked: boolean;
+  /** The AI pilot it was handed to. */
+  assigned: number | null;
+  /** Last game minute the helicopter watched over its truck. */
+  lastWatch: number;
 }
 
 export type CampaignOutcome = 'running' | 'sealed' | 'fallen' | 'grounded';
@@ -425,5 +467,9 @@ export interface CityState {
   research: number;
   stats: PlayerStats;
   campaign: Campaign;
+  requests: Request[];
+  requestSeq: number;
+  /** Where the next army platoon goes, if the player has chosen (else Command chooses). */
+  platoonTarget: number | null;
   flags: Record<string, boolean>;
 }

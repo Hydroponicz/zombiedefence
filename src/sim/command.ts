@@ -111,6 +111,28 @@ export function lastStand(s: CityState, emit: Emit): void {
   if (troops >= 1) emit(airport.id, 'critical', `Command is throwing everything into ${airport.name}: ${Math.round(troops)} more troops are landing.`, true);
 }
 
+/** Where Command would send the next platoon: districts without one, under attack first, then the biggest. */
+export function commandChoice(s: CityState): DistrictState | undefined {
+  const airport = airportOf(s);
+  return s.districts
+    .filter((d) => d !== airport && !d.flags.armyDeployed && d.status !== 'overrun' && DISTRICT_TEMPLATES[d.id].troops > 0)
+    .sort((a, b) => (a.status === 'contested' ? 0 : 1) - (b.status === 'contested' ? 0 : 1) || b.population - a.population)[0];
+}
+
+/** Platoon strength for a district (the army's plan, or a standard platoon where it had none). */
+export function platoonSize(d: DistrictState): number {
+  return DISTRICT_TEMPLATES[d.id].troops || 25;
+}
+
+/** The next platoon's destination and who chose it, or null if none would go. */
+export function nextPlatoon(s: CityState): { district: DistrictState; size: number; chosenBy: 'you' | 'command' } | null {
+  const mine = s.platoonTarget === null ? undefined : s.districts[s.platoonTarget];
+  if (mine && mine.status !== 'overrun' && mine.kind !== 'airbase') return { district: mine, size: platoonSize(mine), chosenBy: 'you' };
+  if (mine) s.platoonTarget = null;
+  const theirs = commandChoice(s);
+  return theirs ? { district: theirs, size: platoonSize(theirs), chosenBy: 'command' } : null;
+}
+
 /** Hourly (and every minute for the clock checks): authorization, the fallback, deployments and evacuation flights. */
 export function updateCommand(s: CityState, emit: Emit): void {
   const t = Math.floor(s.t);
@@ -134,16 +156,17 @@ export function updateCommand(s: CityState, emit: Emit): void {
   if (!s.flags.joc) return;
   const airport = airportOf(s);
 
-  // One platoon an hour into the districts that need one, the ones under attack first.
-  if (t % 60 === 0) {
-    const next = s.districts
-      .filter((d) => d !== airport && !d.flags.armyDeployed && d.status !== 'overrun' && DISTRICT_TEMPLATES[d.id].troops > 0)
-      .sort((a, b) => (a.status === 'contested' ? 0 : 1) - (b.status === 'contested' ? 0 : 1) || b.population - a.population)[0];
-    const size = next ? DISTRICT_TEMPLATES[next.id].troops : 0;
+  // One platoon an hour: where the player sends it, or else where Command chooses (the districts
+  // under attack first). The player can also hold them at the airport.
+  if (t % 60 === 0 && !s.flags.holdPlatoons) {
+    const plan = nextPlatoon(s);
+    const next = plan?.district;
+    const size = plan?.size ?? 0;
     if (next && airport.troops.strength - AIRPORT_RESERVE >= size) {
       next.flags.armyDeployed = true;
       send(airport, next, size);
-      emit(next.id, 'info', `An army platoon (${size}) has deployed into ${next.name} to support the police.`, true);
+      if (plan.chosenBy === 'you') s.platoonTarget = null;
+      emit(next.id, 'info', `An army platoon (${size}) has deployed into ${next.name}${plan.chosenBy === 'you' ? ', as you ordered' : ' to support the police'}.`, true);
     } else if (next && s.army.troops.strength - CAMP_RESERVE >= size) {
       // The airport is short: Camp Ridgeway sends more forward.
       send(s.army, airport, Math.min(200, s.army.troops.strength - CAMP_RESERVE));

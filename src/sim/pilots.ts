@@ -3,6 +3,7 @@
 // ground (where the risk is), and the flight home.
 
 import { districtCenter, DISTRICT_TEMPLATES } from './layout';
+import { credit } from './requests';
 import { BASE_RESERVE_TROOPS, baseOf, BLADDER_LITRES, CRATES, mergeTroops, ROUNDS_PER_TROOP, SEATS, type Emit } from './operations';
 import { hubPosition } from './command';
 import { totalZombies } from './hordes';
@@ -218,7 +219,7 @@ function advanceTrip(s: CityState, p: Pilot, emit: Emit): void {
     const tired = p.fatigue > 0.7 ? 1.8 : 1;
     const loss = dangerOf(d) * 0.12 * (1.3 - p.skill) * tired;
     if (nextRandom(s) < loss) return crash(s, p, d, emit);
-    land(s, p, d);
+    land(s, p, d, emit);
     trip.phase = 'ground';
     trip.start = s.t;
     trip.end = s.t + GROUND_MINUTES;
@@ -232,13 +233,14 @@ function advanceTrip(s: CityState, p: Pilot, emit: Emit): void {
 }
 
 /** Do the job at the landing zone. */
-function land(s: CityState, p: Pilot, d: DistrictState): void {
+function land(s: CityState, p: Pilot, d: DistrictState, emit: Emit): void {
   const trip = p.trip!;
   const order = p.order;
   const kind = order?.kind;
   if (trip.troops > 0) {
     mergeTroops(d, trip.troops, 0, 0.95, trip.troops * ROUNDS_PER_TROOP);
     s.stats.troopsDeployed += trip.troops;
+    credit(s, { what: 'troops', district: d.id, amount: trip.troops, by: 'ai' }, emit);
     trip.troops = 0;
   }
   for (const crate of trip.crates) {
@@ -247,15 +249,24 @@ function land(s: CityState, p: Pilot, d: DistrictState): void {
     else d.troops.ammo += CRATES.ammo.amount;
     d.order = Math.min(100, d.order + CRATES[crate].order);
     s.stats.cratesDelivered += 1;
+    credit(s, { what: 'crate', district: d.id, crate, amount: 1, by: 'ai' }, emit);
   }
   trip.crates = [];
+  if (kind === 'evacuate' && d.scientists >= 1) {
+    // A research team comes out first.
+    const n = Math.min(SEATS, Math.floor(d.scientists));
+    d.scientists -= n;
+    trip.scientists = n;
+    credit(s, { what: 'scientists', district: d.id, amount: n, by: 'ai' }, emit);
+  }
   if (kind === 'evacuate') {
+    const before = trip.civilians + trip.infected;
     // Pilots land at the fullest shelter still holding, where people are screened at the door.
     const shelter = s.sites
       .filter((x) => x.district === d.id && x.status !== 'fallen' && x.sheltered >= 1)
       .sort((a, b) => b.sheltered - a.sheltered)[0];
     const screened = shelter ? 0.25 : 1;
-    for (let i = 0; i < SEATS && d.population + d.infected >= 1; i++) {
+    for (let i = trip.scientists ?? 0; i < SEATS && d.population + d.infected >= 1; i++) {
       if (shelter && shelter.sheltered >= 1) {
         shelter.sheltered -= 1;
         d.sheltered = Math.max(0, d.sheltered - 1);
@@ -268,6 +279,7 @@ function land(s: CityState, p: Pilot, d: DistrictState): void {
         trip.civilians += 1;
       }
     }
+    credit(s, { what: 'civilians', district: d.id, amount: trip.civilians + trip.infected - before, by: 'ai' }, emit);
   }
   if (kind === 'relieve') {
     const n = Math.min(SEATS, Math.floor(d.troops.strength));
@@ -288,6 +300,10 @@ function homecoming(s: CityState, p: Pilot, emit: Emit): void {
   const base = baseOf(s);
   const d = s.districts[trip.district];
   base.population += trip.civilians;
+  if (trip.scientists) {
+    base.scientists += trip.scientists;
+    s.stats.scientistsEvacuated += trip.scientists;
+  }
   screenAtGate(s, base, trip.infected);
   if (trip.tired > 0) mergeTroops(base, trip.tired, trip.tiredFatigue, 0.6, 0);
   base.fuel += trip.fuel;
@@ -295,6 +311,7 @@ function homecoming(s: CityState, p: Pilot, emit: Emit): void {
   s.stats.troopsRelieved += trip.tired;
   s.stats.aiTrips += 1;
   const brought = [
+    trip.scientists && `${trip.scientists} scientists`,
     trip.civilians + trip.infected && `${trip.civilians + trip.infected} civilians`,
     trip.tired && `${trip.tired} exhausted soldiers`,
     trip.fuel && `${trip.fuel.toLocaleString('en-US')} L of fuel`,
