@@ -1,5 +1,6 @@
-// Flight command, in four tabs: Command's requests (take them on, or hand them to a pilot), the AI
-// pilot roster and their orders, research, and where the army's platoons go. Controller: LT/RT
+// Flight command, in five tabs: Command's requests (take them on, or hand them to a pilot), the AI
+// pilot roster and their orders, research, where the army's platoons go, and the city's movement
+// restrictions. Controller: LT/RT
 // changes tab, D-pad ▲▼ picks a row, LB/RB moves between fields, D-pad ◀▶ changes a field, A
 // presses, B closes. Keyboard: [ ] tabs, arrows, Tab, Enter, Esc. Mouse: click anything.
 
@@ -10,11 +11,13 @@ import { baseOf, CRATES, requestOrder, type PlayerCommand } from '../sim/operati
 import { JOB_LABELS, orderSummary, TRIP_FUEL, validOrder } from '../sim/pilots';
 import { assignable, describeNeed, openRequests, rewardText } from '../sim/requests';
 import { RESEARCH, RESEARCH_ORDER, researchBlocked, researchPoints, researchRate } from '../sim/research';
-import type { CityState, CrateKind, JobKind, Pilot, Request } from '../sim/types';
+import { compliance, CURFEW_FROM, CURFEW_UNTIL, FOOD_RUN_MINUTES, foodPoints, foodRunStart, lineScreening, policyAsked, POLICY_LABELS, POLICY_TERMS } from '../sim/policy';
+import type { CityState, CrateKind, JobKind, Pilot, Policy, Request } from '../sim/types';
 
-type Tab = 'requests' | 'pilots' | 'research' | 'platoons';
-const TABS: Tab[] = ['requests', 'pilots', 'research', 'platoons'];
-const TAB_LABELS: Record<Tab, string> = { requests: 'Requests', pilots: 'Pilots', research: 'Research', platoons: 'Platoons' };
+type Tab = 'requests' | 'pilots' | 'research' | 'platoons' | 'movement';
+const TABS: Tab[] = ['requests', 'pilots', 'research', 'platoons', 'movement'];
+const TAB_LABELS: Record<Tab, string> = { requests: 'Requests', pilots: 'Pilots', research: 'Research', platoons: 'Platoons', movement: 'Movement' };
+const POLICIES: Policy[] = ['quarantine', 'curfew', 'unrestricted'];
 const REQUEST_FIELDS = ['track', 'pilot', 'assign'] as const;
 type RequestField = (typeof REQUEST_FIELDS)[number];
 
@@ -40,8 +43,8 @@ export class CommandPanel {
   visible = false;
   private tab: Tab = 'requests';
   /** Row and field per tab, so switching tabs keeps your place. */
-  private rows: Record<Tab, number> = { requests: 0, pilots: 0, research: 0, platoons: 0 };
-  private fields: Record<Tab, number> = { requests: 0, pilots: 0, research: 0, platoons: 0 };
+  private rows: Record<Tab, number> = { requests: 0, pilots: 0, research: 0, platoons: 0, movement: 0 };
+  private fields: Record<Tab, number> = { requests: 0, pilots: 0, research: 0, platoons: 0, movement: 0 };
   /** The pilot picked for each request. */
   private picks = new Map<number, number>();
   private drafts = new Map<number, Draft>();
@@ -105,6 +108,8 @@ export class CommandPanel {
         return RESEARCH_ORDER.length;
       case 'platoons':
         return this.platoonRows(s).length;
+      case 'movement':
+        return POLICIES.length;
     }
   }
 
@@ -152,7 +157,7 @@ export class CommandPanel {
     this.state = state;
     if (!this.visible || !state) return;
     const key = JSON.stringify([this.tab, state.pilots, state.airframes, state.requests, state.unlocked, Math.floor(state.research),
-      state.platoonTarget, state.flags.holdPlatoons, Math.floor(state.t), this.rows, this.fields, [...this.drafts], [...this.picks]]);
+      state.platoonTarget, state.flags.holdPlatoons, state.policy, Math.floor(state.t), this.rows, this.fields, [...this.drafts], [...this.picks]]);
     if (key === this.lastKey) return;
     this.lastKey = key;
     this.row = Math.min(this.row, Math.max(0, this.rowCount() - 1));
@@ -162,7 +167,8 @@ export class CommandPanel {
     const body = this.tab === 'requests' ? this.requestsTab(state)
       : this.tab === 'research' ? this.researchTab(state)
         : this.tab === 'platoons' ? this.platoonsTab(state)
-          : this.pilotsTab(state);
+          : this.tab === 'movement' ? this.movementTab(state)
+            : this.pilotsTab(state);
     this.el.innerHTML = `<div class="cmd-card">${tabs}${body}${hint}</div>`;
   }
 
@@ -286,6 +292,43 @@ export class CommandPanel {
       </div>`;
     }).join('');
     return `${head}<div class="cmd-rows">${rows}</div>`;
+  }
+
+  // --- Movement restrictions ----------------------------------------------------------------------
+
+  private movementTab(s: CityState): string {
+    const asked = policyAsked(s);
+    const head = `<div class="cmd-head"><h2>Movement restrictions</h2><div class="cmd-fleet">
+      ${asked ? `<span>In force: <b>${POLICY_LABELS[s.policy]}</b></span>`
+        : '<span class="warn">Command will ask for your call once the infection spreads after the state of emergency.</span>'}
+      <span>Kept indoors, people meet fewer of the dead and carry fewer of the bitten across the city, but fewer get out, the power grid's staff can't all get to work, and patience wears thin.</span>
+      </div></div>`;
+    const effects: Record<Policy, string> = {
+      quarantine: 'Each district goes to its food points once a day, all at once. An unscreened line spreads the bite; post soldiers at the supermarkets to screen it and catch the bitten instead.',
+      curfew: 'Off the streets at night and in the afternoon, when the dead are about. Fewer drive out of the city.',
+      unrestricted: 'Nothing changes: people shop, work, flee and drive out as they please.',
+    };
+    const rows = POLICIES.map((p, i) => {
+      const selected = i === this.row;
+      const chosen = asked && s.policy === p;
+      return `<div class="cmd-row${selected ? ' selected' : ''}${asked ? '' : ' gone'}" data-row="${i}">
+        <div class="cmd-line"><span class="cmd-name">${chosen ? '▶ ' : ''}${POLICY_LABELS[p]}</span><span class="cmd-status">${POLICY_TERMS[p]}</span></div>
+        <div class="cmd-line"><span class="cmd-order">${effects[p]}</span></div>
+        ${selected && asked && !chosen ? `<div class="cmd-editor"><span class="cmd-button focus" data-row="${i}" data-press="1">Order ${POLICY_LABELS[p].toLowerCase()}</span></div>` : ''}
+      </div>`;
+    }).join('');
+    // How it's holding in each district.
+    const live = s.districts.filter((d) => d.kind !== 'airbase' && d.status !== 'overrun');
+    const table = asked && s.policy !== 'unrestricted' ? `<div class="cmd-rows">${live.map((d) => {
+      const c = compliance(s, d);
+      const points = foodPoints(s, d).length;
+      const extra = s.policy === 'quarantine'
+        ? `food run ${time(foodRunStart(d))}–${time(foodRunStart(d) + FOOD_RUN_MINUTES)} · ${points ? `${points} food point${points > 1 ? 's' : ''} · line screened ${pct(lineScreening(s, d))}` : '<span class="warn">no food point</span>'}`
+        : `out ${time(CURFEW_FROM)}–${time(CURFEW_UNTIL)}`;
+      return `<div class="cmd-row gone"><div class="cmd-line"><span>${d.name}</span>
+        <span class="cmd-status">${c < 0.5 ? '<span class="warn">' : ''}keeping to it ${pct(c)}${c < 0.5 ? '</span>' : ''} · ${extra}</span></div></div>`;
+    }).join('')}</div>` : '';
+    return `${head}<div class="cmd-rows">${rows}</div>${table}`;
   }
 
   // --- Pilots -------------------------------------------------------------------------------------
@@ -459,6 +502,10 @@ export class CommandPanel {
     }
     if (this.tab === 'research') {
       this.send({ type: 'research', id: RESEARCH_ORDER[this.row] });
+      return;
+    }
+    if (this.tab === 'movement') {
+      if (policyAsked(s)) this.send({ type: 'setPolicy', policy: POLICIES[this.row] });
       return;
     }
     if (this.tab === 'platoons') {

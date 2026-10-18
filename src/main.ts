@@ -19,6 +19,7 @@ import { Sites } from './world/Sites';
 import { Traffic } from './world/Traffic';
 import { Cars } from './world/Cars';
 import { cityLight } from './world/CityLight';
+import { POLICY_LABELS, ruleLine } from './sim/policy';
 import { MilitaryConvoys } from './world/MilitaryConvoys';
 import { AirportWorks } from './world/AirportWorks';
 import { Lures } from './world/Lures';
@@ -97,6 +98,10 @@ const radio = new Transmission((r, how) => {
     command.showRequest(r.id);
     input.releasePointer();
   }
+}, (policy) => {
+  // Command's call on movement restrictions (null: stand by, it asks again later).
+  sim.command({ type: 'setPolicy', policy });
+  hud.toast(policy ? `${POLICY_LABELS[policy]} ordered` : 'Standing by: Command will ask again', 3);
 });
 scene.add(requests.marker);
 
@@ -455,7 +460,8 @@ function update(dt: number): void {
     destroyed: heli.destroyed,
     searchlight: heli.searchlight.intensity > 0,
   }, state && districtIndex >= 0 ? state.sites.filter((x) => x.district === districtIndex) : [],
-  state ? siteNear(state, heli.position.x, heli.position.z, SITE_HUD_RADIUS) ?? null : null, state?.traffic ?? null);
+  state ? siteNear(state, heli.position.x, heli.position.z, SITE_HUD_RADIUS) ?? null : null, state?.traffic ?? null,
+  state && districtIndex >= 0 ? ruleLine(state, state.districts[districtIndex], sim.time) : '');
 
   if (map.visible) {
     mapTimer -= dt;

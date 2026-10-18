@@ -8,6 +8,7 @@
 
 import { CITY_DEPTH, CITY_WIDTH, districtAt, districtCenter } from './layout';
 import { totalZombies } from './hordes';
+import { travel } from './policy';
 import { nearestNode, NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, STREET_SPACING } from './streets';
 import type { CityState, DistrictState, Severity, Traffic } from './types';
 
@@ -313,7 +314,9 @@ export function updateTraffic(s: CityState, night: boolean, emit: Emit): void {
   // Local traffic inside each district, spread over its streets.
   const edgesIn = new Float64Array(s.districts.length);
   for (let e = 0; e < EDGES; e++) if (EDGE_DISTRICT[e] >= 0) edgesIn[EDGE_DISTRICT[e]]++;
-  const local = s.districts.map((d) => (civilian(d) ? (d.population * 0.03 * curve * 10) / Math.max(1, edgesIn[d.id]) : 0));
+  // A curfew or quarantine keeps cars off the streets.
+  const allowed = s.districts.map((d) => travel(s, d));
+  const local = s.districts.map((d) => (civilian(d) ? (d.population * 0.03 * curve * 10 * allowed[d.id]) / Math.max(1, edgesIn[d.id]) : 0));
   for (let e = 0; e < EDGES; e++) if (EDGE_DISTRICT[e] >= 0) load[e] += local[EDGE_DISTRICT[e]];
 
   const fear = s.districts.map((d) => (civilian(d) ? fearOf(s, d) : 0));
@@ -322,17 +325,17 @@ export function updateTraffic(s: CityState, night: boolean, emit: Emit): void {
     // Commuting, less as fear grows.
     for (const b of s.districts) {
       if (b === a || !civilian(b)) continue;
-      const trips = (0.012 * a.population * b.population) / total * curve * (1 - 0.7 * fear[a.id]);
+      const trips = (0.012 * a.population * b.population) / total * curve * (1 - 0.7 * fear[a.id]) * allowed[a.id];
       along(`${a.id}-${b.id}`, trips);
     }
     // Flight: frightened people drive for the calmest neighbour and for the highways.
-    const flight = a.population * fear[a.id] * 0.01;
+    const flight = a.population * fear[a.id] * 0.01 * allowed[a.id];
     if (flight > 1) {
       const calm = a.neighbors.map((n) => s.districts[n]).filter(civilian).sort((x, y) => fear[x.id] - fear[y.id])[0];
       if (calm) along(`${a.id}-${calm.id}`, flight * 0.5);
     }
     // Leaving the city: a trickle at first, a flood once afraid, as long as the roads out flow.
-    const leaving = a.population * (0.0004 + 0.004 * fear[a.id]) + flight * 0.5;
+    const leaving = a.population * (0.0004 + 0.004 * fear[a.id]) * allowed[a.id] + flight * 0.5;
     let k = 0;
     let bestLen = Infinity;
     EXITS.forEach((_, x) => {

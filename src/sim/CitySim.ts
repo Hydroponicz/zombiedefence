@@ -16,6 +16,7 @@ import { compareDay, createCampaign, describeReport, finalEvacuation, updateCamp
 import { ISSUE_EVERY, issueRequests, updateRequests } from './requests';
 import { hasResearch, updateLures } from './research';
 import { fortification, updateConvoys } from './convoys';
+import { foodRun, movement, policyUnrest, travel, updatePolicy } from './policy';
 import { DOSES_PER_ISOLATION, policeArmed } from './supplies';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
@@ -175,6 +176,8 @@ export function createCity(seed: number | string): CityState {
     convoySeq: 0,
     nextConvoy: 0,
     airportWorks: 0,
+    policy: 'unrestricted',
+    policySince: 0,
     stats: { civiliansEvacuated: 0, scientistsEvacuated: 0, troopsDeployed: 0, troopsRelieved: 0, cratesDelivered: 0, lostInCrashes: 0,
       pilotsRecruited: 0, aiTrips: 0, flownOut: 0, requestsDone: 0 },
     pilots: [],
@@ -292,6 +295,7 @@ function tick(s: CityState, out: SimEvent[]): void {
   loseFarps(s, emit);
   updateCommand(s, emit);
   updateConvoys(s, emit);
+  if (hourly) updatePolicy(s, emit);
   updatePilots(s, emit);
   if (Math.floor(t) % ISSUE_EVERY === 0) issueRequests(s, emit);
   updateRequests(s, emit);
@@ -392,6 +396,8 @@ function updatePower(s: CityState, day: number, night: boolean, emit: Emit): voi
   const before = s.grid;
   let decay = TUNING.gridDecay * (1 - cityOrder / 100) + (day >= 3 ? TUNING.gridBacklog : 0);
   for (const d of ds) if (d.features.substation && d.rioting) decay += 0.003;
+  // Under a curfew or quarantine, fewer of the grid's staff get to work.
+  decay *= s.policy === 'quarantine' ? 1.6 : s.policy === 'curfew' ? 1.25 : 1;
   s.grid = clamp(s.grid - decay * H);
 
   let cap = 1;
@@ -473,7 +479,9 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const sheltered = P > 0 ? Math.min(d.sheltered, P) / P : 0;
   // People stuck in jammed streets are easy prey.
   const jammed = 1 + 0.4 * Math.min(1.5, s.traffic.jam[d.id] ?? 0);
-  const encounters = Math.min(P * 0.5, biteRate * crowd * exposure * jammed * (1 - 0.9 * sheltered) * freeZ * (P / (P + T + 10)) * H);
+  // Kept indoors by a curfew or quarantine, fewer meet the dead; crowded into a food line, more do.
+  const outdoors = 0.35 + 0.65 * movement(s, d);
+  const encounters = Math.min(P * 0.5, biteRate * crowd * exposure * jammed * outdoors * (1 - 0.9 * sheltered) * freeZ * (P / (P + T + 10)) * H);
   const bitten = encounters * 0.75;
   let civDeaths = encounters * 0.1;
   const civKills = Math.min(Z, encounters * 0.15);
@@ -532,6 +540,8 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
     if (hasResearch(s, 'antiviral')) d.population += isolated;
     else d.dead += isolated;
   }
+  // Under quarantine, the daily food run: the bitten in the line turn, or screening catches them.
+  foodRun(s, d, emit);
   const turned = d.infected * (H / TUNING.turnHours);
   d.infected -= turned;
   d.zombies += turned;
@@ -607,7 +617,7 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const outposts = Math.min(10, d.outposts * 3);
   const target = clamp(
     85 - 25 * shortage - 30 * fearNow - dark - dread + 15 * security + outposts + quell - (medicineShort ? 5 : 0) -
-      (thirst ? 5 : 0),
+      (thirst ? 5 : 0) - policyUnrest(s, d),
     0,
     100,
   );
@@ -808,6 +818,8 @@ function migrate(s: CityState, night: boolean): void {
     if (d.population > 10) {
       const threat = clamp(totalZombies(d) / (d.population * 0.01 + d.troops.strength * 2 + 20));
       let rate = d.status === 'overrun' ? 0.15 : d.order < 10 ? 0.06 : clamp((threat - 0.4) * 0.05, 0, 0.04);
+      // A curfew or quarantine keeps most of them where they are.
+      rate *= travel(s, d);
       const to = rate > 0 ? safestNeighbor(s, d, true) : null;
       if (to && safety(to) > safety(d)) {
         const p = d.population * rate * H;
@@ -823,7 +835,7 @@ function migrate(s: CityState, night: boolean): void {
 
     // The bitten seek treatment, turning the hospital into a hot spot.
     if (hospital && d !== hospital && d.infected > 1) {
-      const moving = d.infected * 0.015 * H;
+      const moving = d.infected * 0.015 * H * travel(s, d);
       di[d.id] -= moving;
       di[hospital.id] += moving;
     }

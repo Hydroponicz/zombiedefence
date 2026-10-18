@@ -12,7 +12,8 @@ import { addAirframe, maybeRecruit, validOrder } from './pilots';
 import { nextRandom } from './rng';
 import { screenAtGate } from './quarantine';
 import { siteName } from './sites';
-import type { Cargo, CityState, CrateKind, DistrictState, Farp, JobKind, Order, Request, ResearchId, Severity, Site } from './types';
+import { policyAsked, setPolicy } from './policy';
+import type { Cargo, CityState, CrateKind, DistrictState, Farp, JobKind, Order, Policy, Request, ResearchId, Severity, Site } from './types';
 
 export const SEATS = 8;
 export const CRATE_SLOTS = 2;
@@ -105,7 +106,9 @@ export type PlayerCommand =
   /** At a base, once researched: take a noise lure aboard. */
   | { type: 'loadLure'; at?: BaseId }
   /** Drop a noise lure (from the air or on the ground) at a place in a district. */
-  | { type: 'dropLure'; district: number; x: number; z: number };
+  | { type: 'dropLure'; district: number; x: number; z: number }
+  /** Movement restrictions, once Command has asked (null: decide later). */
+  | { type: 'setPolicy'; policy: Policy | null };
 
 export type FuelSource = { district: number } | { farp: number } | { army: true };
 
@@ -214,6 +217,8 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
       return hasResearch(s, 'noiseLures') && c.lures < LURE_CAPACITY;
     case 'dropLure':
       return c.lures > 0 && !!s.districts[cmd.district];
+    case 'setPolicy':
+      return policyAsked(s) && (cmd.policy !== null || !s.flags.policyDecided);
     case 'setPlatoon':
       return cmd.target === null || (!!s.districts[cmd.target] && s.districts[cmd.target].kind !== 'airbase' && s.districts[cmd.target].status !== 'overrun');
     case 'setOrder': {
@@ -405,6 +410,9 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       emit(d.id, 'info', `A noise lure is sounding in ${d.name}. The dead around will come to it for ${LURE_HOURS} hours.`, true);
       return true;
     }
+    case 'setPolicy':
+      setPolicy(s, cmd.policy, emit);
+      return true;
     case 'setPlatoon': {
       s.platoonTarget = cmd.target;
       s.flags.holdPlatoons = cmd.hold;

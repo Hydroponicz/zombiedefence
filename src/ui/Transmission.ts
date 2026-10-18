@@ -3,10 +3,13 @@
 // the pilot answers: take it on, open it in Flight Command (to hand it to a pilot), or dismiss it.
 // The answers are a row: the D-pad, right stick, A / D or the arrow keys move along it (or the mouse,
 // hovering), A or Enter picks one, and B or Backspace turns the call down. More than one queues up.
+// Command's call for a decision on movement restrictions comes the same way, ahead of any request:
+// quarantine, curfew or unrestricted, or B to stand by (Command asks again later).
 
 import { MINUTES_PER_DAY } from '../sim/clock';
+import { policyCallDue, POLICY_LABELS, POLICY_TERMS } from '../sim/policy';
 import { describeNeed, rewardText } from '../sim/requests';
-import type { CityState, Request, RequestKind } from '../sim/types';
+import type { CityState, Policy, Request, RequestKind } from '../sim/types';
 
 /** The player's callsign. */
 const CALLSIGN = 'DUSTOFF 1-1';
@@ -28,6 +31,9 @@ const FREQ: Record<RequestKind, string> = {
 
 export type Answer = 'take' | 'open' | 'dismiss';
 const ANSWERS: Answer[] = ['take', 'open', 'dismiss'];
+const POLICY_ANSWERS: Policy[] = ['quarantine', 'curfew', 'unrestricted'];
+/** Marks the policy call as the one shown. */
+const POLICY_CALL = -1;
 /** The right stick moves the choice once it's pushed this far, and again once it's back near centre. */
 const STICK_PUSH = 0.6;
 const STICK_REST = 0.3;
@@ -44,14 +50,24 @@ export class Transmission {
   /** The highlighted answer. */
   private choice = 0;
   private stickArmed = true;
+  /** The policy call was answered: don't put it up again until the simulation has the answer. */
+  private policyAnswered = false;
 
-  /** @param answer what the pilot said to a call (the caller acts on it) */
-  constructor(private answer: (request: Request, how: Answer) => void) {
+  /** The answers on the card that's up. */
+  private get answers(): string[] {
+    return this.shown === POLICY_CALL ? POLICY_ANSWERS : ANSWERS;
+  }
+
+  /**
+   * @param answer what the pilot said to a call (the caller acts on it)
+   * @param decide the pilot's decision on movement restrictions (null: stand by)
+   */
+  constructor(private answer: (request: Request, how: Answer) => void, private decide: (policy: Policy | null) => void) {
     // Hovering an answer highlights it.
     this.el.addEventListener('mouseover', (e) => {
       const button = (e.target as HTMLElement).closest<HTMLElement>('[data-answer]');
       if (!button) return;
-      const i = ANSWERS.indexOf(button.dataset.answer as Answer);
+      const i = this.answers.indexOf(button.dataset.answer!);
       if (i === this.choice) return;
       this.choice = i;
       this.highlight();
@@ -60,9 +76,9 @@ export class Transmission {
     this.el.addEventListener('click', (e) => {
       const button = (e.target as HTMLElement).closest<HTMLElement>('[data-answer]');
       if (!button) return;
-      this.choice = ANSWERS.indexOf(button.dataset.answer as Answer);
+      this.choice = this.answers.indexOf(button.dataset.answer!);
       this.highlight();
-      this.respond(button.dataset.answer as Answer);
+      this.respond(button.dataset.answer!);
     });
   }
 
@@ -88,19 +104,26 @@ export class Transmission {
     this.primed = true;
     // Calls for requests that have closed in the meantime are dropped.
     this.queue = this.queue.filter((id) => s.requests.some((r) => r.id === id && r.status === 'open'));
+    const due = policyCallDue(s);
+    if (!due) this.policyAnswered = false;
+    if (this.shown === POLICY_CALL) {
+      if (!due) this.close();
+      else this.typeOut(dt);
+      return;
+    }
     const current = this.shown === null ? undefined : s.requests.find((r) => r.id === this.shown && r.status === 'open');
     if (this.shown !== null && !current) this.close();
+    // Command's call for a decision comes first.
+    if (this.shown === null && due && !this.policyAnswered) {
+      this.openPolicy(s);
+      return;
+    }
     if (this.shown === null && this.queue.length) this.open(s, this.queue.shift()!);
 
     const r = this.shown === null ? undefined : s.requests.find((x) => x.id === this.shown);
     if (!r) return;
     // The message types out; the rest of the card keeps time.
-    if (this.typed < this.message.length) {
-      this.typed = Math.min(this.message.length, this.typed + dt * TYPE_RATE);
-      const text = this.el.querySelector('.rc-text');
-      if (text) text.textContent = this.message.slice(0, Math.floor(this.typed));
-      if (this.typed >= this.message.length) this.el.querySelector('.rc-over')?.classList.add('on');
-    }
+    this.typeOut(dt);
     const left = Math.max(0, r.deadline - s.t);
     const at = target(r);
     const where = at ? (() => {
@@ -118,6 +141,14 @@ export class Transmission {
     if (waiting) waiting.textContent = this.queue.length ? `+${this.queue.length} MORE IN QUEUE` : '';
   }
 
+  private typeOut(dt: number): void {
+    if (this.typed >= this.message.length) return;
+    this.typed = Math.min(this.message.length, this.typed + dt * TYPE_RATE);
+    const text = this.el.querySelector('.rc-text');
+    if (text) text.textContent = this.message.slice(0, Math.floor(this.typed));
+    if (this.typed >= this.message.length) this.el.querySelector('.rc-over')?.classList.add('on');
+  }
+
   /**
    * Input while a call is up: move along the answers, pick one, or turn the call down.
    * @param stickX left–right from the right stick, or the A / D keys
@@ -133,13 +164,13 @@ export class Transmission {
       this.stickArmed = true;
     }
     if (step) {
-      this.choice = Math.max(0, Math.min(ANSWERS.length - 1, this.choice + step));
+      this.choice = Math.max(0, Math.min(this.answers.length - 1, this.choice + step));
       this.highlight();
       this.blip(1400, 0.025);
       return true;
     }
-    if (actions.has('confirm')) this.respond(ANSWERS[this.choice]);
-    else if (actions.has('command')) this.respond('open');
+    if (actions.has('confirm')) this.respond(this.answers[this.choice]);
+    else if (actions.has('command') && this.shown !== POLICY_CALL) this.respond('open');
     else if (actions.has('back') || actions.has('radioDismiss')) this.respond('dismiss');
     else return false;
     return true;
@@ -147,12 +178,10 @@ export class Transmission {
 
   /** Mark the highlighted answer. */
   private highlight(): void {
-    this.el.querySelectorAll<HTMLElement>('.rc-btn').forEach((b) => b.classList.toggle('sel', b.dataset.answer === ANSWERS[this.choice]));
+    this.el.querySelectorAll<HTMLElement>('.rc-btn').forEach((b) => b.classList.toggle('sel', b.dataset.answer === this.answers[this.choice]));
   }
 
-  private respond(how: Answer): void {
-    const r = this.state?.requests.find((x) => x.id === this.shown);
-    if (!r) return;
+  private respond(how: string): void {
     // A first press finishes the typing; the next answers.
     if (how !== 'dismiss' && this.typed < this.message.length) {
       this.typed = this.message.length;
@@ -161,9 +190,34 @@ export class Transmission {
       this.el.querySelector('.rc-over')?.classList.add('on');
       return;
     }
-    this.answer(r, how);
+    if (this.shown === POLICY_CALL) {
+      this.decide(how === 'dismiss' ? null : (how as Policy));
+      this.policyAnswered = true;
+    } else {
+      const r = this.state?.requests.find((x) => x.id === this.shown);
+      if (!r) return;
+      this.answer(r, how as Answer);
+    }
     this.close();
     this.blip(how === 'dismiss' ? 520 : 880, 0.06);
+  }
+
+  /** Command wants a decision on movement restrictions. */
+  private openPolicy(s: CityState): void {
+    const command = s.flags.joc ? 'KESSLER ACTUAL' : 'RIDGEWAY ACTUAL';
+    const outbreaks = s.districts.filter((d) => d.flags.outbreak).length;
+    this.message = `${CALLSIGN}, ${command}. The infection has spread to ${outbreaks} districts. Command needs your call on civilian movement. ` +
+      `Quarantine: ${POLICY_TERMS.quarantine.toLowerCase()}. Curfew: ${POLICY_TERMS.curfew.toLowerCase()}. ` +
+      'Or leave it unrestricted. How do you want it? Over.';
+    this.typed = 0;
+    this.shown = POLICY_CALL;
+    const button = (p: Policy) => `<span class="rc-btn${p === 'quarantine' ? ' take' : ''}" data-answer="${p}">${POLICY_LABELS[p].toUpperCase()}</span>`;
+    this.el.innerHTML = this.card(s, '255.400', 'CITYWIDE', { label: 'FLASH', cls: 'flash' }, command,
+      POLICY_ANSWERS.map(button).join(''), 'stand by');
+    this.el.hidden = false;
+    this.choice = 0;
+    this.highlight();
+    this.squelch(3);
   }
 
   private close(): void {
@@ -183,9 +237,21 @@ export class Transmission {
       `On completion: ${rewardText(r.reward)}. How copy? Over.`;
     this.typed = 0;
     this.shown = id;
+    this.el.innerHTML = this.card(s, FREQ[r.kind], d.name.toUpperCase(), p, command, `
+          <span class="rc-btn take" data-answer="take">ROGER, TAKING IT</span>
+          <span class="rc-btn" data-answer="open">HAND OFF</span>
+          <span class="rc-btn" data-answer="dismiss">NEGATIVE</span>`, 'negative');
+    this.el.hidden = false;
+    this.choice = 0;
+    this.highlight();
+    this.squelch(p.cls === 'flash' ? 3 : p.cls === 'immediate' ? 2 : 1);
+  }
+
+  /** The radio and its message slip. */
+  private card(s: CityState, freq: string, where: string, p: { label: string; cls: string }, command: string, buttons: string, back: string): string {
     const day = Math.floor(s.t / MINUTES_PER_DAY) + 1;
     const hhmm = `${String(Math.floor((s.t % MINUTES_PER_DAY) / 60)).padStart(2, '0')}${String(Math.floor(s.t % 60)).padStart(2, '0')}`;
-    this.el.innerHTML = `
+    return `
       <div class="rc-radio">
         <div class="rc-rivet tl"></div><div class="rc-rivet tr"></div><div class="rc-rivet bl"></div><div class="rc-rivet br"></div>
         <div class="rc-top">
@@ -194,9 +260,9 @@ export class Transmission {
         </div>
         <div class="rc-face">
           <div class="rc-lcd">
-            <div class="rc-freq">${FREQ[r.kind]}<small>MHz</small></div>
+            <div class="rc-freq">${freq}<small>MHz</small></div>
             <div class="rc-bars"><i></i><i></i><i></i><i></i><i></i></div>
-            <div class="rc-meta">D${day} ${hhmm}Z · ${d.name.toUpperCase()}</div>
+            <div class="rc-meta">D${day} ${hhmm}Z · ${where}</div>
           </div>
           <div class="rc-grille"></div>
           <svg class="rc-wave" viewBox="0 0 120 30" preserveAspectRatio="none" aria-hidden="true">
@@ -208,19 +274,11 @@ export class Transmission {
           <div class="rc-text"></div><span class="rc-over">▌</span>
           <div class="rc-foot"><span class="rc-window"></span><span class="rc-where"></span><span class="rc-queue"></span></div>
         </div>
-        <div class="rc-buttons">
-          <span class="rc-btn take" data-answer="take">ROGER, TAKING IT</span>
-          <span class="rc-btn" data-answer="open">HAND OFF</span>
-          <span class="rc-btn" data-answer="dismiss">NEGATIVE</span>
-        </div>
+        <div class="rc-buttons">${buttons}</div>
         <div class="rc-hint"><span>◀ ▶ / <kbd>A</kbd> <kbd>D</kbd> choose</span><span>Ⓐ / <kbd>Enter</kbd> / click select</span>
-          <span>Ⓑ / <kbd>⌫</kbd> negative</span><span class="rc-held">⏸ GAME HELD</span></div>
+          <span>Ⓑ / <kbd>⌫</kbd> ${back}</span><span class="rc-held">⏸ GAME HELD</span></div>
         <div class="rc-static"></div>
       </div>`;
-    this.el.hidden = false;
-    this.choice = 0;
-    this.highlight();
-    this.squelch(p.cls === 'flash' ? 3 : p.cls === 'immediate' ? 2 : 1);
   }
 
   /** Radio squelch: a burst of static, then call tones. */

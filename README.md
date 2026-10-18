@@ -399,6 +399,38 @@ minutes unloading. You can see them on the road with their headlights on at nigh
 Once the works are finished, a convoy leaves every two to four hours. None leave once the airport
 is overrun.
 
+## Movement restrictions
+
+Soon after the state of emergency, once the infection has reached a third district (or three hours
+after the emergency, whichever comes first), Command radios for your call on what the city's people
+may do. Ⓑ / Backspace means "stand by", and Command asks again two hours later. You can change the
+rule at any time in Flight Command (P) → Movement.
+
+- **Unrestricted:** nothing changes.
+- **Curfew:** people may be out only from 05:00 to 14:00. They are off the streets at night, when the
+  dead bite most, and fewer drive out of the city.
+- **Strict quarantine:** people stay indoors, apart from one trip a day to their district's food
+  points (its supermarkets, or its shelters if it has none). Each district has its own two-hour food
+  run, staggered from 08:00 to 18:00.
+  - **The danger:** the whole district passes through the food line at once. The crowd draws the
+    dead, and the bitten in the line turn and bite the people around them.
+  - **The opportunity:** a screened line catches the bitten instead. Soldiers posted at the
+    supermarkets do the screening (land troops there), helped by police at their checkpoints, and
+    rapid tests make it better. The radio reports each run's toll and catches.
+  - **With nowhere to get food,** the quarantine breaks down.
+
+Both rules keep people from meeting the dead and from carrying the bitten into other districts. They
+also have costs:
+- Fewer people escape the city by road.
+- Fewer of the power grid's staff get to work: the grid decays 25% faster under a curfew and 60%
+  faster under quarantine.
+- They cost order. A quarantine costs more the longer it lasts.
+
+How well a rule holds in each district depends on the police and soldiers there to enforce it, and
+it falls apart in a riot. The HUD shows the rule over each district: the food run time, how well the
+line is screened and how many keep to it. On the ground, the streets empty outside curfew hours, and
+under quarantine people stand in rows in the supermarket lots during their food run.
+
 ## Kessler Airport is sealed
 
 No infection or zombie gets into the airport until every other district has been overrun:

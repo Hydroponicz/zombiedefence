@@ -11,6 +11,7 @@ import { DISTRICT_SIZE, DISTRICT_TEMPLATES, districtAt } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
 import { planSites } from '../sim/sites';
 import { checkpointNodes } from '../sim/traffic';
+import { compliance, foodPoints, foodRunOn, movement } from '../sim/policy';
 import { BLOCKS_PER_DISTRICT, nearestNode, neighbors, nodeX, nodeZ, NODES_X, NODES_Z, roadWidth, SIDEWALK, stepToward } from '../sim/streets';
 import type { CityState, DistrictState } from '../sim/types';
 import type { WalkGrid } from './City';
@@ -143,11 +144,18 @@ const OUT_OVERRUN = 0.02;
 /**
  * A district's people out on the streets: a share of its residents (bar those in shelters), fewer at
  * night and in the dark, and only the odd survivor where it has been overrun.
+ * @param movement how many are allowed out against an ordinary day (a curfew or quarantine, see policy.ts)
  */
-export function civiliansOut(d: DistrictState, night: boolean): number {
+export function civiliansOut(d: DistrictState, night: boolean, movement = 1): number {
   const presence = d.status === 'overrun' ? OUT_OVERRUN : night ? (d.power === 'dark' ? OUT_IN_THE_DARK : OUT_AT_NIGHT) : OUT_BY_DAY;
-  return Math.max(0, d.population - d.sheltered) * presence;
+  return Math.max(0, d.population - d.sheltered) * presence * movement;
 }
+
+/** Places in a supermarket's queue: rows across its parking lot, toward the doors. */
+const QUEUE_COLUMNS = 16;
+const QUEUE_ROWS = 9;
+/** Marks a civilian standing in a food line (the slot is added). */
+const QUEUE_POST = 2000;
 
 /** Figures drawn at most: people, and the dead (crowd and hordes). The view's scale keeps within both. */
 const PEOPLE_BUDGET = 1600;
@@ -256,7 +264,7 @@ export class Agents {
       // Arriving (or jumping) somewhere fills the view at once; otherwise people come and go at its edge.
       const fill = !(Math.hypot(cx - this.filledAt.x, cz - this.filledAt.z) < 200);
       if (fill || Math.hypot(cx - this.filledAt.x, cz - this.filledAt.z) > 100) this.filledAt = { x: cx, z: cz };
-      this.reconcile(state, cx, cz, night > 0.5, share, fill);
+      this.reconcile(state, cx, cz, night > 0.5, share, fill, time);
       this.crowd.reconcile(state, cx, cz, share, this.scale, fill);
     }
 
@@ -271,6 +279,8 @@ export class Agents {
         p.kind = Kind.Bitten;
         p.civilian = false;
         p.mode = Mode.Walk;
+        // Out of the food line, staggering.
+        if (p.post >= QUEUE_POST) p.post = -1;
         p.timer = BITTEN_SECONDS;
       },
     }, time);
@@ -331,14 +341,14 @@ export class Agents {
 
   // --- Reconciliation with the simulation -----------------------------------------------
 
-  private reconcile(state: CityState, cx: number, cz: number, night: boolean, share: Map<number, number>, fill: boolean): void {
+  private reconcile(state: CityState, cx: number, cz: number, night: boolean, share: Map<number, number>, fill: boolean, time: number): void {
     this.state = state;
     const counts = new Map<string, Person[]>();
     for (const p of this.people) {
       // Those turning on screen play out their story whatever the counts say, and a patrol car's
       // crew belongs to its car.
       if (p.mode === Mode.Turning || (p.kind === Kind.Bitten && Number.isFinite(p.timer)) || p.car !== undefined) continue;
-      const key = `${p.kind}-${p.district}${p.post === CHECKPOINT_POST ? '-cp' : ''}`;
+      const key = `${p.kind}-${p.district}${p.post === CHECKPOINT_POST ? '-cp' : p.post >= QUEUE_POST ? '-q' : ''}`;
       const list = counts.get(key);
       if (list) list.push(p);
       else counts.set(key, [p]);
@@ -364,13 +374,24 @@ export class Agents {
 
     // Everyone in view, as the simulation has them: civilians out and about, the bitten among them,
     // soldiers at the posts in view, officers on foot and at checkpoints, riot squads that are out.
-    const targets: [Kind, number, number, boolean?][] = [];
+    const targets: [Kind, number, number, ('cp' | 'q')?][] = [];
     for (const [district, frac] of share) {
       const d = state.districts[district];
-      const living = civiliansOut(d, night) * frac;
-      const bitten = living * (d.infected / Math.max(1, d.population + d.infected));
+      const out = civiliansOut(d, night, movement(state, d, time));
+      // Under quarantine, the food run: most of those out are queueing at the food points (the
+      // supermarkets in view each get their share of the whole district's line).
+      const queueing = state.policy === 'quarantine' && foodRunOn(d, time) && d.status !== 'overrun' ? compliance(state, d) : 0;
+      const points = queueing > 0 ? foodPoints(state, d).filter((x) => x.kind === 'supermarket') : [];
+      const inLine = points.length ? out * queueing * 0.75 : 0;
+      const living = (out - inLine) * frac;
+      const infectedShare = d.infected / Math.max(1, d.population + d.infected);
+      const bitten = living * infectedShare;
       targets.push([Kind.Civilian, district, living - bitten]);
       targets.push([Kind.Bitten, district, bitten]);
+      const lines = points.filter((x) => Math.hypot(x.x - cx, x.z - cz) < ACTIVE_RADIUS).length;
+      const queued = (inLine * lines) / Math.max(1, points.length);
+      targets.push([Kind.Civilian, district, queued * (1 - infectedShare), 'q']);
+      targets.push([Kind.Bitten, district, queued * infectedShare, 'q']);
       let soldiers = 0;
       this.posts.forEach((p, i) => {
         if (p.district === district && this.postVisible[i] && Math.hypot(p.x - cx, p.z - cz) < ACTIVE_RADIUS) soldiers += this.postSoldiers[i];
@@ -385,7 +406,7 @@ export class Agents {
         // Once there are checkpoints, a few officers man each one in view.
         if (d.police.stage !== 'patrol') {
           const checkpoints = checkpointNodes(d).filter(([i, j]) => Math.hypot(nodeX(i) - cx, nodeZ(j) - cz) < ACTIVE_RADIUS).length;
-          targets.push([Kind.Police, district, Math.min(checkpoints * CHECKPOINT_OFFICERS, d.police.officers * frac), true]);
+          targets.push([Kind.Police, district, Math.min(checkpoints * CHECKPOINT_OFFICERS, d.police.officers * frac), 'cp']);
         }
       }
       // Riot squads come out only when called out, with their trucks.
@@ -411,8 +432,9 @@ export class Agents {
 
     // Each kind gets its own spawn budget so a big crowd can't starve the soldiers.
     const budget = KINDS.map(() => (fill ? Infinity : SPAWNS_PER_RECONCILE));
-    for (const [kind, district, want, checkpoint] of targets) {
-      const have = counts.get(`${kind}-${district}${checkpoint ? '-cp' : ''}`) ?? [];
+    for (const [kind, district, want, tag] of targets) {
+      const checkpoint = tag === 'cp';
+      const have = counts.get(`${kind}-${district}${tag ? `-${tag}` : ''}`) ?? [];
       // Riot squads turn out at least four strong.
       const target = kind === Kind.Riot ? Math.ceil(want / 4) * 4 : Math.round(want);
       // Groups come and go whole, and small differences wait, so figures don't flicker in and out.
@@ -452,7 +474,9 @@ export class Agents {
           if (checkpoint && !post) break;
           const p = kind === Kind.Soldier ? this.spawnSoldier(district, cx, cz, have)
             : post ? this.spawnAtCheckpoint(district, post)
-              : this.spawnCivilian(district, cx, cz, kind, fill);
+              : tag === 'q' ? this.spawnInLine(state, district, cx, cz, kind, have)
+                : this.spawnCivilian(district, cx, cz, kind, fill);
+          if (tag === 'q' && !p) break;
           // The simulation's bitten turn when it says so; on screen they just stagger about.
           if (p && kind === Kind.Bitten) p.timer = Infinity;
           if (p) {
@@ -510,6 +534,35 @@ export class Agents {
       x: nodeX(i) + Math.cos(ang) * r, z: nodeZ(j) + Math.sin(ang) * r, heading: ang,
       ni: i, nj: j, pi: i, pj: j, ox: 0, oz: 0, speed: 0, phase: 0, timer: 0,
       cooldown: this.rand() * 2, post: CHECKPOINT_POST, look: 0,
+    };
+  }
+
+  /**
+   * Someone in a food line under quarantine: standing in rows across a supermarket's parking lot,
+   * facing its doors, in a free place in the line.
+   */
+  private spawnInLine(state: CityState, district: number, cx: number, cz: number, kind: Kind, have: Person[]): Person | null {
+    const stores = foodPoints(state, state.districts[district]).filter((x) => x.kind === 'supermarket' && Math.hypot(x.x - cx, x.z - cz) < ACTIVE_RADIUS);
+    if (!stores.length) return null;
+    const taken = new Set(this.people.filter((p) => p.post >= QUEUE_POST).map((p) => p.post));
+    const slots = QUEUE_COLUMNS * QUEUE_ROWS;
+    // The emptiest line first; within it, the place nearest the doors that's free.
+    const fill = (k: number) => have.filter((p) => Math.floor((p.post - QUEUE_POST) / slots) === stores[k].id).length;
+    const k = stores.map((_, n) => n).sort((a, b) => fill(a) - fill(b))[0];
+    const store = stores[k];
+    let slot = -1;
+    for (let n = 0; n < slots && slot < 0; n++) if (!taken.has(QUEUE_POST + store.id * slots + n)) slot = n;
+    if (slot < 0) return null;
+    // Rows from the doors (toward -z of the lot) back toward the street, snaking.
+    const row = Math.floor(slot / QUEUE_COLUMNS);
+    const col = row % 2 ? QUEUE_COLUMNS - 1 - (slot % QUEUE_COLUMNS) : slot % QUEUE_COLUMNS;
+    const x = store.x - 2 + col * 1.1 + (this.rand() - 0.5) * 0.3;
+    const z = store.z - 10 + row * 2.1 + (this.rand() - 0.5) * 0.3;
+    return {
+      kind, civilian: kind === Kind.Civilian, mode: Mode.Post, district, x, z, heading: (this.rand() - 0.5) * 0.6,
+      ni: 0, nj: 0, pi: 0, pj: 0, ox: 0, oz: 0, speed: 1.2 + this.rand() * 0.5, phase: this.rand() * 10,
+      timer: kind === Kind.Bitten ? Infinity : 0, cooldown: 0, post: QUEUE_POST + store.id * slots + slot,
+      look: Math.floor(this.rand() * 1024),
     };
   }
 
@@ -693,8 +746,9 @@ export class Agents {
       const tx = this.crowd.posX(threat);
       const tz = this.crowd.posZ(threat);
       if (p.mode !== Mode.Flee) {
-        // Running for it: off the sidewalk and down the street.
+        // Running for it: off the sidewalk (or out of the food line) and down the street.
         p.mode = Mode.Flee;
+        p.post = -1;
         p.route = undefined;
         this.retarget(p);
         [p.ni, p.nj] = stepToward(p.pi, p.pj, tx, tz, true);
@@ -703,6 +757,8 @@ export class Agents {
       return;
     }
     if (p.mode === Mode.Flee) p.mode = Mode.Walk;
+    // Waiting in a food line.
+    if (p.post >= QUEUE_POST) return;
     this.stroll(p, p.speed, dt);
   }
 
@@ -736,6 +792,7 @@ export class Agents {
       p.timer = TURN_SECONDS;
       return;
     }
+    if (p.post >= QUEUE_POST) return;
     this.stroll(p, p.speed * 0.45, dt);
   }
 

@@ -345,6 +345,9 @@ export interface Lure {
   until: number;
 }
 
+/** What the city's people may do (see policy.ts). */
+export type Policy = 'unrestricted' | 'curfew' | 'quarantine';
+
 export type ConvoyKind = 'engineers' | 'fuel' | 'supply';
 
 /** A military convoy between Camp Ridgeway and the airport (see convoys.ts). */
@@ -505,5 +508,8 @@ export interface CityState {
   nextConvoy: number;
   /** Fortification stages the engineers have finished at the airport (0..5). */
   airportWorks: number;
+  /** Movement restrictions in force, and since when. */
+  policy: Policy;
+  policySince: number;
   flags: Record<string, boolean>;
 }

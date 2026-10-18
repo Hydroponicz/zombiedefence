@@ -194,9 +194,10 @@ export class Hud {
    * @param sites the district's strategic sites
    * @param nearby the site the helicopter is over, if any
    * @param traffic the city's traffic, for the district's roads
+   * @param rule the curfew or quarantine here, if any
    */
   update(dt: number, t: number, timeScale: number, district: DistrictState | null, flight: FlightReadout, sites: Site[] = [], nearby: Site | null = null,
-    traffic: Traffic | null = null): void {
+    traffic: Traffic | null = null, rule = ''): void {
     const scale = timeScale > 1 ? ` <small>Time ×${timeScale}</small>` : '';
     this.clock.innerHTML = `${isDaytime(t) ? '☀' : '☾'} ${formatClock(t)}${scale}`;
 
@@ -219,7 +220,7 @@ export class Hud {
     // When there's too much to draw one to one, each figure stands for a few.
     const each = this.figureScale < 0.95 ? Math.round(1 / this.figureScale) : 1;
     const key = district
-      ? `${each}|${need}|${roads}|${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${district?.police.stage}|${siteLine}|${near}`
+      ? `${each}|${need}|${roads}|${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${district?.police.stage}|${siteLine}|${near}|${rule}`
       : 'none';
     if (key !== this.lastDistrictKey) {
       this.lastDistrictKey = key;
@@ -230,6 +231,7 @@ export class Hud {
            <div class="meta">Zombies ${zombies} · Troops ${troops}${police ? ` · Police ${police} (${POLICE_STAGE[district.police.stage]})` : ''}</div>
            ${siteLine ? `<div class="meta">Sites: ${siteLine}</div>` : ''}
            ${roads ? `<div class="meta">Roads: ${roads}</div>` : ''}
+           ${rule ? `<div class="meta">${rule}</div>` : ''}
            ${need ? `<div class="meta need">Needs: ${need}</div>` : ''}
            ${each > 1 ? `<div class="meta">On the ground, each figure ≈ ${each} people</div>` : ''}
            ${near ? `<div class="meta site ${nearby!.status}">${SITE_LABELS[nearby!.kind]}: ${near}</div>` : ''}`
