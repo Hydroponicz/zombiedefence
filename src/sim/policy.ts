@@ -60,9 +60,12 @@ export function policyCallDue(s: CityState): boolean {
   return !!s.flags.policyCall && !s.flags.policyDecided && s.t >= (s.army.cooldowns.policyAsk ?? 0);
 }
 
-/** Hourly: Command asks for a decision once the infection spreads after the state of emergency. */
+/**
+ * Hourly: Command asks for a decision once the infection spreads after the state of emergency
+ * (unless the player has already made one in Flight Command).
+ */
 export function updatePolicy(s: CityState, emit: Emit): void {
-  if (s.flags.policyCall || !s.flags.jocAuthorized) return;
+  if (s.flags.policyCall || s.flags.policyDecided || !s.flags.jocAuthorized) return;
   const outbreaks = s.districts.filter((d) => d.flags.outbreak).length;
   if (outbreaks < ASK_OUTBREAKS && s.t - (s.army.cooldowns.jocAuthorized ?? s.t) < ASK_AFTER) return;
   s.flags.policyCall = true;

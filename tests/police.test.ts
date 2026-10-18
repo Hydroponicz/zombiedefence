@@ -65,8 +65,9 @@ describe('police', () => {
     const s = city('quit');
     const d = named(s, 'Northside');
     const sim = new CitySim(s);
-    // Day 9 of a city overrun next door: morale drains away.
+    // Eight days of hard duty, the city overrun next door: morale drains away.
     s.t += 1440 * 8;
+    d.police.duty = 8;
     for (const n of d.neighbors) s.districts[n].status = 'overrun';
     const police = d.police.officers + d.police.riot;
     const people = d.population;

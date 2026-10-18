@@ -32,6 +32,8 @@ export interface Police {
   /** 0 broken .. 1 steady. Officers start walking off the job below about a third. */
   morale: number;
   stage: PoliceStage;
+  /** Days of hard duty worked (a quiet district's days count for less); wears morale down. */
+  duty?: number;
   /**
    * Riot squads out on the street in their trucks: called out by a riot or by the infected
    * gathering in the district. Otherwise they're held in reserve at the station.

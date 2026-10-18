@@ -11,7 +11,7 @@ import { baseOf, CRATES, requestOrder, type PlayerCommand } from '../sim/operati
 import { JOB_LABELS, orderSummary, TRIP_FUEL, validOrder } from '../sim/pilots';
 import { describeNeed, openRequests, rewardText } from '../sim/requests';
 import { RESEARCH, RESEARCH_ORDER, researchBlocked, researchPoints, researchRate } from '../sim/research';
-import { compliance, CURFEW_FROM, CURFEW_UNTIL, FOOD_RUN_MINUTES, foodPoints, foodRunStart, lineScreening, policyAsked, POLICY_LABELS, POLICY_TERMS } from '../sim/policy';
+import { compliance, CURFEW_FROM, CURFEW_UNTIL, FOOD_RUN_MINUTES, foodPoints, foodRunStart, lineScreening, POLICY_LABELS, POLICY_TERMS } from '../sim/policy';
 import type { CityState, CrateKind, JobKind, Pilot, Policy, Request } from '../sim/types';
 
 type Tab = 'requests' | 'pilots' | 'research' | 'platoons' | 'movement';
@@ -297,10 +297,8 @@ export class CommandPanel {
   // --- Movement restrictions ----------------------------------------------------------------------
 
   private movementTab(s: CityState): string {
-    const asked = policyAsked(s);
     const head = `<div class="cmd-head"><h2>Movement restrictions</h2><div class="cmd-fleet">
-      ${asked ? `<span>In force: <b>${POLICY_LABELS[s.policy]}</b></span>`
-        : '<span class="warn">Command will ask for your call once the infection spreads after the state of emergency.</span>'}
+      <span>In force: <b>${POLICY_LABELS[s.policy]}</b></span>
       <span>Kept indoors, people meet fewer of the dead and carry fewer of the bitten across the city, but fewer get out, the power grid's staff can't all get to work, and patience wears thin.</span>
       </div></div>`;
     const effects: Record<Policy, string> = {
@@ -310,16 +308,16 @@ export class CommandPanel {
     };
     const rows = POLICIES.map((p, i) => {
       const selected = i === this.row;
-      const chosen = asked && s.policy === p;
-      return `<div class="cmd-row${selected ? ' selected' : ''}${asked ? '' : ' gone'}" data-row="${i}">
+      const chosen = s.policy === p;
+      return `<div class="cmd-row${selected ? ' selected' : ''}" data-row="${i}">
         <div class="cmd-line"><span class="cmd-name">${chosen ? '▶ ' : ''}${POLICY_LABELS[p]}</span><span class="cmd-status">${POLICY_TERMS[p]}</span></div>
         <div class="cmd-line"><span class="cmd-order">${effects[p]}</span></div>
-        ${selected && asked && !chosen ? `<div class="cmd-editor"><span class="cmd-button focus" data-row="${i}" data-press="1">Order ${POLICY_LABELS[p].toLowerCase()}</span></div>` : ''}
+        ${selected && !chosen ? `<div class="cmd-editor"><span class="cmd-button focus" data-row="${i}" data-press="1">Order ${POLICY_LABELS[p].toLowerCase()}</span></div>` : ''}
       </div>`;
     }).join('');
     // How it's holding in each district.
     const live = s.districts.filter((d) => d.kind !== 'airbase' && d.status !== 'overrun');
-    const table = asked && s.policy !== 'unrestricted' ? `<div class="cmd-rows">${live.map((d) => {
+    const table = s.policy !== 'unrestricted' ? `<div class="cmd-rows">${live.map((d) => {
       const c = compliance(s, d);
       const points = foodPoints(s, d).length;
       const extra = s.policy === 'quarantine'
@@ -505,7 +503,7 @@ export class CommandPanel {
       return;
     }
     if (this.tab === 'movement') {
-      if (policyAsked(s)) this.send({ type: 'setPolicy', policy: POLICIES[this.row] });
+      this.send({ type: 'setPolicy', policy: POLICIES[this.row] });
       return;
     }
     if (this.tab === 'platoons') {

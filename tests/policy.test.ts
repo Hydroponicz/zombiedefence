@@ -22,7 +22,8 @@ describe('Movement restrictions', () => {
   it('are put to the player once the infection spreads after the state of emergency', () => {
     const s = createCity('ask');
     const sim = new CitySim(s);
-    expect(sim.command({ type: 'setPolicy', policy: 'curfew' })).toBe(false);
+    // Nothing to put off before Command asks.
+    expect(sim.command({ type: 'setPolicy', policy: null })).toBe(false);
     s.flags.jocAuthorized = true;
     s.army.cooldowns.jocAuthorized = s.t;
     for (const name of ['Westfield', 'Eastside', 'Northside']) named(s, name).flags.outbreak = true;
@@ -39,6 +40,18 @@ describe('Movement restrictions', () => {
     // It can be changed later, but not put off again.
     expect(sim.command({ type: 'setPolicy', policy: null })).toBe(false);
     expect(sim.command({ type: 'setPolicy', policy: 'curfew' })).toBe(true);
+    expect(s.policy).toBe('curfew');
+  });
+
+  it('can be ordered before Command asks, and then it doesn\'t', () => {
+    const s = createCity('early');
+    const sim = new CitySim(s);
+    expect(sim.command({ type: 'setPolicy', policy: 'curfew' })).toBe(true);
+    expect(s.policy).toBe('curfew');
+    s.flags.jocAuthorized = true;
+    for (const name of ['Westfield', 'Eastside', 'Northside']) named(s, name).flags.outbreak = true;
+    sim.step(60);
+    expect(policyCallDue(s)).toBe(false);
     expect(s.policy).toBe('curfew');
   });
 

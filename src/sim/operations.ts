@@ -105,7 +105,7 @@ export type PlayerCommand =
   | { type: 'loadLure'; at?: BaseId }
   /** Drop a noise lure (from the air or on the ground) at a place in a district. */
   | { type: 'dropLure'; district: number; x: number; z: number }
-  /** Movement restrictions, once Command has asked (null: decide later). */
+  /** Movement restrictions, at any time (null: stand by, when Command has asked). */
   | { type: 'setPolicy'; policy: Policy | null };
 
 export type FuelSource = { district: number } | { farp: number } | { army: true };
@@ -214,7 +214,7 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
     case 'dropLure':
       return c.lures > 0 && !!s.districts[cmd.district];
     case 'setPolicy':
-      return policyAsked(s) && (cmd.policy !== null || !s.flags.policyDecided);
+      return cmd.policy !== null || (policyAsked(s) && !s.flags.policyDecided);
     case 'setPlatoon':
       return cmd.target === null || (!!s.districts[cmd.target] && s.districts[cmd.target].kind !== 'airbase' && s.districts[cmd.target].status !== 'overrun');
     case 'setOrder': {

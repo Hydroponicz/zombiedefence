@@ -287,9 +287,15 @@ narrow windows.
   - **Foot patrols** walk in twos and threes, never alone, mostly in the downtown and commercial
     districts.
   - **Checkpoints:** once they're set up, a few officers man each checkpoint in view.
-- **Morale:** police morale wears down every day of the outbreak, and with losses, riots, darkness
-  and fear. Below about a third, officers walk off the job and go home as civilians. Most districts
-  lose their police between days 7 and 10.
+- **Morale:** police morale wears down with days of hard duty, and with losses, riots, darkness and
+  fear.
+  - **Hard duty** means the outbreak in their own streets, a riot, or a neighbouring district under
+    attack or overrun.
+  - **In a quiet district,** the long shifts of the emergency wear them down at a quarter of that
+    rate.
+  - **Soldiers alongside** halve the wear.
+  - **Walking off:** below about a third, officers walk off the job and go home as civilians. Police
+    in the thick of it last about a week; in a quiet district they hold on far longer.
 - **Police stations:** the district's police help hold the station, and it is only looted once
   nobody is left to guard it.
 - **Where to see them:** the HUD shows "Police N" for the district, and the map sidebar shows officers,
@@ -409,8 +415,9 @@ is overrun.
 
 Soon after the state of emergency, once the infection has reached a third district (or three hours
 after the emergency, whichever comes first), Command radios for your call on what the city's people
-may do. Ⓑ / Backspace means "stand by", and Command asks again two hours later. You can change the
-rule at any time in Flight Command (P) → Movement.
+may do. Ⓑ / Backspace means "stand by", and Command asks again two hours later. You can also set
+or change the rule at any time in Flight Command (P) → Movement, even before Command asks; once
+you've chosen, Command doesn't ask.
 
 - **Unrestricted:** nothing changes.
 - **Curfew:** people may be out only from 05:00 to 14:00. They are off the streets at night, when the

@@ -68,8 +68,10 @@ export const TUNING = {
   /** Kills per officer and riot officer relative to a soldier (pistols and batons against rifles). */
   officerKillShare: 0.25,
   riotKillShare: 0.15,
-  /** Police morale lost per day of the outbreak (families at home, no relief coming). */
+  /** Police morale lost per day of hard duty (families at home, no relief coming). */
   policeMoraleDecay: 0.08,
+  /** A quiet district's day counts as this much hard duty: long shifts in a city emergency. */
+  policeQuietDuty: 0.25,
   /** Daily supply flight into the base from outside the city, at 07:00. */
   supplyFlightMinute: 7 * 60,
   supplyFlightTroops: 60,
@@ -638,7 +640,7 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   }
 
   // --- Police ---
-  updatePolice(s, d, day, night, fearNow, policeLoss, emit);
+  updatePolice(s, d, night, fearNow, policeLoss, emit);
 
   // --- Military ---
   if (tr.strength > 0) {
@@ -667,7 +669,7 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
  * Police morale wears down day by day, with losses, riots and darkness; below about a third
  * officers start walking off the job, back to their families (they become civilians).
  */
-function updatePolice(s: CityState, d: DistrictState, day: number, night: boolean, fear: number, lost: number, emit: Emit): void {
+function updatePolice(s: CityState, d: DistrictState, night: boolean, fear: number, lost: number, emit: Emit): void {
   const pol = d.police;
   const total = pol.officers + pol.riot;
   if (total < 0.5) {
@@ -716,10 +718,15 @@ function updatePolice(s: CityState, d: DistrictState, day: number, night: boolea
   }
 
   const lossFrac = lost / H / total;
+  // Hard duty wears them down: the outbreak in their streets, the dead or a riot next door. In a
+  // quiet district it's only the long shifts of a city in emergency, and that slowly.
+  const neighborsFalling = d.neighbors.some((n) => s.districts[n].status !== 'held');
+  const hard = d.flags.outbreak || d.rioting || d.status !== 'held' || neighborsFalling;
+  if (s.flags.jocAuthorized || d.flags.outbreak) pol.duty = (pol.duty ?? 0) + (hard ? 1 : TUNING.policeQuietDuty) * H / 24;
   // With soldiers alongside, they hold together longer.
   const decay = TUNING.policeMoraleDecay * (pol.stage === 'support' ? 0.5 : 1);
   const target = clamp(
-    0.85 - decay * (day - 1) - Math.min(0.3, lossFrac * 6) - 0.25 * fear -
+    0.85 - decay * (pol.duty ?? 0) - Math.min(0.3, lossFrac * 6) - 0.25 * fear -
       (d.rioting ? 0.1 : 0) - (night && d.power === 'dark' ? 0.1 : 0),
   );
   pol.morale += clamp(target - pol.morale, -0.1 * H, 0.05 * H);
