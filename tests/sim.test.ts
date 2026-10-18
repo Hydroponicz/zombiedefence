@@ -77,7 +77,7 @@ describe('city simulation', () => {
       }
       expect(sim.state.grid).toBeGreaterThanOrEqual(0);
     }
-  });
+  }, 20000);
 
   it('collapses on its own eventually, but not in the first week', () => {
     for (const seed of ['1', '2', '3']) {

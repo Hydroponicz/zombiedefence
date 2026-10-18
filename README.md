@@ -385,6 +385,40 @@ Keeping Industrial Park clean keeps the trains running, and the trains feed the 
 
   The HUD shows the stage ("Police 28 (checkpoints)").
 
+## Army supply trucks
+
+Once the JOC is up, everything flown and driven into the airport goes into its stores, and a fleet
+of army supply trucks carries it out to the districts by road:
+- **What comes in:** the daily supply flight (4,000 doses of medicine among its load), the convoys
+  from Camp Ridgeway, and Command's rewards.
+- **What goes out:** medicine where it's short (to keep three days' supply, and enough to isolate
+  the district's bitten), food where the civilian trucks can't keep up, and ammunition for the
+  troops.
+- **Each run:** a truck loads at the terminal, drives out by the access road and the city's streets
+  as they are (jams, wrecks and the dead slow it), unloads, and drives back. The radio reports each
+  delivery, for example "Army trucks delivered 1,500 doses of medicine (2.1 days' worth there now)
+  to Eastside".
+
+**Triage**
+- The stores are finite and the city needs more than comes in, so the neediest districts go first.
+- In Flight Command (P) → **Supply** you can put one district first, or leave it to need.
+- The airport keeps three crates' worth of each kind back for the helicopters.
+
+**Cut off and lost trucks**
+- **Cut off by road:** a district the trucks can't reach because its roads are blocked can only be
+  supplied by air. The radio says so, the map marks it "CUT OFF BY ROAD", and Command's supply
+  requests for it come first.
+- **Lost trucks:** trucks crossing contested or overrun ground are sometimes lost with their cargo.
+  A lost truck is replaced with the next morning's supply flight. The fleet is eight trucks.
+
+The Supply tab shows:
+- the airport's stores, and what's spare for the trucks;
+- the trucks ready, on the way and coming back;
+- for each district: days of medicine and food, ammunition per soldier, trucks on the way, and
+  whether it's cut off.
+
+On the ground the trucks are olive with canvas backs; on the map, olive squares.
+
 ## Military convoys and the airport's fortifications
 
 Once the JOC is up, convoys drive the camp road from Camp Ridgeway to Kessler Airport's west gate,

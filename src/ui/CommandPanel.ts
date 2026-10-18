@@ -1,6 +1,6 @@
-// Flight command, in five tabs: Command's requests (take them on, or hand them to a pilot), the AI
-// pilot roster and their orders, research, where the army's platoons go, and the city's movement
-// restrictions. Controller: LT/RT
+// Flight command, in six tabs: Command's requests (take them on, or hand them to a pilot), the AI
+// pilot roster and their orders, research, where the army's platoons go, the army's supply trucks
+// and the airport's stores, and the city's movement restrictions. Controller: LT/RT
 // changes tab, D-pad ▲▼ picks a row, LB/RB moves between fields, D-pad ◀▶ changes a field, A
 // presses, B closes. Keyboard: [ ] tabs, arrows, Tab, Enter, Esc. Mouse: click anything.
 
@@ -12,11 +12,18 @@ import { JOB_LABELS, orderSummary, TRIP_FUEL, validOrder } from '../sim/pilots';
 import { describeNeed, openRequests, rewardText } from '../sim/requests';
 import { RESEARCH, RESEARCH_ORDER, researchBlocked, researchPoints, researchRate } from '../sim/research';
 import { compliance, CURFEW_FROM, CURFEW_UNTIL, FOOD_RUN_MINUTES, foodRunStart, foodSource, lineScreening, POLICY_LABELS, POLICY_TERMS } from '../sim/policy';
-import type { CityState, CrateKind, JobKind, Pilot, Policy, Request } from '../sim/types';
+import { cargoText, medicineDays, spare } from '../sim/logistics';
+import { foodDays } from '../sim/supplies';
+import type { ArmyCargo, CityState, CrateKind, JobKind, Pilot, Policy, Request } from '../sim/types';
 
-type Tab = 'requests' | 'pilots' | 'research' | 'platoons' | 'movement';
-const TABS: Tab[] = ['requests', 'pilots', 'research', 'platoons', 'movement'];
-const TAB_LABELS: Record<Tab, string> = { requests: 'Requests', pilots: 'Pilots', research: 'Research', platoons: 'Platoons', movement: 'Movement' };
+const sum = (list: ArmyCargo[]): ArmyCargo => list.reduce((a, c) => ({ medicine: a.medicine + c.medicine, rations: a.rations + c.rations, ammo: a.ammo + c.ammo }),
+  { medicine: 0, rations: 0, ammo: 0 });
+
+type Tab = 'requests' | 'pilots' | 'research' | 'platoons' | 'supply' | 'movement';
+const TABS: Tab[] = ['requests', 'pilots', 'research', 'platoons', 'supply', 'movement'];
+const TAB_LABELS: Record<Tab, string> = {
+  requests: 'Requests', pilots: 'Pilots', research: 'Research', platoons: 'Platoons', supply: 'Supply', movement: 'Movement',
+};
 const POLICIES: Policy[] = ['quarantine', 'curfew', 'unrestricted'];
 const REQUEST_FIELDS = ['track', 'pilot', 'assign'] as const;
 type RequestField = (typeof REQUEST_FIELDS)[number];
@@ -43,8 +50,8 @@ export class CommandPanel {
   visible = false;
   private tab: Tab = 'requests';
   /** Row and field per tab, so switching tabs keeps your place. */
-  private rows: Record<Tab, number> = { requests: 0, pilots: 0, research: 0, platoons: 0, movement: 0 };
-  private fields: Record<Tab, number> = { requests: 0, pilots: 0, research: 0, platoons: 0, movement: 0 };
+  private rows: Record<Tab, number> = { requests: 0, pilots: 0, research: 0, platoons: 0, supply: 0, movement: 0 };
+  private fields: Record<Tab, number> = { requests: 0, pilots: 0, research: 0, platoons: 0, supply: 0, movement: 0 };
   /** The pilot picked for each request. */
   private picks = new Map<number, number>();
   private drafts = new Map<number, Draft>();
@@ -108,6 +115,8 @@ export class CommandPanel {
         return RESEARCH_ORDER.length;
       case 'platoons':
         return this.platoonRows(s).length;
+      case 'supply':
+        return this.supplyRows(s).length;
       case 'movement':
         return POLICIES.length;
     }
@@ -157,7 +166,7 @@ export class CommandPanel {
     this.state = state;
     if (!this.visible || !state) return;
     const key = JSON.stringify([this.tab, state.pilots, state.airframes, state.requests, state.unlocked, Math.floor(state.research),
-      state.platoonTarget, state.flags.holdPlatoons, state.policy, Math.floor(state.t), this.rows, this.fields, [...this.drafts], [...this.picks]]);
+      state.platoonTarget, state.flags.holdPlatoons, state.policy, state.logistics.priority, state.logistics.runs.length, Math.floor(state.t), this.rows, this.fields, [...this.drafts], [...this.picks]]);
     if (key === this.lastKey) return;
     this.lastKey = key;
     this.row = Math.min(this.row, Math.max(0, this.rowCount() - 1));
@@ -167,7 +176,8 @@ export class CommandPanel {
     const body = this.tab === 'requests' ? this.requestsTab(state)
       : this.tab === 'research' ? this.researchTab(state)
         : this.tab === 'platoons' ? this.platoonsTab(state)
-          : this.tab === 'movement' ? this.movementTab(state)
+          : this.tab === 'supply' ? this.supplyTab(state)
+            : this.tab === 'movement' ? this.movementTab(state)
             : this.pilotsTab(state);
     this.el.innerHTML = `<div class="cmd-card">${tabs}${body}${hint}</div>`;
   }
@@ -289,6 +299,56 @@ export class CommandPanel {
         <div class="cmd-line"><span class="cmd-name">${chosen ? '▶ ' : ''}${name}</span><span class="cmd-status">${detail}</span></div>
         ${selected && enabled && !chosen ? `<div class="cmd-editor"><span class="cmd-button focus" data-row="${i}" data-press="1">${
           row === 'auto' ? "Leave it to Command" : row === 'hold' ? 'Hold the platoons' : `Send the next platoon to ${s.districts[row].name}`}</span></div>` : ''}
+      </div>`;
+    }).join('');
+    return `${head}<div class="cmd-rows">${rows}</div>`;
+  }
+
+  // --- Supply ------------------------------------------------------------------------------------
+
+  private supplyRows(s: CityState): ('auto' | number)[] {
+    return ['auto', ...s.districts.filter((d) => d.kind !== 'airbase').map((d) => d.id)];
+  }
+
+  private supplyTab(s: CityState): string {
+    const lg = s.logistics;
+    const airport = s.districts.find((d) => d.kind === 'airbase')!;
+    const k = (n: number) => (n >= 10000 ? `${Math.round(n / 1000)}k` : Math.round(n).toLocaleString('en-US'));
+    const out = lg.runs.filter((r) => r.phase === 'out');
+    const stock = spare(s);
+    const head = `<div class="cmd-head"><h2>Army supply</h2><div class="cmd-fleet">
+      ${!s.flags.joc ? '<span class="warn">The army\'s supply trucks start running once the JOC is set up at Kessler Airport.</span>' : ''}
+      <span>Airport stores: medicine <b>${k(airport.medicine)}</b> · food <b>${k(airport.rations)}</b> · ammunition <b>${k(airport.troops.ammo)}</b> · fuel <b>${k(airport.fuel)} L</b></span>
+      <span>Trucks <b>${lg.fleet - lg.runs.length}</b> ready · <b>${out.length}</b> on the way · <b>${lg.runs.length - out.length}</b> coming back</span>
+      <span>Spare for the trucks: medicine <b>${k(stock.medicine)}</b> · food <b>${k(stock.rations)}</b> · ammunition <b>${k(stock.ammo)}</b>${
+        stock.medicine < 200 ? ' <span class="warn">(the rest is kept for helicopter crates)</span>' : ''}</span>
+      <span>Supply flight daily at 07:00 · convoys from Camp Ridgeway</span>
+      </div></div>`;
+    const rows = this.supplyRows(s).map((row, i) => {
+      const selected = i === this.row;
+      const chosen = row === 'auto' ? lg.priority === null : lg.priority === row;
+      let name: string;
+      let detail: string;
+      let enabled = true;
+      if (row === 'auto') {
+        name = 'Where the need is greatest';
+        detail = 'Medicine first, then food and ammunition, to the districts shortest of them';
+      } else {
+        const d = s.districts[row];
+        name = d.name;
+        enabled = d.status !== 'overrun';
+        const trucks = out.filter((r) => r.to === row);
+        const cut = lg.cutOff.includes(row);
+        const ammo = d.troops.strength >= 1 ? ` · ammo ${Math.round(d.troops.ammo / d.troops.strength)}/soldier` : '';
+        detail = !enabled ? 'Overrun'
+          : `medicine ${medicineDays(d).toFixed(1)} d · food ${foodDays(d, s.sites).toFixed(1)} d${ammo}` +
+            (cut ? ' · <span class="warn">cut off by road: supply it by air</span>'
+              : trucks.length ? ` · <span class="good">${trucks.length} truck${trucks.length > 1 ? 's' : ''} on the way (${cargoText(sum(trucks.map((r) => r.cargo)))})</span>` : '');
+      }
+      return `<div class="cmd-row${selected ? ' selected' : ''}${enabled ? '' : ' gone'}" data-row="${i}">
+        <div class="cmd-line"><span class="cmd-name">${chosen ? '▶ ' : ''}${name}</span><span class="cmd-status">${detail}</span></div>
+        ${selected && enabled && !chosen ? `<div class="cmd-editor"><span class="cmd-button focus" data-row="${i}" data-press="1">${
+          row === 'auto' ? 'Send trucks where the need is greatest' : `Supply ${s.districts[row].name} first`}</span></div>` : ''}
       </div>`;
     }).join('');
     return `${head}<div class="cmd-rows">${rows}</div>`;
@@ -504,6 +564,11 @@ export class CommandPanel {
     }
     if (this.tab === 'research') {
       this.send({ type: 'research', id: RESEARCH_ORDER[this.row] });
+      return;
+    }
+    if (this.tab === 'supply') {
+      const row = this.supplyRows(s)[this.row];
+      this.send({ type: 'setSupplyPriority', district: row === 'auto' ? null : row });
       return;
     }
     if (this.tab === 'movement') {

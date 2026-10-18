@@ -347,6 +347,41 @@ export interface Lure {
   until: number;
 }
 
+/** What an army supply truck carries (doses, person-days, rounds). */
+export interface ArmyCargo {
+  medicine: number;
+  rations: number;
+  ammo: number;
+}
+
+/**
+ * An army supply truck's run from the airport to a district and back (see logistics.ts). Its route
+ * and timetable are fixed when it sets off each way, like a food truck's.
+ */
+export interface ArmyRun {
+  id: number;
+  to: number;
+  cargo: ArmyCargo;
+  phase: 'out' | 'back';
+  /** Street corners along the way, flattened (i0, j0, i1, j1, ...), and minutes to reach each. */
+  path: number[];
+  times: number[];
+  depart: number;
+  arrive: number;
+}
+
+/** The army's supply chain out of the airport. */
+export interface Logistics {
+  /** Trucks the army has for it (some are lost on the road). */
+  fleet: number;
+  runs: ArmyRun[];
+  seq: number;
+  /** The district the player wants supplied first, if any. */
+  priority: number | null;
+  /** Districts the trucks can't reach by road: they need supplying by air. */
+  cutOff: number[];
+}
+
 /** What the city's people may do (see policy.ts). */
 export type Policy = 'unrestricted' | 'curfew' | 'quarantine';
 
@@ -505,6 +540,8 @@ export interface CityState {
   nextConvoy: number;
   /** Fortification stages the engineers have finished at the airport (0..5). */
   airportWorks: number;
+  /** Army supply trucks carrying the airport's stock out to the districts. */
+  logistics: Logistics;
   /** Movement restrictions in force, and since when. */
   policy: Policy;
   policySince: number;

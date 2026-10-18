@@ -4,7 +4,7 @@
 import { needs } from '../sim/supplies';
 import { requestTarget } from '../game/Requests';
 import { formatClock, MINUTES_PER_DAY, NIGHT_START, DAY_START } from '../sim/clock';
-import { ARMY_BASE, CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE, DISTRICT_TEMPLATES, GRID_COLS, GRID_ROWS } from '../sim/layout';
+import { ARMY_BASE, CITY_DEPTH, CITY_WIDTH, districtCenter, DISTRICT_SIZE, DISTRICT_TEMPLATES, GRID_COLS, GRID_ROWS } from '../sim/layout';
 import { totalZombies } from '../sim/hordes';
 import { guardsNeeded } from '../sim/sites';
 import { RAIL, trainPose, truckPose } from '../sim/supply';
@@ -314,6 +314,21 @@ export class DebugMap {
       const ty = my + (p.z + CITY_DEPTH / 2) * scale;
       g.fillRect(tx - 2.5, ty - 2.5, 5, 5);
       g.strokeRect(tx - 2.5, ty - 2.5, 5, 5);
+    }
+    // The army's supply trucks: olive.
+    g.fillStyle = '#6b7a3a';
+    for (const run of s.logistics.runs) {
+      const p = truckPose(run, s.t);
+      const tx = mx + (p.x + CITY_WIDTH / 2) * scale;
+      const ty = my + (p.z + CITY_DEPTH / 2) * scale;
+      g.fillRect(tx - 3, ty - 3, 6, 6);
+      g.strokeRect(tx - 3, ty - 3, 6, 6);
+    }
+    // Districts the trucks can't reach: only helicopters can supply them.
+    for (const id of s.logistics.cutOff) {
+      const d = s.districts[id];
+      const c = districtCenter(d.col, d.row);
+      this.text('CUT OFF BY ROAD', mx + (c.x + CITY_WIDTH / 2) * scale, my + (c.z + CITY_DEPTH / 2) * scale + 40, 11, '#ef5b4f', 'center', true);
     }
 
     // Strategic sites: a letter on a square coloured by status.

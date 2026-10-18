@@ -270,7 +270,7 @@ function send(s: CityState, from: number, to: number, drive: { path: number[]; t
 }
 
 /** Where a truck is at game minute t, and which way it faces (radians, 0 facing -Z). */
-export function truckPose(tr: Truck, t: number): { x: number; z: number; heading: number } {
+export function truckPose(tr: Pick<Truck, 'path' | 'times' | 'depart'>, t: number): { x: number; z: number; heading: number } {
   const p = tr.path;
   const elapsed = Math.max(0, t - tr.depart);
   for (let k = 1; k < tr.times.length; k++) {

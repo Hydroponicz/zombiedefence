@@ -16,6 +16,7 @@ import { compareDay, createCampaign, describeReport, finalEvacuation, updateCamp
 import { ISSUE_EVERY, issueRequests, updateRequests } from './requests';
 import { hasResearch, updateLures } from './research';
 import { fortification, updateConvoys } from './convoys';
+import { createLogistics, updateLogistics } from './logistics';
 import { foodRun, movement, policyUnrest, travel, updatePolicy } from './policy';
 import { DOSES_PER_ISOLATION, policeArmed } from './supplies';
 import { hashSeed, nextRandom } from './rng';
@@ -76,7 +77,7 @@ export const TUNING = {
   supplyFlightMinute: 7 * 60,
   supplyFlightTroops: 60,
   supplyFlightRations: 8000,
-  supplyFlightMedicine: 2000,
+  supplyFlightMedicine: 4000,
   supplyFlightAmmo: 30000,
   /** Research points per scientist at the base per game hour. */
   researchPerScientist: 1,
@@ -178,6 +179,7 @@ export function createCity(seed: number | string): CityState {
     convoySeq: 0,
     nextConvoy: 0,
     airportWorks: 0,
+    logistics: createLogistics(),
     policy: 'unrestricted',
     policySince: 0,
     stats: { civiliansEvacuated: 0, scientistsEvacuated: 0, troopsDeployed: 0, troopsRelieved: 0, cratesDelivered: 0, lostInCrashes: 0,
@@ -297,6 +299,7 @@ function tick(s: CityState, out: SimEvent[]): void {
   loseFarps(s, emit);
   updateCommand(s, emit);
   updateConvoys(s, emit);
+  updateLogistics(s, emit);
   if (hourly) updatePolicy(s, emit);
   updatePilots(s, emit);
   if (Math.floor(t) % ISSUE_EVERY === 0) issueRequests(s, emit);

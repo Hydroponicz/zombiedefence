@@ -105,6 +105,8 @@ export type PlayerCommand =
   | { type: 'loadLure'; at?: BaseId }
   /** Drop a noise lure (from the air or on the ground) at a place in a district. */
   | { type: 'dropLure'; district: number; x: number; z: number }
+  /** The district the army's supply trucks go to first (null: the neediest). */
+  | { type: 'setSupplyPriority'; district: number | null }
   /** Movement restrictions, at any time (null: stand by, when Command has asked). */
   | { type: 'setPolicy'; policy: Policy | null };
 
@@ -213,6 +215,8 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
       return hasResearch(s, 'noiseLures') && c.lures < LURE_CAPACITY;
     case 'dropLure':
       return c.lures > 0 && !!s.districts[cmd.district];
+    case 'setSupplyPriority':
+      return cmd.district === null || (!!s.districts[cmd.district] && s.districts[cmd.district].kind !== 'airbase' && s.districts[cmd.district].status !== 'overrun');
     case 'setPolicy':
       return cmd.policy !== null || (policyAsked(s) && !s.flags.policyDecided);
     case 'setPlatoon':
@@ -406,6 +410,11 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
     }
     case 'setPolicy':
       setPolicy(s, cmd.policy, emit);
+      return true;
+    case 'setSupplyPriority':
+      s.logistics.priority = cmd.district;
+      emit(null, 'info', cmd.district === null ? 'Army supply trucks will go where the need is greatest.'
+        : `Army supply trucks will supply ${s.districts[cmd.district].name} first.`, true);
       return true;
     case 'setPlatoon': {
       s.platoonTarget = cmd.target;

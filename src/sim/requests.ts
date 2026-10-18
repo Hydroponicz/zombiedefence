@@ -78,14 +78,17 @@ function candidates(s: CityState): Candidate[] {
   for (const d of s.districts) {
     if (d.kind === 'airbase' || d.status === 'overrun' || people(d) < 500) continue;
     const n = people(d);
-    // Supplies running out where people are still holding on.
+    // Supplies running out where people are still holding on; most of all where the army's trucks
+    // can't get through, and only a helicopter can bring them.
+    const cutOff = s.logistics.cutOff.includes(d.id);
     const shortOf = (kind: CrateKind, sites: Site['kind'][], urgency: number, label: (place: string) => string) => {
       const site = siteFor(s, d, sites);
       const place = site ? siteName(site, d) : d.name;
       out.push({
         kind: 'supply', district: d.id, site: site?.id ?? null, crate: kind,
         needed: Math.min(2, Math.max(1, Math.ceil((n * (kind === 'medicine' ? 0.15 : 0.5)) / CRATE_AMOUNT[kind]))),
-        minutes: 150, title: label(place), reward: { troops: 15, order: 8 }, urgency,
+        minutes: 150, title: label(place) + (cutOff ? ', and the roads are cut' : ''), reward: { troops: 15, order: 8 },
+        urgency: urgency + (cutOff ? 4 : 0),
       });
     };
     if (needsMedicine(d)) shortOf('medicine', ['pharmacy', 'shelter'], 3, (p) => `${p} is out of medicine`);

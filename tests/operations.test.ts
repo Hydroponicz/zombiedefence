@@ -83,6 +83,8 @@ describe('player operations in the simulation', () => {
       d.flags.outbreak = true;
       d.infected = 400;
       d.medicine = medicine;
+      // No army trucks bringing more in the meantime.
+      t.state.districts.find((x) => x.kind === 'airbase')!.medicine = 0;
       t.step(4 * 60);
       return d.zombies + d.infected;
     };

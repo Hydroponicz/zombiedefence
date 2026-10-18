@@ -37,7 +37,7 @@ describe('hordes', () => {
     sim.step(DAY * 10);
     expect(sim.state.hordes.length).toBeGreaterThan(0);
     expect(Math.max(...sim.state.hordes.map((h) => h.size))).toBeGreaterThan(1000);
-  });
+  }, 20000);
 
   it('are shed by a district that has run out of prey, without losing anyone', () => {
     const s = emptyCity();

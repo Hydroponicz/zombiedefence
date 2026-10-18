@@ -1,5 +1,5 @@
-// Civilian food trucks driving their routes and freight trains running into the rail yard, placed
-// from the simulation's timetables at the smooth game time.
+// Civilian food trucks and the army's supply trucks driving their routes, and freight trains running
+// into the rail yard, placed from the simulation's timetables at the smooth game time.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -7,6 +7,7 @@ import { RAIL, TRAIN_LENGTH, trainPose, truckPose } from '../sim/supply';
 import type { CityState } from '../sim/types';
 
 const MAX_TRUCKS = 120;
+const MAX_ARMY_TRUCKS = 16;
 const MAX_TRAINS = 4;
 const WAGONS = 12;
 const LOCO_LENGTH = 20;
@@ -27,6 +28,7 @@ function coloredBox(w: number, h: number, d: number, x: number, y: number, z: nu
 export class Traffic {
   readonly group = new THREE.Group();
   private trucks: THREE.InstancedMesh;
+  private army: THREE.InstancedMesh;
   private locos: THREE.InstancedMesh;
   private wagons: THREE.InstancedMesh;
   private m = new THREE.Matrix4();
@@ -53,10 +55,17 @@ export class Traffic {
       coloredBox(3.0, 3.4, WAGON_LENGTH, 0, 2.5, 0, 0x8a4b32),
       coloredBox(2.8, 0.9, WAGON_LENGTH - 2, 0, 0.45, 0, 0x1c1c1c),
     ]);
+    // An army supply truck: olive cab and a canvas-topped cargo bed.
+    const armyTruck = mergeGeometries([
+      coloredBox(2.5, 2.2, 2.4, 0, 1.6, -3.2, 0x4f5636),
+      coloredBox(2.5, 2.4, 5.4, 0, 2.0, 1.1, 0x8c7f5c),
+      coloredBox(2.3, 0.9, 8.2, 0, 0.45, -0.4, 0x1c1c1c),
+    ]);
+    this.army = new THREE.InstancedMesh(armyTruck, material, MAX_ARMY_TRUCKS);
     this.trucks = new THREE.InstancedMesh(truck, material, MAX_TRUCKS);
     this.locos = new THREE.InstancedMesh(loco, material, MAX_TRAINS);
     this.wagons = new THREE.InstancedMesh(wagon, material, MAX_TRAINS * WAGONS);
-    for (const mesh of [this.trucks, this.locos, this.wagons]) {
+    for (const mesh of [this.trucks, this.army, this.locos, this.wagons]) {
       mesh.count = 0;
       mesh.frustumCulled = false;
       mesh.castShadow = true;
@@ -78,6 +87,19 @@ export class Traffic {
     }
     this.trucks.count = n;
     this.trucks.instanceMatrix.needsUpdate = true;
+
+    let a = 0;
+    for (const run of state?.logistics.runs ?? []) {
+      if (a >= MAX_ARMY_TRUCKS) break;
+      const p = truckPose(run, time);
+      const rx = Math.cos(p.heading);
+      const rz = -Math.sin(p.heading);
+      this.q.setFromAxisAngle(this.up, p.heading);
+      this.m.compose(this.v.set(p.x + rx * LANE, 0, p.z + rz * LANE), this.q, this.one);
+      this.army.setMatrixAt(a++, this.m);
+    }
+    this.army.count = a;
+    this.army.instanceMatrix.needsUpdate = true;
 
     let locos = 0;
     let wagons = 0;
