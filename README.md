@@ -67,10 +67,24 @@ Streetlights burn at night while a district has grid power.
 
 ## What's in phase 2
 
-- **Living streets** within about 380 m of the helicopter: zombies, civilians and soldiers whose
-  numbers match the simulation (one-for-one while an outbreak is small, compressed for hordes).
+- **Living streets** within about 380 m of the helicopter: zombies, civilians and soldiers.
   Zombies shamble along the streets, chase and bite civilians, who flee and later rise as zombies.
   Soldiers man sandbag posts while their district holds and shoot with tracers.
+- **What you see is what the simulation has.** Everyone on the ground is drawn at one shared scale,
+  one figure a person whenever that fits:
+  - **Civilians:** the district's residents who are out on the streets in the part of it you can
+    see. That's 8% of them by day, 3% at night (2% in the dark), the odd survivor where it's overrun,
+    and none of those inside its shelters. The bitten are among them in the district's proportion.
+  - **The dead:** the district's zombies in the part you can see, and every horde close enough to
+    draw.
+  - **Soldiers:** the troops at the sandbag posts and the guards at the sites in view.
+  - **Police:** officers walking a beat and manning checkpoints (most are in their patrol cars), and
+    riot squads that are out.
+  - **The scale:** with more than can be drawn (a big horde in view), everyone is scaled down
+    together so the mix stays true, and the district panel says how many people each figure stands for.
+  - **What your door guns kill is gone from the simulation too:** each figure counts for as many as
+    it stands for. New arrivals walk in from the edge of view rather than appearing beside you, and
+    small differences wait, so a street you've cleared stays clear for a while.
 - **Rotor noise:** hovering under 70 m draws nearby zombies toward the helicopter (the HUD shows
   how many) and is reported to the simulation, which pulls hordes in from neighbouring districts.
 - **The collapse from afar:** smoke columns and street fires over contested, rioting and overrun

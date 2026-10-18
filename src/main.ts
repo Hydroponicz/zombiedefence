@@ -135,6 +135,9 @@ ops.onToast = (text) => hud.toast(text, 2.5);
 input.onGamepadChange = (name) => hud.toast(name ? 'Controller connected' : 'Controller disconnected', 2);
 
 let paused = false;
+/** Door-gun kills not yet reported to the simulation, by district. */
+const doorGunKills = new Map<number, number>();
+let killReportTimer = 0;
 /** A radio call was up last frame (to free the mouse once when one appears). */
 let radioWasUp = false;
 let respawnTimer = 0;
@@ -366,7 +369,19 @@ function update(dt: number): void {
   agents.update(dt, heli.position, altitude, heli.destroyed ? 0 : heli.rotor, state, night, clearance, sim.time);
   // The door gun fires as well as a few troops at the doors would.
   const doorGun = state && hasResearch(state, 'doorGun') ? DOOR_GUN_SHOOTERS : 0;
-  if (!heli.destroyed) agents.doorGunners(dt, heli.position, (state?.cargo.troops ?? 0) + doorGun);
+  if (!heli.destroyed) {
+    // What the door guns kill is gone from the simulation too: each figure is 1 / scale of the dead.
+    const kills = agents.doorGunners(dt, heli.position, (state?.cargo.troops ?? 0) + doorGun);
+    const district = districtAt(heli.position.x, heli.position.z);
+    if (kills > 0 && district >= 0) doorGunKills.set(district, (doorGunKills.get(district) ?? 0) + kills / agents.scale);
+  }
+  killReportTimer -= dt;
+  if (killReportTimer <= 0) {
+    killReportTimer = 1;
+    for (const [district, count] of doorGunKills) sim.command({ type: 'killZombies', district, count });
+    doorGunKills.clear();
+  }
+  hud.figureScale = agents.scale;
   lures.update(dt);
   requests.update(dt, state, sim.time, heli.position, altitude);
   radio.update(dt, state, heli.position, (r) => (state ? requestTarget(state, r, sim.time) : null));

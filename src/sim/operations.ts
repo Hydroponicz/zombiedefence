@@ -3,6 +3,7 @@
 // one crate, so the game can pace them (and a hot landing zone can interrupt them).
 
 import { replaceHelicopter } from './campaign';
+import { districtAt } from './layout';
 import { assignable, credit, overwatch } from './requests';
 import { deliver, deliveryEffect, deliveryPlace } from './supplies';
 import { hasResearch, LURE_CAPACITY, LURE_HOURS, researchBlocked, startResearch } from './research';
@@ -97,6 +98,8 @@ export type PlayerCommand =
   | { type: 'overwatch'; request: number }
   /** Where the next army platoon goes (null: Command's choice), or hold them at the airport. */
   | { type: 'setPlatoon'; target: number | null; hold: boolean }
+  /** The dead the player's own guns killed on the ground (in the simulation's numbers). */
+  | { type: 'killZombies'; district: number; count: number }
   /** Spend research points on a project. */
   | { type: 'research'; id: ResearchId }
   /** At a base, once researched: take a noise lure aboard. */
@@ -205,6 +208,8 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
       return true;
     case 'research':
       return researchBlocked(s, cmd.id) === null;
+    case 'killZombies':
+      return !!s.districts[cmd.district] && cmd.count > 0;
     case 'loadLure':
       return hasResearch(s, 'noiseLures') && c.lures < LURE_CAPACITY;
     case 'dropLure':
@@ -373,6 +378,23 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       return overwatch(s, cmd.request, emit);
     case 'research':
       return startResearch(s, cmd.id, emit);
+    case 'killZombies': {
+      // From the district's own dead first, then any horde there.
+      const d = s.districts[cmd.district];
+      let left = cmd.count;
+      const own = Math.min(left, d.zombies);
+      d.zombies -= own;
+      left -= own;
+      for (const h of s.hordes) {
+        if (left <= 0) break;
+        if (districtAt(h.x, h.z) !== d.id) continue;
+        const n = Math.min(left, h.size);
+        h.size -= n;
+        left -= n;
+      }
+      d.dead += cmd.count - left;
+      return true;
+    }
     case 'loadLure':
       c.lures += 1;
       return true;

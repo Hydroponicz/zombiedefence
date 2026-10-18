@@ -67,6 +67,8 @@ const LOW_FUEL = 0.2;
 const BINGO_FUEL = 0.1;
 
 export class Hud {
+  /** The view's scale (see Agents): each figure on the ground stands for 1 / scale people. */
+  figureScale = 1;
   private clock = el('hud-clock');
   private district = el('hud-district');
   private flight = el('hud-flight');
@@ -214,8 +216,10 @@ export class Hud {
       : '';
     const roads = district && traffic && district.kind !== 'airbase' && district.kind !== 'army' ? roadStatus(traffic, district.id) : '';
     const need = district ? needs(district, sites).join(' · ') : '';
+    // When there's too much to draw one to one, each figure stands for a few.
+    const each = this.figureScale < 0.95 ? Math.round(1 / this.figureScale) : 1;
     const key = district
-      ? `${need}|${roads}|${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${district?.police.stage}|${siteLine}|${near}`
+      ? `${each}|${need}|${roads}|${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${district?.police.stage}|${siteLine}|${near}`
       : 'none';
     if (key !== this.lastDistrictKey) {
       this.lastDistrictKey = key;
@@ -227,6 +231,7 @@ export class Hud {
            ${siteLine ? `<div class="meta">Sites: ${siteLine}</div>` : ''}
            ${roads ? `<div class="meta">Roads: ${roads}</div>` : ''}
            ${need ? `<div class="meta need">Needs: ${need}</div>` : ''}
+           ${each > 1 ? `<div class="meta">On the ground, each figure ≈ ${each} people</div>` : ''}
            ${near ? `<div class="meta site ${nearby!.status}">${SITE_LABELS[nearby!.kind]}: ${near}</div>` : ''}`
         : `<div class="name">Outside the city</div>`;
     }

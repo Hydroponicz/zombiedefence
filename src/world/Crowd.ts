@@ -19,7 +19,7 @@ import type { CityState, Horde } from '../sim/types';
 import { walkable, type WalkGrid } from './City';
 
 export const CROWD_CAPACITY = 9000;
-const RESIDENT_CAP = 1800;
+const RESIDENT_CAP = CROWD_CAPACITY - 200;
 /** Residents are kept within this radius of the helicopter; hordes are drawn from much further. */
 export const RESIDENT_RADIUS = 380;
 const RESIDENT_DESPAWN = 470;
@@ -290,7 +290,13 @@ export class Crowd {
    * and the hordes within sight.
    * @param share fraction of each district's area inside the resident radius
    */
-  reconcile(state: CityState, cx: number, cz: number, share: Map<number, number>): void {
+  /**
+   * Match the dead on screen to the simulation, at the view's scale (one figure for 1 / scale of the
+   * dead, the same for everyone on the ground: see Agents).
+   * @param fill the helicopter has just arrived (or jumped): fill the view at once, anywhere in it;
+   *   otherwise new arrivals come in from the edge of view, and small differences wait
+   */
+  reconcile(state: CityState, cx: number, cz: number, share: Map<number, number>, scale = 1, fill = false): void {
     const base = state.districts.find((d) => d.kind === 'airbase');
     if (base && !state.flags.baseOpen) {
       const c = districtCenter(base.col, base.row);
@@ -312,38 +318,40 @@ export class Crowd {
     const wants: [number, number][] = [];
     let total = 0;
     for (const [d, frac] of share) {
-      const want = visibleResidents(state.districts[d].zombies) * frac;
+      const want = state.districts[d].zombies * frac * scale;
       wants.push([d, want]);
       total += want;
     }
-    const scale = total > RESIDENT_CAP ? RESIDENT_CAP / total : 1;
-    let budget = SPAWNS_PER_RECONCILE;
+    let budget = fill ? CROWD_CAPACITY : SPAWNS_PER_RECONCILE;
     let residentCount = 0;
+    const cap = total > RESIDENT_CAP ? RESIDENT_CAP / total : 1;
     for (const [d, want] of wants) {
-      const target = Math.round(want * scale);
+      const target = Math.round(want * cap);
       const have = residents.get(d) ?? [];
       residentCount += Math.min(target, have.length);
-      if (have.length > target) {
+      // Small differences wait, so the dead you just shot don't walk straight back in.
+      const slack = fill ? 0 : Math.max(3, target * 0.08);
+      // None at all is none, though.
+      if (have.length > target + slack || (target === 0 && have.length > 0)) {
         have.sort((a, b) => dist2(this.x[b], this.z[b], cx, cz) - dist2(this.x[a], this.z[a], cx, cz));
         for (let n = 0; n < have.length - target; n++) this.remove[have[n]] = 1;
-      } else {
-        for (let n = have.length; n < target && budget > 0; n++, budget--) this.spawnInDistrict(d, cx, cz);
+      } else if (have.length < target - slack) {
+        for (let n = have.length; n < target && budget > 0; n++, budget--) this.spawnInDistrict(d, cx, cz, fill);
       }
     }
     for (const [d, list] of residents) if (!share.has(d)) for (const i of list) this.remove[i] = 1;
 
     // Hordes.
     // Nearest first, so the spawn budget fills the horde in front of the player before distant ones.
-    const visible = state.hordes
-      .filter((h) => Math.hypot(h.x - cx, h.z - cz) < HORDE_VIEW + formationLength(h.size))
-      .sort((a, b) => dist2(a.x, a.z, cx, cz) - dist2(b.x, b.z, cx, cz));
+    const visible = hordesInView(state, cx, cz).sort((a, b) => dist2(a.x, a.z, cx, cz) - dist2(b.x, b.z, cx, cz));
     const room = Math.max(0, CROWD_CAPACITY - residentCount - 50);
-    const sum = visible.reduce((n, h) => n + h.size, 0);
+    const sum = visible.reduce((n, h) => n + h.size * scale, 0);
     for (const t of this.tracks.values()) t.seen = false;
     for (const h of visible) {
       const t = this.track(h, state.t, this.simTime);
       t.seen = true;
-      t.size = Math.min(h.size, HORDE_MEMBER_CAP, sum > room ? (room * h.size) / sum : h.size);
+      const size = h.size * scale;
+      t.size = Math.min(size, HORDE_MEMBER_CAP, sum > room ? (room * size) / sum : size);
     }
     const members = new Map<number, number[]>();
     for (let i = 0; i < this.count; i++) {
@@ -455,9 +463,10 @@ export class Crowd {
     return { dx, dz, half: streetHalf(ax, az, bx, bz) };
   }
 
-  private spawnInDistrict(district: number, cx: number, cz: number): void {
+  /** @param fill anywhere in view; else out at its edge, drifting in */
+  private spawnInDistrict(district: number, cx: number, cz: number, fill = true): void {
     for (let attempt = 0; attempt < 8; attempt++) {
-      const r = RESIDENT_RADIUS * Math.sqrt(this.rand());
+      const r = fill ? RESIDENT_RADIUS * Math.sqrt(this.rand()) : RESIDENT_RADIUS * (0.75 + 0.25 * this.rand());
       const a = this.rand() * Math.PI * 2;
       const x = cx + Math.cos(a) * r;
       const z = cz + Math.sin(a) * r;
@@ -921,8 +930,9 @@ export class Crowd {
 }
 
 /** Residents shown for a district's zombie count: one-for-one while few, compressed when many. */
-function visibleResidents(z: number): number {
-  return z <= 400 ? z : 400 + (z - 400) * 0.15;
+/** Hordes close enough to be drawn. */
+export function hordesInView(state: CityState, cx: number, cz: number): Horde[] {
+  return state.hordes.filter((h) => Math.hypot(h.x - cx, h.z - cz) < HORDE_VIEW + formationLength(h.size));
 }
 
 function formationLength(size: number): number {

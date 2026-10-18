@@ -15,7 +15,7 @@ import { BLOCKS_PER_DISTRICT, nearestNode, neighbors, nodeX, nodeZ, NODES_X, NOD
 import type { CityState, DistrictState } from '../sim/types';
 import type { WalkGrid } from './City';
 import { cityLight, Glow, vehicleLamps } from './CityLight';
-import { Crowd, CROWD_CAPACITY, RESIDENT_RADIUS, type HumanRef } from './Crowd';
+import { Crowd, CROWD_CAPACITY, hordesInView, RESIDENT_RADIUS, type HumanRef } from './Crowd';
 import type { Effects } from './Effects';
 
 const enum Kind {
@@ -105,20 +105,15 @@ const SKINS = [0xe0b48f, 0xb98563, 0x8d5a3b, 0xf1c9a5];
 export const ACTIVE_RADIUS = RESIDENT_RADIUS;
 const DESPAWN_RADIUS = 470;
 const RECONCILE_SECONDS = 0.5;
-const SPAWNS_PER_RECONCILE = 40;
-const CAPACITY = { [Kind.Civilian]: 320, [Kind.Soldier]: 120, [Kind.Police]: 80, [Kind.Riot]: 60, [Kind.Bitten]: 60 } as const;
+const SPAWNS_PER_RECONCILE = 120;
+const CAPACITY = { [Kind.Civilian]: 1500, [Kind.Soldier]: 220, [Kind.Police]: 140, [Kind.Riot]: 72, [Kind.Bitten]: 240 } as const;
 /** Marks an officer standing at a checkpoint rather than walking a beat. */
 const CHECKPOINT_POST = 1000;
 /** Sensor pips for people (the crowd has its own capacity). */
-const PIP_PEOPLE = 800;
+const PIP_PEOPLE = 2200;
 const PIP_DEAD = 0xff2a1a;
-/** Bitten people seen among the living on the street, at most per district in view. */
-const BITTEN_VISIBLE = 14;
 /** A civilian bitten on screen staggers this long, then collapses and rises. */
 const BITTEN_SECONDS = 18;
-/** Police on the street at most per district in view (the rest are elsewhere in the district). */
-const POLICE_VISIBLE = 30;
-const RIOT_VISIBLE = 20;
 const PISTOL_RANGE = 45;
 /** Officers on a foot patrol, together: 2 or 3. */
 const PATROL_GROUP = [2, 3];
@@ -139,12 +134,26 @@ const POSTS_PER_DISTRICT = 3;
 const DOOR_GUN_RANGE = 70;
 const DOOR_GUN_SHOTS_PER_TROOP = 0.8;
 
-/** Roughly 4% of a district's people are out on the streets by day. */
-function visibleCivilians(d: DistrictState, night: boolean): number {
-  const base = Math.min(d.population * 0.04, 1600);
-  const indoors = d.status === 'overrun' ? 0.04 : night ? (d.power === 'dark' ? 0.3 : 0.55) : 1;
-  return base * indoors;
+/** Share of a district's residents out on the streets at any moment (the rest are indoors). */
+export const OUT_BY_DAY = 0.08;
+const OUT_AT_NIGHT = 0.03;
+const OUT_IN_THE_DARK = 0.02;
+const OUT_OVERRUN = 0.02;
+
+/**
+ * A district's people out on the streets: a share of its residents (bar those in shelters), fewer at
+ * night and in the dark, and only the odd survivor where it has been overrun.
+ */
+export function civiliansOut(d: DistrictState, night: boolean): number {
+  const presence = d.status === 'overrun' ? OUT_OVERRUN : night ? (d.power === 'dark' ? OUT_IN_THE_DARK : OUT_AT_NIGHT) : OUT_BY_DAY;
+  return Math.max(0, d.population - d.sheltered) * presence;
 }
+
+/** Figures drawn at most: people, and the dead (crowd and hordes). The view's scale keeps within both. */
+const PEOPLE_BUDGET = 1600;
+const ZOMBIE_BUDGET = CROWD_CAPACITY - 300;
+/** Real officers standing at each checkpoint. */
+const CHECKPOINT_OFFICERS = 4;
 
 export interface AttractInfo {
   active: boolean;
@@ -170,6 +179,12 @@ export class Agents {
   private truckMesh!: THREE.InstancedMesh;
   private truckPhase!: THREE.InstancedBufferAttribute;
   private state: CityState | null = null;
+  /**
+   * The view's scale: each figure on the ground stands for 1 / scale people (or dead), the same for
+   * everyone, so what you see is in proportion to the simulation's numbers.
+   */
+  scale = 1;
+  private filledAt = { x: NaN, z: NaN };
   private rand: () => number;
   private reconcileTimer = 0;
   /** Street posts, and posts at strategic sites (`site` set; their sandbags are drawn by Sites). */
@@ -238,8 +253,11 @@ export class Agents {
     if (state && this.reconcileTimer <= 0) {
       this.reconcileTimer = RECONCILE_SECONDS;
       const share = this.areaShare(cx, cz);
-      this.reconcile(state, cx, cz, night > 0.5, share);
-      this.crowd.reconcile(state, cx, cz, share);
+      // Arriving (or jumping) somewhere fills the view at once; otherwise people come and go at its edge.
+      const fill = !(Math.hypot(cx - this.filledAt.x, cz - this.filledAt.z) < 200);
+      if (fill || Math.hypot(cx - this.filledAt.x, cz - this.filledAt.z) > 100) this.filledAt = { x: cx, z: cz };
+      this.reconcile(state, cx, cz, night > 0.5, share, fill);
+      this.crowd.reconcile(state, cx, cz, share, this.scale, fill);
     }
 
     this.rebuildGrid();
@@ -313,7 +331,7 @@ export class Agents {
 
   // --- Reconciliation with the simulation -----------------------------------------------
 
-  private reconcile(state: CityState, cx: number, cz: number, night: boolean, share: Map<number, number>): void {
+  private reconcile(state: CityState, cx: number, cz: number, night: boolean, share: Map<number, number>, fill: boolean): void {
     this.state = state;
     const counts = new Map<string, Person[]>();
     for (const p of this.people) {
@@ -335,21 +353,22 @@ export class Agents {
         const site = sites.get(p.site);
         const guards = site && site.status !== 'fallen' ? site.guards : 0;
         this.postVisible[i] = guards >= 1;
-        this.postSoldiers[i] = Math.min(8, guards);
+        this.postSoldiers[i] = guards;
         return;
       }
       this.postVisible[i] = d.troops.strength >= 1 && d.status !== 'overrun';
       const posted = state.sites.reduce((n, x) => n + (x.district === d.id ? x.guards : 0), 0);
-      this.postSoldiers[i] = Math.min(Math.max(0, d.troops.strength - posted), 36) / POSTS_PER_DISTRICT;
+      this.postSoldiers[i] = Math.max(0, d.troops.strength - posted) / POSTS_PER_DISTRICT;
     });
     this.updateSandbags();
 
+    // Everyone in view, as the simulation has them: civilians out and about, the bitten among them,
+    // soldiers at the posts in view, officers on foot and at checkpoints, riot squads that are out.
     const targets: [Kind, number, number, boolean?][] = [];
     for (const [district, frac] of share) {
       const d = state.districts[district];
-      // Some of those on the street are the district's hidden bitten.
-      const living = visibleCivilians(d, night) * frac;
-      const bitten = Math.min(living * (d.infected / Math.max(1, d.population + d.infected)), BITTEN_VISIBLE);
+      const living = civiliansOut(d, night) * frac;
+      const bitten = living * (d.infected / Math.max(1, d.population + d.infected));
       targets.push([Kind.Civilian, district, living - bitten]);
       targets.push([Kind.Bitten, district, bitten]);
       let soldiers = 0;
@@ -362,16 +381,27 @@ export class Agents {
         // threes, mostly in the busy shopping and office streets.
         const kind = DISTRICT_TEMPLATES[district].kind;
         const dense = kind === 'downtown' || kind === 'commercial';
-        targets.push([Kind.Police, district, Math.min(d.police.officers * frac * (dense ? 0.3 : 0.06), POLICE_VISIBLE)]);
+        targets.push([Kind.Police, district, d.police.officers * frac * (dense ? 0.3 : 0.06)]);
         // Once there are checkpoints, a few officers man each one in view.
         if (d.police.stage !== 'patrol') {
           const checkpoints = checkpointNodes(d).filter(([i, j]) => Math.hypot(nodeX(i) - cx, nodeZ(j) - cz) < ACTIVE_RADIUS).length;
-          targets.push([Kind.Police, district, Math.min(checkpoints * 3, d.police.officers * frac, POLICE_VISIBLE), true]);
+          targets.push([Kind.Police, district, Math.min(checkpoints * CHECKPOINT_OFFICERS, d.police.officers * frac), true]);
         }
       }
       // Riot squads come out only when called out, with their trucks.
-      if (d.status !== 'overrun' && d.police.riotOut) targets.push([Kind.Riot, district, Math.min(d.police.riot * frac, RIOT_VISIBLE)]);
+      if (d.status !== 'overrun' && d.police.riotOut) targets.push([Kind.Riot, district, d.police.riot * frac]);
     }
+
+    // One scale for all of it, and for the dead (the crowd and the hordes in view): as close to one
+    // figure a person as can be drawn.
+    const people = targets.reduce((n, t) => n + t[2], 0);
+    let dead = 0;
+    for (const [district, frac] of share) dead += state.districts[district].zombies * frac;
+    for (const h of hordesInView(state, cx, cz)) dead += h.size;
+    this.scale = Math.min(1, PEOPLE_BUDGET / Math.max(1, people), ZOMBIE_BUDGET / Math.max(1, dead));
+    for (const t of targets) t[2] *= this.scale;
+    // A riot squad is a few officers at least, or none.
+    for (const t of targets) if (t[0] === Kind.Riot && t[2] < 2) t[2] = 0;
 
     // Respect overall capacity.
     for (const kind of KINDS) {
@@ -380,13 +410,14 @@ export class Agents {
     }
 
     // Each kind gets its own spawn budget so a big crowd can't starve the soldiers.
-    const budget = KINDS.map(() => SPAWNS_PER_RECONCILE);
+    const budget = KINDS.map(() => (fill ? Infinity : SPAWNS_PER_RECONCILE));
     for (const [kind, district, want, checkpoint] of targets) {
       const have = counts.get(`${kind}-${district}${checkpoint ? '-cp' : ''}`) ?? [];
       // Riot squads turn out at least four strong.
       const target = kind === Kind.Riot ? Math.ceil(want / 4) * 4 : Math.round(want);
-      // Groups come and go whole: keep a little slack so they don't flicker.
-      const slack = kind === Kind.Riot ? SQUAD : kind === Kind.Police && !checkpoint ? 3 : 0;
+      // Groups come and go whole, and small differences wait, so figures don't flicker in and out.
+      const slack = kind === Kind.Riot ? SQUAD : kind === Kind.Police && !checkpoint ? 3 : fill ? 0 : Math.floor(Math.max(1, target * 0.06));
+      if (!fill && have.length < target && target - have.length <= slack) continue;
       if (have.length > target + slack || (target === 0 && have.length > 0)) {
         // Remove the furthest first, they are least likely to be watched.
         have.sort((a, b) => Math.hypot(b.x - cx, b.z - cz) - Math.hypot(a.x - cx, a.z - cz));
@@ -397,7 +428,7 @@ export class Agents {
           const d = state.districts[district];
           if (kind === Kind.Police && !checkpoint) {
             // A foot patrol: a lead officer and one or two partners.
-            const lead = this.spawnCivilian(district, cx, cz, kind);
+            const lead = this.spawnCivilian(district, cx, cz, kind, fill);
             if (!lead) continue;
             const size = PATROL_GROUP[Math.floor(this.rand() * PATROL_GROUP.length)];
             for (let k = 0; k < size; k++) {
@@ -421,7 +452,7 @@ export class Agents {
           if (checkpoint && !post) break;
           const p = kind === Kind.Soldier ? this.spawnSoldier(district, cx, cz, have)
             : post ? this.spawnAtCheckpoint(district, post)
-              : this.spawnCivilian(district, cx, cz, kind);
+              : this.spawnCivilian(district, cx, cz, kind, fill);
           // The simulation's bitten turn when it says so; on screen they just stagger about.
           if (p && kind === Kind.Bitten) p.timer = Infinity;
           if (p) {
@@ -483,9 +514,10 @@ export class Agents {
   }
 
   /** Someone walking the streets: a civilian, or a police patrol. */
-  private spawnCivilian(district: number, cx: number, cz: number, kind = Kind.Civilian): Person | null {
+  /** @param fill anywhere in view; else out at its edge, walking in */
+  private spawnCivilian(district: number, cx: number, cz: number, kind = Kind.Civilian, fill = true): Person | null {
     for (let attempt = 0; attempt < 20; attempt++) {
-      const r = ACTIVE_RADIUS * Math.sqrt(this.rand());
+      const r = fill ? ACTIVE_RADIUS * Math.sqrt(this.rand()) : ACTIVE_RADIUS * (0.75 + 0.25 * this.rand());
       const ang = this.rand() * Math.PI * 2;
       const [i, j] = nearestNode(cx + Math.cos(ang) * r, cz + Math.sin(ang) * r);
       const options = neighbors(i, j);

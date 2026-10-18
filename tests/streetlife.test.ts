@@ -4,7 +4,7 @@ import { CitySim, createCity } from '../src/sim/CitySim';
 import { districtCenter } from '../src/sim/layout';
 import { nearestNode, nodeX, nodeZ, roadWidth } from '../src/sim/streets';
 import type { CityState } from '../src/sim/types';
-import { Agents } from '../src/world/Agents';
+import { Agents, OUT_BY_DAY } from '../src/world/Agents';
 import { Cars } from '../src/world/Cars';
 import type { Effects } from '../src/world/Effects';
 
@@ -153,5 +153,54 @@ describe('patrol cars', () => {
     d.zombies = 0;
     for (let k = 0; k < 20 * 30; k++) step();
     expect(people(agents).filter((p) => p.car !== undefined).length).toBe(0);
+  });
+});
+
+describe('what you see on the ground', () => {
+  const inView = (agents: Agents, state: CityState, name: string) => {
+    const d = named(state, name);
+    const c = districtCenter(d.col, d.row);
+    const share = (agents as unknown as { areaShare: (x: number, z: number) => Map<number, number> }).areaShare(c.x + 60, c.z + 60).get(d.id)!;
+    return { d, share };
+  };
+
+  it('matches the simulation one to one when it can: people out on the street, the dead, the soldiers', () => {
+    const s = quiet('one-to-one');
+    const d = named(s, 'Eastside');
+    d.zombies = 400;
+    d.troops.strength = 30;
+    const agents = watch(s, 'Eastside', 6);
+    const { share } = inView(agents, s, 'Eastside');
+    expect(agents.scale).toBe(1);
+    const out = (d.population - d.sheltered) * OUT_BY_DAY * share;
+    const civilians = people(agents).filter((p) => p.kind === CIVILIAN && p.car === undefined).length;
+    expect(civilians).toBeGreaterThan(out * 0.85);
+    expect(civilians).toBeLessThan(out * 1.15);
+    expect(agents.crowd.living()).toBeGreaterThan(400 * share * 0.85);
+    expect(agents.crowd.living()).toBeLessThan(400 * share * 1.15 + 6);
+  });
+
+  it('draws everyone at one shared scale when there are too many to draw', () => {
+    const s = quiet('shared-scale');
+    const d = named(s, 'Eastside');
+    d.zombies = 60000;
+    const agents = watch(s, 'Eastside', 8);
+    const { share } = inView(agents, s, 'Eastside');
+    expect(agents.scale).toBeLessThan(1);
+    const civilians = people(agents).filter((p) => p.kind === CIVILIAN && p.car === undefined).length;
+    // The ratio of the living to the dead on screen is the simulation's.
+    const real = ((d.population - d.sheltered) * OUT_BY_DAY * share) / (60000 * share);
+    const seen = civilians / agents.crowd.living();
+    expect(seen).toBeGreaterThan(real * 0.8);
+    expect(seen).toBeLessThan(real * 1.25);
+  });
+
+  it('door-gun kills come off the simulation\'s count', () => {
+    const s = quiet('kills');
+    const d = named(s, 'Westfield');
+    d.zombies = 100;
+    const sim = new CitySim(s);
+    expect(sim.command({ type: 'killZombies', district: d.id, count: 30 })).toBe(true);
+    expect(d.zombies).toBe(70);
   });
 });
