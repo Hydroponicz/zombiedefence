@@ -175,7 +175,11 @@ The city can't be saved, only emptied.
   - who was flown out, who escaped by road, who you brought in, and which districts fell;
   - what you changed. The day is replayed from its start without your actions and compared, so
     the report says how many more people are alive or out of the city because of you, and which
-    districts held because of you.
+    districts held because of you;
+  - **supplies:** what you and your pilots delivered where, and what it did against the day
+    without you ("Eastside · you: 3,000 medicine · 140 more bitten isolated because of you");
+    what the army's trucks carried; and where shortages cost the most ("Riverside · 220 turned
+    untreated (no medicine for 9 h)", "short of ammunition for 6 h").
 - **The end screen:** how many got out of the city, the lives your own actions saved (the sum of
   the daily differences), a rating, and the campaign day by day. You can fly on with the city
   running freely (Enter / A), or start a new city (N / X).
@@ -384,6 +388,29 @@ Keeping Industrial Park clean keeps the trains running, and the trains feed the 
      their morale holds up longer.
 
   The HUD shows the stage ("Police 28 (checkpoints)").
+
+## Shortages
+
+What a district runs out of shows, and costs it:
+- **Medicine:** with none, the bitten aren't found and isolated; they turn in their homes. The
+  radio says so ("Westfield is out of medicine… about 60 an hour are turning"), and the HUD shows
+  it in red over the district. It ends when medicine arrives, and the radio says so too.
+- **Ammunition for the troops:**
+  - Troops fire for every kill and to hold the dead back. In an outbreak district, with rounds to
+    spare, they also sweep the streets and hunt the dead harder.
+  - A soldier carries 300 rounds and fires about 10 an hour sweeping, so a platoon needs
+    resupplying about every day.
+  - Short of rounds they stop sweeping, fight less well, and hold their fire. On the ground they
+    shoot less often, and only at the dead close by. The radio and HUD say "holding fire".
+- **Ammunition for the police:**
+  - Police draw on their station's armoury.
+  - With it empty, they're down to batons and shields. They fight far worse, and stop firing on
+    the ground.
+  - Ammunition crates and army trucks restock the armoury where there are no troops.
+- **Food:** order falls and riots follow, as before.
+
+Platoons leave the airport with 300 rounds each, not a share of the whole stockpile; the rest goes
+out by truck. Camp Ridgeway's convoys bring only its spare rounds; its soldiers keep their own.
 
 ## Army supply trucks
 

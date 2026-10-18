@@ -16,7 +16,8 @@ import { CRATES } from './operations';
 import { districtAt, districtCenter } from './layout';
 import { nextRandom } from './rng';
 import { nearestNode } from './streets';
-import { DOSES_PER_ISOLATION, foodDays } from './supplies';
+import { recordDelivery } from './daystats';
+import { AMMO_FULL, DOSES_PER_ISOLATION, foodDays, policeAmmo } from './supplies';
 import { truckPose } from './supply';
 import { routesFrom } from './traffic';
 import type { ArmyCargo, ArmyRun, CityState, DistrictState, Logistics, Severity } from './types';
@@ -35,8 +36,9 @@ const MEDICINE_PER_DAY = 0.02;
 const MEDICINE_DAYS = 3;
 /** Days of food the army tops a district up to, where the civilian trucks fall short. */
 const FOOD_DAYS = 1;
-/** Rounds per soldier the troops are kept stocked with. */
-const AMMO_PER_SOLDIER = 250;
+/** Rounds per soldier the troops are kept stocked with, and in each police armoury with no troops. */
+const AMMO_PER_SOLDIER = AMMO_FULL * 2;
+const POLICE_AMMO = 15000;
 /** The airport keeps back crates' worth of each for the helicopters. */
 const RESERVE_CRATES = 3;
 /** A truck lost on the road is replaced with the next morning's supply flight. */
@@ -62,9 +64,13 @@ export function shortage(s: CityState, d: DistrictState): ArmyCargo {
   return {
     medicine: Math.max(0, n * MEDICINE_PER_DAY * MEDICINE_DAYS + isolating - d.medicine - inbound.medicine),
     rations: Math.max(0, (FOOD_DAYS - foodDays(d, s.sites)) * n - inbound.rations),
-    ammo: Math.max(0, d.troops.strength * AMMO_PER_SOLDIER - d.troops.ammo - inbound.ammo),
+    // Troops' rifles; with none, the police's armouries.
+    ammo: Math.max(0, d.troops.strength >= 1 ? d.troops.strength * AMMO_PER_SOLDIER - d.troops.ammo - inbound.ammo
+      : hasStation(s, d) ? POLICE_AMMO - policeAmmo(s, d) - inbound.ammo : 0),
   };
 }
+
+const hasStation = (s: CityState, d: DistrictState) => s.sites.some((x) => x.district === d.id && x.kind === 'police' && x.status !== 'fallen');
 
 /** Days of medicine a district holds at the rate it uses it. */
 export function medicineDays(d: DistrictState): number {
@@ -74,7 +80,8 @@ export function medicineDays(d: DistrictState): number {
 /** How badly a district needs a truck: days of medicine and food short, and ammunition. */
 function urgency(d: DistrictState, short: ArmyCargo): number {
   const n = Math.max(1, people(d));
-  return (short.medicine / (n * MEDICINE_PER_DAY)) * 2 + short.rations / n + short.ammo / Math.max(1, d.troops.strength * AMMO_PER_SOLDIER);
+  const ammoNeed = d.troops.strength >= 1 ? d.troops.strength * AMMO_PER_SOLDIER : POLICE_AMMO;
+  return (short.medicine / (n * MEDICINE_PER_DAY)) * 2 + short.rations / n + (short.ammo / ammoNeed) * 1.5;
 }
 
 /** What the airport's stores can spare for the trucks. */
@@ -121,6 +128,7 @@ function arrivals(s: CityState, emit: Emit): void {
 }
 
 function unload(s: CityState, d: DistrictState, cargo: ArmyCargo, emit: Emit): void {
+  for (const kind of ['medicine', 'rations', 'ammo'] as const) recordDelivery(s, 'trucks', d.id, kind, cargo[kind]);
   d.medicine += cargo.medicine;
   d.rations += cargo.rations;
   if (d.troops.strength >= 1) d.troops.ammo += cargo.ammo;
@@ -225,4 +233,18 @@ export function cargoText(c: ArmyCargo): string {
     c.rations >= 1 && `${Math.round(c.rations).toLocaleString('en-US')} food`,
     c.ammo >= 1 && `${Math.round(c.ammo).toLocaleString('en-US')} rounds`,
   ].filter(Boolean).join(' · ') || 'empty';
+}
+
+/**
+ * What a district's shortages are costing it right now, for the HUD: the bitten turning untreated,
+ * troops holding their fire, police with empty armouries, roads the trucks can't use.
+ */
+export function shortageAlerts(s: CityState, d: DistrictState): string[] {
+  if (d.status === 'overrun' || d.kind === 'airbase' || d.kind === 'army') return [];
+  const out: string[] = [];
+  if (d.flags.medicineOut) out.push(`No medicine: ~${Math.round(d.infected / 4)} bitten turning an hour, untreated`);
+  if (d.flags.ammoLow) out.push(`Troops holding fire: ${Math.round(d.troops.ammo / Math.max(1, d.troops.strength))} rounds each`);
+  if (d.flags.policeDry) out.push('Police out of ammunition: batons only');
+  if (s.logistics.cutOff.includes(d.id)) out.push('Cut off by road: army trucks can\'t get through');
+  return out;
 }

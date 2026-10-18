@@ -471,6 +471,35 @@ export interface DayReport {
   heldBecause: string[];
   /** Districts that fell that would have held without the player. */
   lostAnyway: string[];
+  /** What was delivered where, and what the shortages cost (see daystats.ts). */
+  districts?: ReportedDistrict[];
+}
+
+/** A district's day in the report, with how it would have gone without the player. */
+export interface ReportedDistrict extends DistrictDay {
+  isolatedWithout: number;
+  untreatedWithout: number;
+}
+
+/** Who brought supplies in. */
+export type Deliverer = 'you' | 'pilots' | 'trucks';
+
+/** A district's day: what was delivered, by whom, and what it (or the lack of it) did. */
+export interface DistrictDay {
+  district: number;
+  delivered: Record<Deliverer, ArmyCargo>;
+  /** The bitten found and isolated (with medicine, at checkpoints and in food lines). */
+  isolated: number;
+  /** The bitten who turned, and of them those who turned with no medicine there to isolate them. */
+  turned: number;
+  untreated: number;
+  /** The dead killed by troops and police, and the rounds they fired. */
+  kills: number;
+  rounds: number;
+  /** Hours the troops were short of ammunition, and the police out of it. */
+  dryHours: number;
+  /** Hours without medicine while it had bitten to isolate. */
+  noMedicineHours: number;
 }
 
 export interface HistorySample {
@@ -540,6 +569,8 @@ export interface CityState {
   nextConvoy: number;
   /** Fortification stages the engineers have finished at the airport (0..5). */
   airportWorks: number;
+  /** Each district's day so far, for the morning report (see daystats.ts). */
+  today: DistrictDay[];
   /** Army supply trucks carrying the airport's stock out to the districts. */
   logistics: Logistics;
   /** Movement restrictions in force, and since when. */

@@ -9,6 +9,7 @@
 
 import { DAY_START, dayNumber, MINUTES_PER_DAY } from './clock';
 import type { Campaign, CampaignOutcome, CityState, DayReport, Severity } from './types';
+import { notable } from './daystats';
 
 type Emit = (district: number | null, severity: Severity, text: string, radio?: boolean) => void;
 
@@ -163,6 +164,11 @@ export function compareDay(before: CityState, after: CityState, without: CitySta
     saved: Math.round((living(after) + escaped(after) - (living(without) + escaped(without))) / 10) * 10 || 0,
     heldBecause: fellWithout.filter((n) => !fell.includes(n)),
     lostAnyway: fell.filter((n) => !fellWithout.includes(n)),
+    districts: (after.today ?? []).filter(notable).map((day) => ({
+      ...structuredClone(day),
+      isolatedWithout: without.today?.[day.district]?.isolated ?? 0,
+      untreatedWithout: without.today?.[day.district]?.untreated ?? 0,
+    })),
   };
 }
 
@@ -174,5 +180,9 @@ export function describeReport(r: DayReport): string {
   let text = parts.join(', ') + '.';
   if (r.saved > 0) text += ` Because of you, ${r.saved.toLocaleString('en-US')} more people are alive or out of the city.`;
   if (r.heldBecause.length) text += ` ${r.heldBecause.join(' and ')} held because of you.`;
+  const isolated = Math.round((r.districts ?? []).reduce((n, d) => n + d.isolated - d.isolatedWithout, 0));
+  if (isolated >= 10) text += ` Your deliveries meant ${isolated.toLocaleString('en-US')} more of the bitten were found and isolated.`;
+  const worst = (r.districts ?? []).filter((d) => d.untreated >= 20).sort((a, b) => b.untreated - a.untreated)[0];
+  if (worst) text += ` With no medicine, ${Math.round(worst.untreated).toLocaleString('en-US')} turned untreated in the worst-hit district.`;
   return text;
 }

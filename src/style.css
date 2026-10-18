@@ -59,6 +59,7 @@ html, body {
 #hud-district .meta { font-size: 12px; color: var(--muted); }
 #hud-district .site { color: var(--text); }
 #hud-district .need { color: var(--warn); }
+#hud-district .alert { color: var(--critical); font-weight: 600; }
 #hud-district .site.besieged { color: var(--warn); }
 #hud-district .site.fallen { color: var(--critical); }
 
@@ -276,7 +277,7 @@ kbd {
 #hud-countdown.final { background: rgba(160, 40, 30, 0.75); color: #fff; font-weight: 600; }
 #hud-countdown[hidden] { display: none; }
 
-#hud-report { top: 162px; left: 16px; width: 300px; font-size: 13px; }
+#hud-report { top: 162px; left: 16px; width: 340px; font-size: 13px; }
 #hud-report[hidden] { display: none; }
 #hud-report .title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
 #hud-report table { width: 100%; border-collapse: collapse; }
@@ -285,6 +286,9 @@ kbd {
 #hud-report .impact { margin-top: 8px; font-weight: 600; }
 #hud-report .good, #campaign-end .good { color: var(--held); }
 #hud-report .bad, #campaign-end .bad { color: var(--critical); }
+#hud-report .supplies { margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.12); font-size: 12px; line-height: 1.35; }
+#hud-report .supplies > div { margin-top: 3px; }
+#hud-report .subtitle { font-weight: 600; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
 
 #campaign-end {
   position: fixed;

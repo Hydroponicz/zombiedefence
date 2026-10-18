@@ -9,6 +9,7 @@
 // some of the power grid's staff from work, and wears on people's patience.
 
 import { formatClock, minuteOfDay } from './clock';
+import { dayOf } from './daystats';
 import { hasResearch } from './research';
 import { DOSES_PER_ISOLATION } from './supplies';
 import type { CityState, DistrictState, Policy, Severity, Site } from './types';
@@ -232,6 +233,7 @@ export function foodRun(s: CityState, d: DistrictState, emit: Emit): number {
   const caught = Math.min(inLine, inLine * QUEUE_SCREEN * screen * H);
   const bitten = Math.min(d.population * 0.02, inLine * QUEUE_SPREAD * (1 - screen) * H);
   if (caught > 0) {
+    dayOf(s, d.id).isolated += caught;
     d.infected -= caught;
     // Isolated like any other case: cured with the antiviral, else they die in isolation.
     if (hasResearch(s, 'antiviral') && d.medicine >= caught * DOSES_PER_ISOLATION) {

@@ -5,7 +5,8 @@
 // police). A delivery takes effect at once in the district's supplies. A site under siege loses some
 // of it in the fighting, and a fallen one can't take it at all.
 
-import type { CityState, CrateKind, DistrictState, Site, SiteKind } from './types';
+import { recordDelivery } from './daystats';
+import type { CityState, CrateKind, Deliverer, DistrictState, Site, SiteKind } from './types';
 
 /** Doses of medicine it takes to find and isolate one of the bitten before they turn. */
 export const DOSES_PER_ISOLATION = 10;
@@ -64,12 +65,40 @@ export function deliveryEffect(s: CityState, kind: CrateKind, district: number, 
 }
 
 /** Put a crate's worth into the district (share of it, if the site was under siege). */
-export function deliver(s: CityState, kind: CrateKind, d: DistrictState, share: number): void {
+export function deliver(s: CityState, kind: CrateKind, d: DistrictState, share: number, by: Deliverer): void {
   const amount = AMOUNT[kind] * share;
+  recordDelivery(s, by, d.id, kind, amount);
   if (kind === 'medicine') d.medicine += amount;
   else if (kind === 'rations') d.rations += amount;
   else if (d.troops.strength >= 1) d.troops.ammo += amount;
-  else d.cooldowns.policeArmed = s.t;
+  else {
+    // To the police: into their armoury, and they're armed up for a day.
+    d.cooldowns.policeArmed = s.t;
+    const armoury = s.sites.find((x) => x.district === d.id && x.kind === 'police' && x.status !== 'fallen');
+    if (armoury) armoury.ammo += amount;
+  }
+}
+
+/** Rounds in the district's police armouries (its police stations still standing). */
+export function policeAmmo(s: CityState, d: DistrictState): number {
+  return s.sites.reduce((n, x) => n + (x.district === d.id && x.kind === 'police' && x.status !== 'fallen' ? x.ammo : 0), 0);
+}
+
+/** Whether the district's police have run out of ammunition (with stations whose armouries are empty). */
+export function policeDry(s: CityState, d: DistrictState): boolean {
+  const stations = s.sites.some((x) => x.district === d.id && x.kind === 'police' && x.status !== 'fallen');
+  return stations && policeAmmo(s, d) < 1;
+}
+
+/** Rounds the police fire, drawn from their armouries. */
+export function drawPoliceAmmo(s: CityState, d: DistrictState, rounds: number): void {
+  for (const x of s.sites) {
+    if (rounds <= 0) return;
+    if (x.district !== d.id || x.kind !== 'police' || x.status === 'fallen') continue;
+    const take = Math.min(x.ammo, rounds);
+    x.ammo -= take;
+    rounds -= take;
+  }
 }
 
 /** Whether the district's police are freshly armed from a delivery. */
@@ -92,8 +121,11 @@ export function needsFood(d: DistrictState, sites: Site[]): boolean {
   return foodDays(d, sites) < 1;
 }
 
+/** Rounds per soldier below which troops start holding their fire. */
+export const AMMO_FULL = 150;
+
 export function needsAmmo(d: DistrictState): boolean {
-  return d.troops.strength >= 10 && d.troops.ammo / d.troops.strength < 100;
+  return d.troops.strength >= 10 && d.troops.ammo / d.troops.strength < AMMO_FULL * 0.7;
 }
 
 /**

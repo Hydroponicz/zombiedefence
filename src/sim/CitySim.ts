@@ -18,7 +18,8 @@ import { hasResearch, updateLures } from './research';
 import { fortification, updateConvoys } from './convoys';
 import { createLogistics, updateLogistics } from './logistics';
 import { foodRun, movement, policyUnrest, travel, updatePolicy } from './policy';
-import { DOSES_PER_ISOLATION, policeArmed } from './supplies';
+import { AMMO_FULL, DOSES_PER_ISOLATION, drawPoliceAmmo, policeArmed, policeDry } from './supplies';
+import { dayOf, startDay } from './daystats';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
 
@@ -49,7 +50,17 @@ export const TUNING = {
   soldierCoverage: 250,
   /** Soldier casualties per zombie per hour (before effectiveness). */
   troopLossRate: 0.012,
-  roundsPerKill: 6,
+  roundsPerKill: 12,
+  /** Rounds a soldier fires an hour holding the dead back (before kills), at full engagement. */
+  suppressionRounds: 6,
+  /** Rounds a soldier fires an hour sweeping an infected district's streets for the dead. */
+  sweepRounds: 10,
+  /** How much harder troops with ammunition to spare hunt the dead (at a full load and over). */
+  sweepHunt: 0.35,
+  /** Rounds an officer fires per kill, from the station's armoury. */
+  policeRoundsPerKill: 8,
+  /** How well police fight with their armoury empty (batons and shields). */
+  policeDryShare: 0.55,
   roundsPerSoldier: 300,
   zombieWanderRate: 0.01,
   /** Rations each district starts with, in days. */
@@ -78,7 +89,7 @@ export const TUNING = {
   supplyFlightTroops: 60,
   supplyFlightRations: 8000,
   supplyFlightMedicine: 4000,
-  supplyFlightAmmo: 30000,
+  supplyFlightAmmo: 20000,
   /** Research points per scientist at the base per game hour. */
   researchPerScientist: 1,
   /** Litres per hour a defended fuel depot trucks to the base. */
@@ -92,6 +103,8 @@ export class CitySim {
   private pending: SimEvent[] = [];
   /** The state at the start of the day, to replay without the player for the day's report. */
   private dayStart: CityState | null = null;
+  /** A replay of the day for its report. */
+  private replay = false;
 
   /** @param reports report each day against a replay without the player (the game does; tests mostly don't) */
   constructor(seedOrState: number | string | CityState, private reports = false) {
@@ -106,9 +119,14 @@ export class CitySim {
       if (s.campaign.outcome !== 'running' && !s.flags.freePlay) return;
       const running = s.campaign.outcome === 'running';
       tick(s, this.pending);
-      if (!this.reports) continue;
-      if (running && s.campaign.outcome !== 'running') this.reportDay();
-      else if (s.t % 1440 === 360 && running) this.reportDay();
+      const morning = s.t % 1440 === 360;
+      if (this.reports) {
+        if (running && s.campaign.outcome !== 'running') this.reportDay();
+        else if (morning && running) this.reportDay();
+      }
+      // Each district's tally starts again once the morning report has it (a replay keeps its own
+      // for the report to compare).
+      if (morning && !this.replay) startDay(s);
     }
   }
 
@@ -121,6 +139,7 @@ export class CitySim {
     const s = this.state;
     if (before && s.t > before.t) {
       const without = new CitySim(structuredClone(before));
+      without.replay = true;
       // The replay plays out the same day, and isn't stopped by the campaign ending in it.
       without.state.flags.freePlay = true;
       without.step(s.t - before.t);
@@ -129,6 +148,8 @@ export class CitySim {
       makeEmit(s, this.pending)(null, 'info', describeReport(report), true);
     }
     this.dayStart = structuredClone(s);
+    // The replay of the coming day tallies it from nothing, as the day itself will.
+    startDay(this.dayStart);
   }
 
   /** A player action (loading, deploying, boarding...). Returns whether it happened. */
@@ -179,6 +200,7 @@ export function createCity(seed: number | string): CityState {
     convoySeq: 0,
     nextConvoy: 0,
     airportWorks: 0,
+    today: [],
     logistics: createLogistics(),
     policy: 'unrestricted',
     policySince: 0,
@@ -254,6 +276,7 @@ export function createCity(seed: number | string): CityState {
   first.population -= TUNING.outbreakStartInfected;
 
   createSites(state);
+  startDay(state);
   initialFleet(state);
   sampleHistory(state);
   state.campaign.startPopulation = state.districts.reduce((n, d) => n + d.population + d.infected, 0);
@@ -442,14 +465,16 @@ function policeEffectiveness(s: CityState, d: DistrictState, night: boolean): nu
   const light = night ? (d.power === 'dark' ? 0.6 : 0.85) : 1;
   // Working alongside soldiers, they fight better; so they do with ammunition flown in.
   const support = d.police.stage === 'support' ? 1.2 : 1;
-  const armed = policeArmed(s, d) ? 1.3 : 1;
+  // Freshly armed from a delivery, they fight better; with their armoury empty, far worse.
+  const armed = policeDry(s, d) ? TUNING.policeDryShare : policeArmed(s, d) ? 1.3 : 1;
   return (0.35 + 0.65 * d.police.morale) * light * (d.rioting ? 0.8 : 1) * support * armed;
 }
 
 function effectiveness(d: DistrictState, night: boolean): number {
   const tr = d.troops;
   if (tr.strength < 0.5) return 0;
-  const ammoF = clamp(tr.ammo / Math.max(1, tr.strength * 60), 0.1, 1);
+  // Short of rounds, they hold their fire.
+  const ammoF = clamp(tr.ammo / Math.max(1, tr.strength * AMMO_FULL), 0.1, 1);
   const light = night ? (d.power === 'dark' ? 0.6 : 0.85) : 1;
   return ammoF * (1 - 0.6 * tr.fatigue) * (0.35 + 0.65 * tr.morale) * light * (d.rioting ? 0.6 : 1);
 }
@@ -491,9 +516,12 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   let civDeaths = encounters * 0.1;
   const civKills = Math.min(Z, encounters * 0.15);
 
-  // Soldiers kill far better than the police: rifles and training against pistols and batons.
+  // Soldiers kill far better than the police: rifles and training against pistols and batons. With
+  // ammunition to spare they sweep the streets and hunt the dead down; short of it, they only defend.
+  const perSoldier = T >= 1 ? tr.ammo / T : 0;
+  const sweep = d.flags.outbreak && T >= 1 ? clamp(perSoldier / AMMO_FULL, 0, 1) * (perSoldier >= AMMO_FULL * 0.3 ? 1 : 0) : 0;
   const policePower = (O * TUNING.officerKillShare + R * TUNING.riotKillShare) * pe;
-  const killers = T * e + policePower;
+  const killers = T * e * (1 + TUNING.sweepHunt * sweep) + policePower;
   const fighterKills = Math.min(
     Z - civKills,
     killers * TUNING.soldierKillRate * H * (Z / (Z + TUNING.huntHalfSaturation + P * TUNING.huntPerCivilian)),
@@ -531,7 +559,16 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const hordeLosses = kills * (1 - residentShare);
   d.zombies = Math.max(0, d.zombies - kills * residentShare);
   tr.strength = Math.max(0, T - troopLoss);
-  tr.ammo = Math.max(0, tr.ammo - soldierKills * TUNING.roundsPerKill);
+  // Rounds for every kill, and more to hold the dead back while they come on.
+  const engaged = Math.min(1, Z / 60);
+  const rounds = soldierKills * TUNING.roundsPerKill + T * e * (TUNING.suppressionRounds * engaged + TUNING.sweepRounds * sweep) * H;
+  tr.ammo = Math.max(0, tr.ammo - rounds);
+  const policeRounds = (fighterKills - soldierKills) * TUNING.policeRoundsPerKill;
+  drawPoliceAmmo(s, d, policeRounds);
+  const today = dayOf(s, d.id);
+  today.kills += kills;
+  today.rounds += rounds + policeRounds;
+  if ((T >= 10 && tr.ammo / T < AMMO_FULL * 0.4) || (T < 1 && O + pol.riot >= 5 && policeDry(s, d))) today.dryHours += H;
   if (tr.strength < 0.5) {
     tr.strength = 0;
   }
@@ -540,6 +577,7 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   // they turn: they die in isolation, or with the antiviral, are cured.
   if (d.flags.outbreak && d.medicine > 0 && d.infected > 0) {
     const isolated = Math.min(d.infected * TUNING.isolationRate * H, d.medicine / DOSES_PER_ISOLATION);
+    dayOf(s, d.id).isolated += isolated;
     d.infected -= isolated;
     d.medicine -= isolated * DOSES_PER_ISOLATION;
     if (hasResearch(s, 'antiviral')) d.population += isolated;
@@ -550,6 +588,14 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const turned = d.infected * (H / TUNING.turnHours);
   d.infected -= turned;
   d.zombies += turned;
+  // What a shortage of medicine costs: the bitten turn in their homes, never found.
+  const untreated = d.flags.outbreak && d.medicine < 1;
+  today.turned += turned;
+  if (untreated) {
+    today.untreated += turned;
+    if (d.infected >= 1) today.noMedicineHours += H;
+  }
+  shortages(s, d, emit);
 
   d.killRate = d.killRate * 0.95 + (kills / H) * 0.05;
   d.noise = d.noise * 0.9 + clamp(d.killRate / 50, 0, 2) * 0.1;
@@ -669,6 +715,39 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
 }
 
 /**
+ * Shortages on the radio, as they start and end: the bitten turning with no medicine to isolate
+ * them; troops holding their fire; police with empty armouries.
+ */
+function shortages(s: CityState, d: DistrictState, emit: Emit): void {
+  if (d.status === 'overrun' || d.kind === 'airbase') return;
+  const report = (flag: string, on: boolean, start: string, end: string) => {
+    if (on && !d.flags[flag]) {
+      d.flags[flag] = true;
+      emit(d.id, 'warn', start, true);
+    } else if (!on && d.flags[flag]) {
+      d.flags[flag] = false;
+      emit(d.id, 'info', end);
+    }
+  };
+  const T = d.troops.strength;
+  const hours = Math.round(d.infected / TUNING.turnHours);
+  // With some hysteresis, so a trickle of supply doesn't flicker the reports.
+  const noMedicine = d.flags.medicineOut ? d.medicine < 200 : d.flags.outbreak === true && d.medicine < 1 && d.infected >= 20;
+  report('medicineOut', noMedicine,
+    `${d.name} is out of medicine. The bitten aren't being found and isolated: about ${hours} an hour are turning in their homes.`,
+    `Medicine has reached ${d.name}: the bitten are being found and isolated again.`);
+  const perSoldier = T >= 1 ? d.troops.ammo / T : Infinity;
+  const lowAmmo = d.flags.ammoLow ? T >= 10 && perSoldier < AMMO_FULL * 0.6 : T >= 10 && perSoldier < AMMO_FULL * 0.4;
+  report('ammoLow', lowAmmo,
+    `Troops in ${d.name} are running out of ammunition and holding their fire. The dead are getting closer.`,
+    `Troops in ${d.name} have been resupplied with ammunition.`);
+  const dry = T < 1 && d.police.officers + d.police.riot >= 5 && policeDry(s, d);
+  report('policeDry', dry,
+    `The police in ${d.name} are out of ammunition: they're down to batons and shields.`,
+    `The police in ${d.name} have ammunition again.`);
+}
+
+/**
  * Police morale wears down day by day, with losses, riots and darkness; below about a third
  * officers start walking off the job, back to their families (they become civilians).
  */
@@ -716,6 +795,7 @@ function updatePolice(s: CityState, d: DistrictState, night: boolean, fear: numb
   if (pol.stage !== 'patrol' && d.infected > 0) {
     // Rapid tests catch twice as many.
     const screened = d.infected * 0.02 * (hasResearch(s, 'rapidTests') ? 2 : 1) * Math.min(1, pol.officers / 40) * pol.morale * H;
+    dayOf(s, d.id).isolated += screened;
     d.infected -= screened;
     d.dead += screened;
   }

@@ -2,10 +2,12 @@
 // and the end screen with the score.
 
 import { escaped, finalEvacuation, minutesLeft, rating, savedByPlayer } from '../sim/campaign';
-import type { CityState, DayReport } from '../sim/types';
+import type { ArmyCargo, CityState, DayReport } from '../sim/types';
 
 /** How long a morning report stays up, in real seconds. */
-const REPORT_SECONDS = 30;
+const REPORT_SECONDS = 40;
+/** Lines of supply news in a report, at most. */
+const SUPPLY_LINES = 5;
 
 const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
 
@@ -44,7 +46,7 @@ export class CampaignView {
     if (this.seenReports < 0) this.seenReports = n;
     if (n > this.seenReports) {
       this.seenReports = n;
-      this.showReport(s.campaign.reports[n - 1]);
+      this.showReport(s.campaign.reports[n - 1], s);
     }
     if (this.reportTimer > 0) {
       this.reportTimer -= dt;
@@ -87,7 +89,7 @@ export class CampaignView {
     this.countdown.className = cls;
   }
 
-  private showReport(r: DayReport): void {
+  private showReport(r: DayReport, s: CityState): void {
     const rows: [string, string][] = [
       ['Flown out of the city', fmt(r.flownOut)],
       ['Escaped by road', fmt(r.fled)],
@@ -105,7 +107,7 @@ export class CampaignView {
     this.report.innerHTML = `<div class="title">Day ${r.day} report</div>
       <table>${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
       <div class="impact ${r.saved > 0 ? 'good' : r.saved < 0 ? 'bad' : ''}">${impact(r.saved)}</div>
-      ${lines.join('')}`;
+      ${lines.join('')}${supplies(r, s)}`;
     this.report.hidden = false;
     this.reportTimer = REPORT_SECONDS;
   }
@@ -135,6 +137,49 @@ export class CampaignView {
     </div>`;
     this.end.hidden = false;
   }
+}
+
+const cargo = (c: ArmyCargo) => [
+  c.medicine >= 1 && `${fmt(c.medicine)} medicine`,
+  c.rations >= 1 && `food for ${fmt(c.rations)}`,
+  c.ammo >= 1 && `${fmt(c.ammo)} rounds`,
+].filter(Boolean).join(', ');
+const anyOf = (c: ArmyCargo) => c.medicine + c.rations + c.ammo >= 1;
+
+/**
+ * The day's supplies: what you and your pilots brought where and what it did (against the day
+ * without you), what the army's trucks carried, and where shortages cost the most.
+ */
+function supplies(r: DayReport, s: CityState): string {
+  const days = r.districts ?? [];
+  if (!days.length) return '';
+  const name = (id: number) => s.districts[id]?.name ?? '?';
+  const out: string[] = [];
+  for (const d of days) {
+    const mine = [anyOf(d.delivered.you) && `you: ${cargo(d.delivered.you)}`, anyOf(d.delivered.pilots) && `pilots: ${cargo(d.delivered.pilots)}`].filter(Boolean);
+    if (!mine.length) continue;
+    const more = Math.round(d.isolated - d.isolatedWithout);
+    const effect = more >= 5 ? ` · <span class="good">${fmt(more)} more bitten isolated because of you</span>` : '';
+    out.push(`<div><b>${name(d.district)}</b> · ${mine.join(' · ')}${effect}</div>`);
+  }
+  const trucks = days.filter((d) => anyOf(d.delivered.trucks));
+  if (trucks.length) {
+    const total = trucks.reduce((a, d) => ({ medicine: a.medicine + d.delivered.trucks.medicine, rations: a.rations + d.delivered.trucks.rations, ammo: a.ammo + d.delivered.trucks.ammo }),
+      { medicine: 0, rations: 0, ammo: 0 });
+    out.push(`<div>Army trucks: ${cargo(total)} to ${trucks.length} district${trucks.length > 1 ? 's' : ''}</div>`);
+  }
+  const short = days
+    .filter((d) => d.untreated >= 20 || d.dryHours >= 2)
+    .sort((a, b) => b.untreated + b.dryHours * 50 - (a.untreated + a.dryHours * 50));
+  for (const d of short) {
+    const costs = [
+      d.untreated >= 20 && `${fmt(d.untreated)} turned untreated (no medicine for ${Math.round(d.noMedicineHours)} h)`,
+      d.dryHours >= 2 && `short of ammunition for ${Math.round(d.dryHours)} h`,
+    ].filter(Boolean).join(' · ');
+    out.push(`<div class="bad"><b>${name(d.district)}</b> · ${costs}</div>`);
+  }
+  if (!out.length) return '';
+  return `<div class="supplies"><div class="subtitle">Supplies</div>${out.slice(0, SUPPLY_LINES + 1).join('')}</div>`;
 }
 
 function impact(saved: number): string {

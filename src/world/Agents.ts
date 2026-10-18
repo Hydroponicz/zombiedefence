@@ -12,6 +12,7 @@ import { makeRandom } from '../sim/rng';
 import { planSites } from '../sim/sites';
 import { checkpointNodes } from '../sim/traffic';
 import { compliance, foodPoints, foodRunOn, foodSource, movement } from '../sim/policy';
+import { AMMO_FULL } from '../sim/supplies';
 import { BLOCKS_PER_DISTRICT, nearestNode, neighbors, nodeX, nodeZ, NODES_X, NODES_Z, roadWidth, SIDEWALK, stepToward } from '../sim/streets';
 import type { CityState, DistrictState } from '../sim/types';
 import type { WalkGrid } from './City';
@@ -793,7 +794,9 @@ export class Agents {
   private updateSoldier(p: Person, dt: number): void {
     p.cooldown -= dt;
     if (p.cooldown > 0) return;
-    const target = this.crowd.nearest(p.x, p.z, SHOOT_RANGE);
+    // Short of rounds, they hold their fire until the dead are close, and shoot less often.
+    const fire = this.firepower(p.district);
+    const target = this.crowd.nearest(p.x, p.z, SHOOT_RANGE * (0.35 + 0.65 * fire));
     if (target < 0) {
       p.cooldown = 0.5;
       return;
@@ -801,7 +804,7 @@ export class Agents {
     const tx = this.crowd.posX(target);
     const tz = this.crowd.posZ(target);
     p.heading = Math.atan2(-(tx - p.x), -(tz - p.z));
-    p.cooldown = 0.5 + this.rand() * 1.2;
+    p.cooldown = (0.5 + this.rand() * 1.2) / fire;
     const hit = this.rand() < 0.3;
     const miss = hit ? 0 : 3;
     this.effects.tracer(
@@ -809,6 +812,13 @@ export class Agents {
       tx + (this.rand() - 0.5) * miss, 1.0 + this.rand() * 0.8, tz + (this.rand() - 0.5) * miss,
     );
     if (hit) this.crowd.kill(target);
+  }
+
+  /** How freely a district's troops fire: 1 with rounds to spare, down to 0.15 nearly out. */
+  private firepower(district: number): number {
+    const d = this.state?.districts[district];
+    if (!d || d.troops.strength < 1) return 1;
+    return Math.max(0.15, Math.min(1, d.troops.ammo / d.troops.strength / AMMO_FULL));
   }
 
   /** The bitten stagger along, dazed, until they collapse and turn. */
@@ -827,7 +837,9 @@ export class Agents {
   /** Patrol officers walk their beat and stop to fire their pistols at the dead nearby. */
   private updateOfficer(p: Person, dt: number): void {
     p.cooldown -= dt;
-    const target = p.recalled ? -1 : this.crowd.nearest(p.x, p.z, PISTOL_RANGE);
+    // With their armoury empty, officers have nothing to fire.
+    const dry = !!this.state?.districts[p.district]?.flags.policeDry;
+    const target = p.recalled || dry ? -1 : this.crowd.nearest(p.x, p.z, PISTOL_RANGE);
     if (target < 0) {
       // Checkpoint officers hold their post; a car's crew stands by its car (or gets back in);
       // patrols walk their beat together.

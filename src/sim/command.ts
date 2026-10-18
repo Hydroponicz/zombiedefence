@@ -32,7 +32,7 @@ export function createArmy(): DistrictState {
     id: ARMY_ID, name: ARMY_BASE.name, kind: 'army', col: -1, row: -1, neighbors: [],
     features: { fortified: true, generator: 300, fuelDepot: true },
     population: 0, infected: 0, zombies: 0, dead: 0,
-    troops: { strength: ARMY_TROOPS, fatigue: 0, morale: 0.9, ammo: ARMY_TROOPS * 300 + 500000 },
+    troops: { strength: ARMY_TROOPS, fatigue: 0, morale: 0.9, ammo: ARMY_TROOPS * 300 + 200000 },
     police: { officers: 0, riot: 0, morale: 0, stage: 'patrol' },
     rations: 60000, medicine: 20000, fuel: 200000,
     power: 'on', powerThreshold: 0, order: 100, rioting: false, status: 'held',
@@ -68,10 +68,17 @@ export function mergeTroops(to: DistrictState, strength: number, fatigue: number
 }
 
 /** Move soldiers (and their share of ammunition) from one place to another. */
-function send(from: DistrictState, to: DistrictState, n: number): number {
+/** Rounds each soldier carries when moved; the rest of a base's stock goes by truck. */
+const LOADOUT = 300;
+
+/**
+ * Move troops with their ammunition: their share of what the base holds, or a set loadout each (a
+ * platoon going into the city doesn't carry off the airport's whole stock).
+ */
+function send(from: DistrictState, to: DistrictState, n: number, loadout = Infinity): number {
   const moving = Math.max(0, Math.min(n, from.troops.strength));
   if (moving <= 0) return 0;
-  const ammo = (from.troops.ammo / Math.max(1, from.troops.strength)) * moving;
+  const ammo = Math.min(from.troops.ammo / Math.max(1, from.troops.strength), loadout) * moving;
   from.troops.strength -= moving;
   from.troops.ammo -= ammo;
   mergeTroops(to, moving, from.troops.fatigue, Math.max(0.8, from.troops.morale), ammo);
@@ -87,7 +94,7 @@ export function establishJoc(s: CityState, emit: Emit, byCommand: boolean): void
   const airport = airportOf(s);
   s.flags.joc = true;
   airport.features = { ...airport.features, fortified: true };
-  const troops = send(s.army, airport, Math.min(AIRLIFT_TROOPS, s.army.troops.strength - CAMP_RESERVE));
+  const troops = send(s.army, airport, Math.min(AIRLIFT_TROOPS, s.army.troops.strength - CAMP_RESERVE), LOADOUT);
   for (const [key, amount] of [['rations', 30000], ['medicine', 8000]] as const) {
     const n = Math.min(amount, s.army[key]);
     s.army[key] -= n;
@@ -107,7 +114,7 @@ export function establishJoc(s: CityState, emit: Emit, byCommand: boolean): void
 export function lastStand(s: CityState, emit: Emit): void {
   if (!s.flags.joc) establishJoc(s, emit, true);
   const airport = airportOf(s);
-  const troops = send(s.army, airport, s.army.troops.strength - CAMP_RESERVE);
+  const troops = send(s.army, airport, s.army.troops.strength - CAMP_RESERVE, LOADOUT);
   if (troops >= 1) emit(airport.id, 'critical', `Command is throwing everything into ${airport.name}: ${Math.round(troops)} more troops are landing.`, true);
 }
 
@@ -164,12 +171,12 @@ export function updateCommand(s: CityState, emit: Emit): void {
     const size = plan?.size ?? 0;
     if (next && airport.troops.strength - AIRPORT_RESERVE >= size) {
       next.flags.armyDeployed = true;
-      send(airport, next, size);
+      send(airport, next, size, LOADOUT);
       if (plan.chosenBy === 'you') s.platoonTarget = null;
       emit(next.id, 'info', `An army platoon (${size}) has deployed into ${next.name}${plan.chosenBy === 'you' ? ', as you ordered' : ' to support the police'}.`, true);
     } else if (next && s.army.troops.strength - CAMP_RESERVE >= size) {
       // The airport is short: Camp Ridgeway sends more forward.
-      send(s.army, airport, Math.min(200, s.army.troops.strength - CAMP_RESERVE));
+      send(s.army, airport, Math.min(200, s.army.troops.strength - CAMP_RESERVE), LOADOUT);
     }
   }
 

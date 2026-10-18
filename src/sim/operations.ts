@@ -312,7 +312,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       const place = deliveryPlace(s, kind, d.id, site) as { ok: true; share: number };
       const effect = deliveryEffect(s, kind, d.id, place.share);
       c.crates.splice(index, 1);
-      deliver(s, kind, d, place.share);
+      deliver(s, kind, d, place.share, 'you');
       d.order = Math.min(100, d.order + CRATES[kind].order);
       s.stats.cratesDelivered += 1;
       emit(d.id, 'info', `A crate of ${CRATES[kind].label} has reached ${site ? siteName(site, d) : d.name}` +

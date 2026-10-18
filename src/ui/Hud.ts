@@ -195,9 +195,10 @@ export class Hud {
    * @param nearby the site the helicopter is over, if any
    * @param traffic the city's traffic, for the district's roads
    * @param rule the curfew or quarantine here, if any
+   * @param alerts what the district's shortages are costing it
    */
   update(dt: number, t: number, timeScale: number, district: DistrictState | null, flight: FlightReadout, sites: Site[] = [], nearby: Site | null = null,
-    traffic: Traffic | null = null, rule = ''): void {
+    traffic: Traffic | null = null, rule = '', alerts: string[] = []): void {
     const scale = timeScale > 1 ? ` <small>Time ×${timeScale}</small>` : '';
     this.clock.innerHTML = `${isDaytime(t) ? '☀' : '☾'} ${formatClock(t)}${scale}`;
 
@@ -220,7 +221,7 @@ export class Hud {
     // When there's too much to draw one to one, each figure stands for a few.
     const each = this.figureScale < 0.95 ? Math.round(1 / this.figureScale) : 1;
     const key = district
-      ? `${each}|${need}|${roads}|${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${district?.police.stage}|${siteLine}|${near}|${rule}`
+      ? `${each}|${need}|${roads}|${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${district?.police.stage}|${siteLine}|${near}|${rule}|${alerts.join()}`
       : 'none';
     if (key !== this.lastDistrictKey) {
       this.lastDistrictKey = key;
@@ -233,6 +234,7 @@ export class Hud {
            ${roads ? `<div class="meta">Roads: ${roads}</div>` : ''}
            ${rule ? `<div class="meta">${rule}</div>` : ''}
            ${need ? `<div class="meta need">Needs: ${need}</div>` : ''}
+           ${alerts.map((a) => `<div class="meta alert">${a}</div>`).join('')}
            ${each > 1 ? `<div class="meta">On the ground, each figure ≈ ${each} people</div>` : ''}
            ${near ? `<div class="meta site ${nearby!.status}">${SITE_LABELS[nearby!.kind]}: ${near}</div>` : ''}`
         : `<div class="name">Outside the city</div>`;

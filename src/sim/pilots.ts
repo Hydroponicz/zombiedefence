@@ -247,7 +247,7 @@ function land(s: CityState, p: Pilot, d: DistrictState, emit: Emit): void {
   }
   // Pilots set down at the right place for what they carry.
   for (const crate of trip.crates) {
-    deliver(s, crate, d, 1);
+    deliver(s, crate, d, 1, 'pilots');
     d.order = Math.min(100, d.order + CRATES[crate].order);
     s.stats.cratesDelivered += 1;
     credit(s, { what: 'crate', district: d.id, crate, amount: 1, by: 'ai' }, emit);

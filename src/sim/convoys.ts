@@ -20,7 +20,7 @@ const SUPPLY_EVERY = 480;
 export const WORKS_STAGES = 5;
 /** What a fuel convoy brings (its tankers), and a supply convoy. */
 const FUEL_LOAD = 20000;
-const SUPPLY_LOAD = { rations: 12000, medicine: 3000, ammo: 60000 };
+const SUPPLY_LOAD = { rations: 12000, medicine: 3000, ammo: 40000 };
 
 export const WORKS_LABELS = [
   'concrete barriers at the gate and around the JOC',
@@ -112,7 +112,8 @@ function unload(s: CityState, c: MilitaryConvoy, airport: DistrictState, emit: E
   }
   const rations = Math.min(SUPPLY_LOAD.rations, s.army.rations);
   const medicine = Math.min(SUPPLY_LOAD.medicine, s.army.medicine);
-  const ammo = Math.min(SUPPLY_LOAD.ammo, s.army.troops.ammo);
+  // Only the camp's spare rounds: its soldiers keep their own.
+  const ammo = Math.min(SUPPLY_LOAD.ammo, Math.max(0, s.army.troops.ammo - s.army.troops.strength * 300));
   s.army.rations -= rations;
   s.army.medicine -= medicine;
   s.army.troops.ammo -= ammo;

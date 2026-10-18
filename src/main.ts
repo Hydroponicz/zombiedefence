@@ -21,6 +21,7 @@ import { Cars } from './world/Cars';
 import { cityLight } from './world/CityLight';
 import { POLICY_LABELS, ruleLine } from './sim/policy';
 import { DevConsole } from './ui/DevConsole';
+import { shortageAlerts } from './sim/logistics';
 import { MilitaryConvoys } from './world/MilitaryConvoys';
 import { AirportWorks } from './world/AirportWorks';
 import { Lures } from './world/Lures';
@@ -465,7 +466,8 @@ function update(dt: number): void {
     searchlight: heli.searchlight.intensity > 0,
   }, state && districtIndex >= 0 ? state.sites.filter((x) => x.district === districtIndex) : [],
   state ? siteNear(state, heli.position.x, heli.position.z, SITE_HUD_RADIUS) ?? null : null, state?.traffic ?? null,
-  state && districtIndex >= 0 ? ruleLine(state, state.districts[districtIndex], sim.time) : '');
+  state && districtIndex >= 0 ? ruleLine(state, state.districts[districtIndex], sim.time) : '',
+  state && districtIndex >= 0 ? shortageAlerts(state, state.districts[districtIndex]) : []);
 
   if (map.visible) {
     mapTimer -= dt;
