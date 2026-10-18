@@ -19,6 +19,7 @@ import { Sites } from './world/Sites';
 import { Traffic } from './world/Traffic';
 import { Cars } from './world/Cars';
 import { cityLight } from './world/CityLight';
+import { CampaignView } from './ui/CampaignView';
 import { Joc } from './world/Joc';
 import { siteNear } from './sim/sites';
 
@@ -104,8 +105,9 @@ const ops = new Operations(
   (cmd) => sim.command(cmd),
   (litres) => (heli.fuel = Math.min(FUEL_CAPACITY, heli.fuel + litres)),
   () => {
-    hud.toast('Crew recovered. A replacement helicopter is waiting at the base', 4);
-    respawn();
+    hud.toast('Crew recovered', 3);
+    // Into a spare at the base, as soon as the simulation has found one.
+    respawnDue = 1;
   },
 );
 ops.onToast = (text) => hud.toast(text, 2.5);
@@ -114,6 +116,15 @@ input.onGamepadChange = (name) => hud.toast(name ? 'Controller connected' : 'Con
 
 let paused = false;
 let respawnTimer = 0;
+/** Seconds until the crew takes a spare helicopter at the base (after abandoning one), or -1. */
+let respawnDue = -1;
+let waitToast = 0;
+
+/** Whether a spare helicopter is free for the player (always, once flying on after the campaign). */
+function spareReady(): boolean {
+  const s = sim.state;
+  return !s || !!s.flags.freePlay || !(s.flags.awaitingAirframe || s.flags.grounded);
+}
 let accumulator = 0;
 let mapTimer = 0;
 let firstInput = false;
@@ -130,6 +141,16 @@ function setPaused(value: boolean): void {
 
 function handleActions(frame: FrameInput): void {
   const a = frame.actions;
+  // The campaign is over: fly on, or start a new city.
+  if (campaignView.endVisible) {
+    if (a.has('confirm')) {
+      sim.command({ type: 'freePlay' });
+      campaignView.hideEnd();
+    } else if (a.has('newGame') || a.has('sling')) {
+      location.search = `?seed=${Math.floor(Math.random() * 1e6)}`;
+    }
+    return;
+  }
   if (command.visible) {
     if (a.has('command') || a.has('back')) command.toggle();
     else command.handle(a);
@@ -254,10 +275,23 @@ function update(dt: number): void {
       sim.command({ type: 'crash', district: districtAt(heli.position.x, heli.position.z) });
     }
     respawnTimer += dt;
-    if (respawnTimer > RESPAWN_SECONDS) {
+    if (respawnTimer > RESPAWN_SECONDS) respawnDue = 0;
+  }
+  if (respawnDue >= 0) {
+    respawnDue -= dt;
+    waitToast -= dt;
+    if (respawnDue <= 0 && spareReady()) {
+      respawnDue = -1;
       respawnTimer = 0;
       respawn();
       hud.toast(`Replacement helicopter ready at ${spawnPad().name}`, 3);
+    } else if (respawnDue <= 0) {
+      // Check again shortly.
+      respawnDue = 0.5;
+      if (waitToast <= 0 && !sim.state?.flags.grounded) {
+        waitToast = 6;
+        hud.toast('No spare helicopter at base: waiting for one to come back', 5);
+      }
     }
   }
 
@@ -324,6 +358,7 @@ function update(dt: number): void {
   const forward = (-heli.yaw * 180) / Math.PI;
   // Over Camp Ridgeway the panel shows the base.
   const here = state ? (districtIndex >= 0 ? state.districts[districtIndex] : baseHere() === 'army' || nearCamp() ? state.army : null) : null;
+  campaignView.update(dt, sim.state);
   hud.update(dt, sim.time, sim.timeScale, here, {
     altitude,
     drawn: agents.attract.active ? agents.attract.drawn : 0,
@@ -354,6 +389,7 @@ function update(dt: number): void {
 }
 
 const timer = new THREE.Timer();
+const campaignView = new CampaignView();
 renderer.setAnimationLoop((time) => {
   timer.update(time);
   update(Math.min(timer.getDelta(), 0.1));

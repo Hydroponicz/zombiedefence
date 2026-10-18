@@ -61,6 +61,8 @@ export type Action =
   | 'command'
   /** Toggle the helicopter's sensor overlay that marks zombies, the bitten and the living. */
   | 'sensor'
+  /** On the end screen: start a new city. */
+  | 'newGame'
   | `overlay${number}`;
 
 const KEY_ACTIONS: Record<string, Action> = {
@@ -74,6 +76,7 @@ const KEY_ACTIONS: Record<string, Action> = {
   KeyF: 'sling',
   KeyP: 'command',
   KeyT: 'sensor',
+  KeyN: 'newGame',
   Enter: 'confirm',
   BracketRight: 'timeFaster',
   BracketLeft: 'timeSlower',

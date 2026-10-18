@@ -11,7 +11,8 @@ import { createSites, siteHolds, updateSites } from './sites';
 import { airportOf, createArmy, lastStand, updateCommand } from './command';
 import { createSupply, updateSupply } from './supply';
 import { createTraffic, roadFlow, updateTraffic } from './traffic';
-import { baseSealed, checkSeal, isBase } from './quarantine';
+import { baseSealed, checkSeal, isBase, screenAtGate } from './quarantine';
+import { compareDay, createCampaign, describeReport, finalEvacuation, updateCampaign } from './campaign';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
 
@@ -79,13 +80,45 @@ export const TUNING = {
 export class CitySim {
   state: CityState;
   private pending: SimEvent[] = [];
+  /** The state at the start of the day, to replay without the player for the day's report. */
+  private dayStart: CityState | null = null;
 
-  constructor(seedOrState: number | string | CityState) {
+  /** @param reports report each day against a replay without the player (the game does; tests mostly don't) */
+  constructor(seedOrState: number | string | CityState, private reports = false) {
     this.state = typeof seedOrState === 'object' ? seedOrState : createCity(seedOrState);
+    if (reports) this.dayStart = structuredClone(this.state);
   }
 
   step(ticks = 1): void {
-    for (let i = 0; i < ticks; i++) tick(this.state, this.pending);
+    for (let i = 0; i < ticks; i++) {
+      const s = this.state;
+      // Once the campaign is over the city stands still, unless the player flies on.
+      if (s.campaign.outcome !== 'running' && !s.flags.freePlay) return;
+      const running = s.campaign.outcome === 'running';
+      tick(s, this.pending);
+      if (!this.reports) continue;
+      if (running && s.campaign.outcome !== 'running') this.reportDay();
+      else if (s.t % 1440 === 360 && running) this.reportDay();
+    }
+  }
+
+  /**
+   * Report the day since the last report: replay it from its start without the player's actions
+   * and compare, so the report can say what the player changed.
+   */
+  private reportDay(): void {
+    const before = this.dayStart;
+    const s = this.state;
+    if (before && s.t > before.t) {
+      const without = new CitySim(structuredClone(before));
+      // The replay plays out the same day, and isn't stopped by the campaign ending in it.
+      without.state.flags.freePlay = true;
+      without.step(s.t - before.t);
+      const report = compareDay(before, s, without.state);
+      s.campaign.reports.push(report);
+      makeEmit(s, this.pending)(null, 'info', describeReport(report), true);
+    }
+    this.dayStart = structuredClone(s);
   }
 
   /** A player action (loading, deploying, boarding...). Returns whether it happened. */
@@ -124,6 +157,7 @@ export function createCity(seed: number | string): CityState {
     farps: [],
     farpSeq: 0,
     research: 0,
+    campaign: createCampaign(0),
     stats: { civiliansEvacuated: 0, scientistsEvacuated: 0, troopsDeployed: 0, troopsRelieved: 0, cratesDelivered: 0, lostInCrashes: 0,
       pilotsRecruited: 0, aiTrips: 0, flownOut: 0 },
     pilots: [],
@@ -198,6 +232,7 @@ export function createCity(seed: number | string): CityState {
   createSites(state);
   initialFleet(state);
   sampleHistory(state);
+  state.campaign.startPopulation = state.districts.reduce((n, d) => n + d.population + d.infected, 0);
   return state;
 }
 
@@ -239,6 +274,7 @@ function tick(s: CityState, out: SimEvent[]): void {
   loseFarps(s, emit);
   updateCommand(s, emit);
   updatePilots(s, emit);
+  updateCampaign(s, emit);
 
   s.research += (s.army.scientists + airport.scientists) * TUNING.researchPerScientist * H;
   if (!s.collapsed && airport.status === 'overrun') {
@@ -673,7 +709,8 @@ function safestNeighbor(s: CityState, d: DistrictState, civilians = false): Dist
   let best: DistrictState | null = null;
   for (const n of d.neighbors) {
     const c = s.districts[n];
-    if (c.status === 'overrun' || (civilians && c.kind === 'airbase')) continue;
+    // In the final evacuation its gates open to everyone.
+    if (c.status === 'overrun' || (civilians && c.kind === 'airbase' && !s.flags.finalEvac)) continue;
     if (!best || safety(c) > safety(best)) best = c;
   }
   return best;
@@ -754,6 +791,25 @@ function migrate(s: CityState, night: boolean): void {
       const moving = d.infected * 0.015 * H;
       di[d.id] -= moving;
       di[hospital.id] += moving;
+    }
+  }
+
+  // The final evacuation: people make for the airport, district by district toward it. The
+  // bitten among them are caught at its gate.
+  const airport = ds.find(isBase);
+  if (airport && finalEvacuation(s) && airport.status !== 'overrun') {
+    const far = (d: DistrictState) => Math.abs(d.col - airport.col) + Math.abs(d.row - airport.row);
+    for (const d of ds) {
+      if (d === airport || d.status === 'overrun' || d.population < 10) continue;
+      const to: DistrictState | undefined = d.neighbors.map((n) => ds[n]).filter((n) => n.status !== 'overrun' && far(n) < far(d)).sort((a, b) => far(a) - far(b))[0];
+      if (!to) continue;
+      const p = d.population * (to === airport ? 0.05 : 0.02) * H;
+      const inf = d.infected * (to === airport ? 0.05 : 0.02) * H;
+      dp[d.id] -= p;
+      dp[to.id] += p;
+      di[d.id] -= inf;
+      if (to === airport) screenAtGate(s, airport, inf);
+      else di[to.id] += inf;
     }
   }
 

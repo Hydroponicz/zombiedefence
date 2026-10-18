@@ -19,7 +19,7 @@ self.onmessage = (e: MessageEvent<SimRequest>) => {
     return;
   }
   if (msg.type === 'init') {
-    sim = new CitySim(msg.seed);
+    sim = new CitySim(msg.seed, true);
   } else if (msg.type === 'step' && sim) {
     sim.step(msg.ticks);
   }

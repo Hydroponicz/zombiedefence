@@ -329,6 +329,50 @@ export interface PlayerStats {
   flownOut: number;
 }
 
+export type CampaignOutcome = 'running' | 'sealed' | 'fallen' | 'grounded';
+
+/** The campaign: a deadline to get people out by, and how it went (see campaign.ts). */
+export interface Campaign {
+  /** When Command seals the city (absolute game minute), once announced. */
+  deadline: number | null;
+  outcome: CampaignOutcome;
+  endedAt: number | null;
+  /** One per day (and one for the last part-day at the end). */
+  reports: DayReport[];
+  /** People in the city when it began. */
+  startPopulation: number;
+  /** Warnings already given (minutes before the seal). */
+  warned: number[];
+}
+
+/** A day as it went, and what the player's own actions changed (against a replay without them). */
+export interface DayReport {
+  day: number;
+  from: number;
+  to: number;
+  flownOut: number;
+  /** Escaped by road. */
+  fled: number;
+  /** Civilians the player brought in. */
+  evacuated: number;
+  scientists: number;
+  troops: number;
+  crates: number;
+  lostInCrashes: number;
+  /** People alive in the city at the end of the day. */
+  alive: number;
+  /** Districts not overrun. */
+  held: number;
+  /** Districts that fell that day. */
+  fell: string[];
+  /** More people alive or out of the city than without the player. */
+  saved: number;
+  /** Districts that would have fallen without the player. */
+  heldBecause: string[];
+  /** Districts that fell that would have held without the player. */
+  lostAnyway: string[];
+}
+
 export interface HistorySample {
   t: number;
   population: number;
@@ -380,5 +424,6 @@ export interface CityState {
   /** Research points earned by scientists at the base. */
   research: number;
   stats: PlayerStats;
+  campaign: Campaign;
   flags: Record<string, boolean>;
 }

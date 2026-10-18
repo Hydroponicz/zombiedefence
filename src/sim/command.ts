@@ -150,10 +150,12 @@ export function updateCommand(s: CityState, emit: Emit): void {
     }
   }
 
-  // Evacuees waiting at the airport fly out.
-  if (t % EVAC_FLIGHT_MINUTES === 0 && airport.status !== 'overrun') {
-    const waiting = Math.floor(airport.population - AIRPORT_STAFF);
-    const seats = Math.min(EVAC_FLIGHT_SEATS, waiting);
+  // Evacuees waiting at the airport fly out; in the final evacuation, every hour and fuller.
+  const final = !!s.flags.finalEvac;
+  if (t % (final ? 60 : EVAC_FLIGHT_MINUTES) === 0 && airport.status !== 'overrun') {
+    // At the very end the staff go too.
+    const waiting = Math.floor(airport.population - (final ? 0 : AIRPORT_STAFF));
+    const seats = Math.min(final ? EVAC_FLIGHT_SEATS * 2 : EVAC_FLIGHT_SEATS, waiting);
     if (seats > 0) {
       airport.population -= seats;
       s.stats.flownOut += seats;

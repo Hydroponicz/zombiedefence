@@ -132,6 +132,31 @@ Each runs one person or crate at a time; lift off to leave.
   and use the menu). Crashes and desertions lose them.
 - **Downed pilots** who survive a crash wait in the district: land there to pick them up.
 
+## The campaign
+
+The city can't be saved, only emptied.
+
+- **The deadline:** once Command authorizes the Joint Operations Command, it announces that at 06:00
+  nine days later the city will be sealed and sterilized. A countdown sits under the clock, and the
+  radio warns at three days, six hours and one hour out.
+- **The final evacuation:** for the last 24 hours, flights leave Kessler Airport every hour (800
+  seats instead of 400 every three hours). The airport's gates open to everyone, and people make for
+  it district by district; the bitten among them are caught at the gate.
+- **How it ends:**
+  - **Sealed:** the deadline arrives.
+  - **Fallen:** Kessler Airport is overrun.
+  - **Grounded:** you run out of helicopters. Each crash or abandoned helicopter uses up a spare
+    from the fleet. With none ready, you wait for one to come back; with none at all, you're
+    grounded. Salvage helicopters to keep spares.
+- **Morning reports:** at 06:00 each day a report card shows the day:
+  - who was flown out, who escaped by road, who you brought in, and which districts fell;
+  - what you changed. The day is replayed from its start without your actions and compared, so
+    the report says how many more people are alive or out of the city because of you, and which
+    districts held because of you.
+- **The end screen:** how many got out of the city, the lives your own actions saved (the sum of
+  the daily differences), a rating, and the campaign day by day. You can fly on with the city
+  running freely (Enter / A), or start a new city (N / X).
+
 ## Downtown
 
 Downtown is built block by block from a lumpy height field: the main financial core, a second

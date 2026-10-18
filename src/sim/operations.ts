@@ -2,6 +2,7 @@
 // crates, evacuate people and rotate exhausted soldiers out. Each command moves one person or
 // one crate, so the game can pace them (and a hot landing zone can interrupt them).
 
+import { replaceHelicopter } from './campaign';
 import { airportOf, establishJoc, hubOf, mergeTroops } from './command';
 import { addAirframe, maybeRecruit, validOrder } from './pilots';
 import { nextRandom } from './rng';
@@ -73,7 +74,9 @@ export type PlayerCommand =
   | { type: 'dismissPilot'; pilot: number }
   | { type: 'hirePilot'; pilot: number }
   /** Make an abandoned helicopter in the district airworthy; it is ferried to the base. */
-  | { type: 'salvage'; district: number };
+  | { type: 'salvage'; district: number }
+  /** After the campaign has ended: let the city run on and keep flying. */
+  | { type: 'freePlay' };
 
 export type FuelSource = { district: number } | { farp: number } | { army: true };
 
@@ -163,6 +166,8 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
     case 'crash':
     case 'abandon':
       return true;
+    case 'freePlay':
+      return s.campaign.outcome !== 'running' && !s.flags.freePlay;
     case 'setOrder': {
       const p = s.pilots.find((x) => x.id === cmd.pilot);
       return !!p && p.hired && !['dead', 'deserted', 'stranded'].includes(p.status) && (cmd.order === null || validOrder(s, cmd.order));
@@ -428,6 +433,7 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       }
       s.cargo = emptyCargo();
       emit(d ? d.id : null, 'warn', `Helicopter abandoned${d ? ` in ${d.name}` : ''} out of fuel. The crew has been recovered.`);
+      replaceHelicopter(s, emit);
       return true;
     }
     case 'crash': {
@@ -441,8 +447,13 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       s.cargo = emptyCargo();
       emit(cmd.district >= 0 ? cmd.district : null, 'critical',
         `Helicopter down${where ? ` over ${where}` : ''}${aboard ? ` with ${aboard} aboard` : ''}.`);
+      replaceHelicopter(s, emit);
       return true;
     }
+    case 'freePlay':
+      s.flags.freePlay = true;
+      emit(null, 'info', 'Flying on. The city runs on without a deadline.');
+      return true;
   }
 }
 

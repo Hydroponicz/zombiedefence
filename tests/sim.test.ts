@@ -84,6 +84,8 @@ describe('city simulation', () => {
       const sim = new CitySim(seed);
       sim.step(DAY * 7);
       expect(sim.state.collapsed).toBe(false);
+      // Past the seal: the city runs on.
+      sim.state.flags.freePlay = true;
       sim.step(DAY * 23);
       expect(sim.state.collapsed).toBe(true);
     }
