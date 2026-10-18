@@ -115,11 +115,46 @@ export function curfewOpen(t: number): boolean {
   return m >= CURFEW_FROM && m < CURFEW_UNTIL;
 }
 
-/** Food points: held supermarkets, or with none, the shelters. */
+/** Sites that can serve as an emergency distribution point, staffed by soldiers or the police. */
+const EMERGENCY_POINTS = ['depot', 'factory', 'police', 'pharmacy'];
+
+/**
+ * A district's own food points: its held supermarkets; with none, its shelters; with none of those,
+ * an emergency distribution point at another site that soldiers (or, at the police station, the
+ * police) are there to run.
+ */
 export function foodPoints(s: CityState, d: DistrictState): Site[] {
   const here = s.sites.filter((x) => x.district === d.id && x.status !== 'fallen');
   const stores = here.filter((x) => x.kind === 'supermarket');
-  return stores.length ? stores : here.filter((x) => x.kind === 'shelter');
+  if (stores.length) return stores;
+  const shelters = here.filter((x) => x.kind === 'shelter');
+  if (shelters.length) return shelters;
+  return here.filter((x) => EMERGENCY_POINTS.includes(x.kind) && (x.guards >= 1 || (x.kind === 'police' && d.police.officers >= 3)));
+}
+
+/** Where a district gets its food under quarantine. */
+export interface FoodSource {
+  /** The district whose food points they use: their own, or a neighbour's. */
+  district: DistrictState;
+  points: Site[];
+  /** They walk to a neighbouring district's food points. */
+  away: boolean;
+}
+
+/**
+ * A district's own food points; with none, the nearest neighbouring district's (one that still
+ * holds), a long walk away; or nowhere.
+ */
+export function foodSource(s: CityState, d: DistrictState): FoodSource | null {
+  const own = foodPoints(s, d);
+  if (own.length) return { district: d, points: own, away: false };
+  for (const n of d.neighbors) {
+    const next = s.districts[n];
+    if (next.kind === 'airbase' || next.status === 'overrun') continue;
+    const points = foodPoints(s, next);
+    if (points.length) return { district: next, points, away: true };
+  }
+  return null;
 }
 
 /**
@@ -134,7 +169,7 @@ export function compliance(s: CityState, d: DistrictState): number {
   let c = 0.45 + 0.5 * security;
   if (d.rioting) c *= 0.5;
   if (d.flags.anarchy) c *= 0.3;
-  if (s.policy === 'quarantine' && !foodPoints(s, d).length) c *= 0.5;
+  if (s.policy === 'quarantine' && !foodSource(s, d)) c *= 0.5;
   return clamp(c);
 }
 
@@ -157,20 +192,25 @@ export function travel(s: CityState, d: DistrictState, t = s.t): number {
   return 1 - 0.9 * c;
 }
 
-/** Order lost to the rule: resentment, cabin fever, and a quarantine with no food to be had. */
+/**
+ * Order lost to the rule: resentment, cabin fever, a long walk to another district for food, and a
+ * quarantine with no food to be had.
+ */
 export function policyUnrest(s: CityState, d: DistrictState): number {
   if (!restricted(s, d)) return 0;
   if (s.policy === 'curfew') return 3;
   const days = (s.t - (s.policySince ?? s.t)) / 1440;
-  return 4 + Math.min(5, days) + (foodPoints(s, d).length ? 0 : 10);
+  const food = foodSource(s, d);
+  return 4 + Math.min(5, days) + (!food ? 10 : food.away ? 4 : 0);
 }
 
-/** How well a district's food line is screened for the bitten (0..1). */
+/** How well a district's food line is screened for the bitten (0..1): the line where it gets its food. */
 export function lineScreening(s: CityState, d: DistrictState): number {
-  const points = foodPoints(s, d);
-  if (!points.length) return 0;
+  const food = foodSource(s, d);
+  if (!food) return 0;
+  const { points, district: at } = food;
   const guards = points.reduce((n, x) => n + Math.min(SCREEN_GUARDS, x.guards), 0) / (points.length * SCREEN_GUARDS);
-  const police = d.police.stage !== 'patrol' && d.police.officers >= 5 ? 0.3 * d.police.morale : 0;
+  const police = at.police.stage !== 'patrol' && at.police.officers >= 5 ? 0.3 * at.police.morale : 0;
   const tests = hasResearch(s, 'rapidTests') ? 1.5 : 1;
   return clamp((guards + police) * tests);
 }
@@ -183,8 +223,9 @@ export function foodRun(s: CityState, d: DistrictState, emit: Emit): number {
   if (s.policy !== 'quarantine' || !restricted(s, d) || !foodRunOn(d, s.t)) return 0;
   const H = 1 / 60;
   const c = compliance(s, d);
-  const points = foodPoints(s, d);
-  if (!points.length || d.population < 50) return 0;
+  const food = foodSource(s, d);
+  if (!food || d.population < 50) return 0;
+  const { points } = food;
   const screen = lineScreening(s, d);
   // Most of the district passes through in the two hours, the bitten among them.
   const inLine = d.infected * c;
@@ -204,7 +245,8 @@ export function foodRun(s: CityState, d: DistrictState, emit: Emit): number {
   d.cooldowns.lineCaught = (d.cooldowns.lineCaught ?? 0) + caught;
   d.cooldowns.lineBitten = (d.cooldowns.lineBitten ?? 0) + bitten;
   if (minuteOfDay(s.t) - foodRunStart(d) === FOOD_RUN_MINUTES - 1) {
-    const where = points[0].name.includes(d.name) ? points[0].name : `${points[0].name} in ${d.name}`;
+    const at = food.district.name;
+    const where = points[0].name.includes(at) ? points[0].name : `${points[0].name} in ${at}`;
     const hurt = Math.round(d.cooldowns.lineBitten);
     const found = Math.round(d.cooldowns.lineCaught);
     if (hurt >= 5) emit(d.id, hurt >= 40 ? 'critical' : 'warn', `The bitten turned in the food line at ${where}: about ${hurt} people were bitten.`);
@@ -222,8 +264,10 @@ export function ruleLine(s: CityState, d: DistrictState, t = s.t): string {
   if (!restricted(s, d)) return '';
   const kept = `keeping to it ${Math.round(compliance(s, d) * 100)}%`;
   if (s.policy === 'curfew') return `Curfew · ${curfewOpen(t) ? `out until ${hhmm(CURFEW_UNTIL)}` : `indoors until ${hhmm(CURFEW_FROM)}`} · ${kept}`;
-  if (!foodPoints(s, d).length) return `Quarantine · no food point · ${kept}`;
+  const food = foodSource(s, d);
+  if (!food) return `Quarantine · no food point · ${kept}`;
   const start = foodRunStart(d);
-  return `Quarantine · food run ${hhmm(start)}–${hhmm(start + FOOD_RUN_MINUTES)}${foodRunOn(d, t) ? ' (now)' : ''} · ` +
+  return `Quarantine · food run ${hhmm(start)}–${hhmm(start + FOOD_RUN_MINUTES)}${foodRunOn(d, t) ? ' (now)' : ''}` +
+    `${food.away ? ` at ${food.district.name}` : food.points[0].kind === 'supermarket' || food.points[0].kind === 'shelter' ? '' : ' (emergency point)'} · ` +
     `line screened ${Math.round(lineScreening(s, d) * 100)}% · ${kept}`;
 }

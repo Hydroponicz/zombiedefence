@@ -430,7 +430,12 @@ you've chosen, Command doesn't ask.
   - **The opportunity:** a screened line catches the bitten instead. Soldiers posted at the
     supermarkets do the screening (land troops there), helped by police at their checkpoints, and
     rapid tests make it better. The radio reports each run's toll and catches.
-  - **With nowhere to get food,** the quarantine breaks down.
+  - **A district with no supermarket or shelter** (the Industrial Park, or one whose stores have
+    fallen) gets an emergency distribution point at a site run by soldiers there: the supply depot,
+    the ration factory, a pharmacy, or the police station while its police hold out. Land troops at
+    one of its sites to set one up. With none, people walk to the nearest neighbouring district's
+    food points, which costs some order.
+  - **With nowhere to get food at all,** the quarantine breaks down.
 
 Both rules keep people from meeting the dead and from carrying the bitten into other districts. They
 also have costs:

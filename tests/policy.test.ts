@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CitySim, createCity } from '../src/sim/CitySim';
-import { CURFEW_FROM, foodPoints, foodRun, foodRunStart, movement, policyCallDue, travel } from '../src/sim/policy';
+import { CURFEW_FROM, foodPoints, foodRun, foodRunStart, foodSource, movement, policyCallDue, policyUnrest, travel } from '../src/sim/policy';
 import type { CityState, Policy } from '../src/sim/types';
 
 const quietEmit = () => {};
@@ -91,6 +91,30 @@ describe('Movement restrictions', () => {
     expect(open.bitten).toBeGreaterThan(50);
     expect(screened.caught).toBeGreaterThan(30);
     expect(screened.bitten).toBeLessThan(open.bitten * 0.5);
+  });
+
+  it('feed a district with no store or shelter at a site its soldiers run, or else at a neighbour\'s', () => {
+    const s = decided('nofood', 'quarantine');
+    const park = named(s, 'Industrial Park');
+    expect(foodPoints(s, park)).toHaveLength(0);
+    // Nobody to run a point: they walk to a neighbour's food point, which costs some patience.
+    const away = foodSource(s, park)!;
+    expect(away.away).toBe(true);
+    expect(park.neighbors).toContain(away.district.id);
+    const walking = policyUnrest(s, park);
+    // Soldiers at the supply depot hand food out there.
+    const depot = s.sites.find((x) => x.district === park.id && x.kind === 'depot')!;
+    depot.guards = 5;
+    const own = foodSource(s, park)!;
+    expect(own.away).toBe(false);
+    expect(own.points).toEqual([depot]);
+    expect(policyUnrest(s, park)).toBeLessThan(walking);
+    // The food run goes on there, the bitten in it too.
+    park.infected = 100;
+    s.t = at(s, foodRunStart(park));
+    const healthy = park.population;
+    for (let k = 0; k < 120; k++, s.t++) foodRun(s, park, quietEmit);
+    expect(park.population).toBeLessThan(healthy);
   });
 
   it('mean fewer get out of the city by road', () => {
