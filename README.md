@@ -33,10 +33,10 @@ Add `?seed=1234` to the URL to replay a specific city and outbreak.
 | Time speed | D-pad left / right (LT / RT on the map) | [ / ] |
 | Map: select district | D-pad | Arrow keys or click |
 | Map: overlay | LB / RB | 1–7 or Tab |
-| Release slung fuel bladder | X | F |
+| Release slung fuel bladder, or drop a noise lure | X | F |
 | Landed: choose operation | D-pad up / down | Up / Down arrows |
 | Landed: start / stop it | A | E or Enter |
-| Flight command (AI pilots) | L3, or Y on the map | P |
+| Flight command (requests, pilots, research, platoons) | L3, or Y on the map; LT / RT change tab | P; [ ] change tab |
 | Pause | Menu | Esc |
 | Show / hide controls | | H |
 
@@ -156,6 +156,50 @@ The city can't be saved, only emptied.
 - **The end screen:** how many got out of the city, the lives your own actions saved (the sum of
   the daily differences), a rating, and the campaign day by day. You can fly on with the city
   running freely (Enter / A), or start a new city (N / X).
+
+## Command requests
+
+Every couple of hours Command puts out what the city needs most, as a request with a deadline and a
+reward. There are more than one helicopter can do: triage is the game.
+
+- **What comes up:**
+  - **Supplies:** a pharmacy or shelter out of medicine, a supermarket or depot running out of food,
+    or troops low on ammunition. Deliver the crates. Reward: 15 troops and order in the district.
+  - **Reinforce:** a district under attack with too few soldiers. Land 8 troops. Reward: 30 troops.
+  - **Evacuate:** a shelter under siege. Bring its people out. Reward: a pilot looking for work.
+  - **Extract:** a research team about to be cut off. Bring the scientists out. Reward: 80 research.
+  - **Overwatch:** a food truck crawling through infested streets. Hover over it (within 160 m,
+    below 160 m) for 15 minutes; while you do it can't be lost, and while it waits for you its crew
+    keeps its head down. Reward: a helicopter for the fleet.
+- **Taking them on:** Flight Command (P) → Requests. "Take it on" puts the request under the clock
+  with its distance and bearing, a gold beam marks the place in the world, and a gold diamond marks
+  it on the map (the other requests are white diamonds).
+- **Handing them to pilots:** any request but overwatch can go to an AI pilot as a one-off trip.
+  An evacuation brings any research team out first.
+- **Credit:** deliveries and boardings by you or your pilots count toward any request they answer.
+  A request fails when its time runs out, or when its district, site, team or truck is lost. After
+  failing it can't come back for 10 hours (6 after it's done).
+
+## Research
+
+Scientists at the base earn a research point an hour each (and requests can pay in research).
+Spend them in Flight Command (P) → Research:
+
+| Project | Cost | Effect |
+| --- | --- | --- |
+| Rapid bite tests | 120 | Checkpoints catch twice as many of the bitten, fewer slip through with people fleeing, and the bitten are caught before they board. |
+| Noise lures | 200 | Load sirens at the base and drop them from the air (F / X) or set them down. For six hours a lure pulls hordes and the district's dead toward it. |
+| Loudspeaker | 150 | Boarding civilians and evacuating shelters takes half the time. |
+| Door gun | 250 | Fires on the dead near a low helicopter like four troops at the doors. |
+| Heavy sling | 150 | Fuel bladders hold 3,000 L. |
+| Troop vaccine | 600 | After rapid tests. Bitten soldiers don't turn, and fewer fall. |
+| Antiviral | 1,200 | After the vaccine. The bitten among your evacuees are treated at the base instead of turned away. |
+
+## Army platoons
+
+Once the JOC is up, a platoon leaves the airport each hour. Flight Command (P) → Platoons shows where
+the next one goes and when. Command chooses by default (districts without a platoon, those under
+attack first); pick a district to send the next one there instead, or hold them at the airport.
 
 ## Downtown
 

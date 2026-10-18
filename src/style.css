@@ -228,6 +228,20 @@ kbd {
 .cmd-field.off { opacity: 0.4; }
 .cmd-button { align-self: center; cursor: pointer; background: rgba(255,255,255,0.08); }
 .cmd-hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+.cmd-tabs { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.cmd-tab { padding: 6px 14px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; user-select: none; }
+.cmd-tab.on { color: var(--text); border-bottom-color: var(--held); }
+.cmd-tab b { background: var(--warn); color: #111; border-radius: 8px; padding: 0 6px; font-size: 11px; }
+.cmd-row.done { opacity: 0.6; }
+.cmd-row .good, .cmd-fleet .good { color: var(--held); }
+.cmd-status.warn, .cmd-fleet .warn { color: var(--warn); }
+.cmd-button.off { opacity: 0.4; pointer-events: none; }
+
+#hud-request { position: absolute; top: 100px; left: 16px; max-width: 340px; padding: 6px 10px; font-size: 13px; }
+#hud-request[hidden] { display: none; }
+#hud-request .what { font-weight: 600; }
+#hud-request .meta { color: var(--muted); font-size: 12px; }
+#hud-request .meta .watch { color: var(--held); font-weight: 600; }
 
 #pause {
   position: fixed;
@@ -262,7 +276,7 @@ kbd {
 #hud-countdown.final { background: rgba(160, 40, 30, 0.75); color: #fff; font-weight: 600; }
 #hud-countdown[hidden] { display: none; }
 
-#hud-report { top: 100px; left: 16px; width: 300px; font-size: 13px; }
+#hud-report { top: 162px; left: 16px; width: 300px; font-size: 13px; }
 #hud-report[hidden] { display: none; }
 #hud-report .title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
 #hud-report table { width: 100%; border-collapse: collapse; }

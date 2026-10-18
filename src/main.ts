@@ -20,6 +20,7 @@ import { Traffic } from './world/Traffic';
 import { Cars } from './world/Cars';
 import { cityLight } from './world/CityLight';
 import { Lures } from './world/Lures';
+import { RequestTracker } from './game/Requests';
 import { hasResearch } from './sim/research';
 import { CampaignView } from './ui/CampaignView';
 import { Joc } from './world/Joc';
@@ -79,6 +80,8 @@ const fleet = new AiFleet(city.helipads);
 scene.add(fleet.group);
 const lures = new Lures();
 scene.add(lures.group);
+const requests = new RequestTracker((cmd) => sim.command(cmd), (text) => hud.toast(text, 4));
+scene.add(requests.marker);
 
 const heli = new Helicopter();
 scene.add(heli.object, heli.slingObject);
@@ -339,6 +342,7 @@ function update(dt: number): void {
   const doorGun = state && hasResearch(state, 'doorGun') ? DOOR_GUN_SHOOTERS : 0;
   if (!heli.destroyed) agents.doorGunners(dt, heli.position, (state?.cargo.troops ?? 0) + doorGun);
   lures.update(dt);
+  requests.update(dt, state, sim.time, heli.position, altitude);
   effects.update(dt, night);
   farps.update(dt);
   sites.update(dt, night);

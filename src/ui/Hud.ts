@@ -28,10 +28,10 @@ export const CONTROLS_HTML = `
   <tr><td>Time speed</td><td>D-pad ◀ ▶ (LT / RT on the map)</td><td><kbd>[</kbd> / <kbd>]</kbd></td></tr>
   <tr><td>Map: select district</td><td>D-pad</td><td>Arrow keys or click</td></tr>
   <tr><td>Map: overlay</td><td>LB / RB</td><td><kbd>1</kbd>–<kbd>7</kbd> or <kbd>Tab</kbd></td></tr>
-  <tr><td>Flight command (AI pilots)</td><td>L3, or Y on the map</td><td><kbd>P</kbd></td></tr>
+  <tr><td>Flight command (requests, pilots, research, platoons)</td><td>L3, or Y on the map · LT / RT tabs</td><td><kbd>P</kbd> · <kbd>[</kbd> <kbd>]</kbd> tabs</td></tr>
   <tr><td>Pause</td><td>Menu</td><td><kbd>Esc</kbd></td></tr>
   <tr><td>Show / hide controls</td><td></td><td><kbd>H</kbd></td></tr>
-  <tr><td>Release slung fuel bladder</td><td>X</td><td><kbd>F</kbd></td></tr>
+  <tr><td>Release slung fuel bladder, or drop a noise lure</td><td>X</td><td><kbd>F</kbd></td></tr>
   <tr><td>Landed: choose operation</td><td>D-pad ▲ ▼</td><td><kbd>↑</kbd> / <kbd>↓</kbd></td></tr>
   <tr><td>Landed: start / stop it</td><td>A</td><td><kbd>E</kbd> or <kbd>Enter</kbd></td></tr>
   <tr><td>Controller readout</td><td></td><td><kbd>G</kbd></td></tr>

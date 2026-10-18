@@ -1,6 +1,7 @@
 // Full-screen 2D debug map of the city simulation: district overlays, a detail panel,
 // city-wide history and the event log. Navigable by mouse, keyboard or controller.
 
+import { requestTarget } from '../game/Requests';
 import { formatClock, MINUTES_PER_DAY, NIGHT_START, DAY_START } from '../sim/clock';
 import { ARMY_BASE, CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE, DISTRICT_TEMPLATES, GRID_COLS, GRID_ROWS } from '../sim/layout';
 import { totalZombies } from '../sim/hordes';
@@ -220,6 +221,39 @@ export class DebugMap {
       g.fillRect(fx - 6, fy - 6, 12, 12);
       g.strokeRect(fx - 6, fy - 6, 12, 12);
       this.text(`FARP ${fmt(f.fuel)} L`, fx + 9, fy + 4, 11, '#f3d2a8');
+    }
+
+    // Noise lures: a red ring as wide as the pull.
+    for (const l of s.lures) {
+      const lx = mx + (l.x + CITY_WIDTH / 2) * scale;
+      const ly = my + (l.z + CITY_DEPTH / 2) * scale;
+      g.strokeStyle = '#ff4a3a';
+      g.lineWidth = 2;
+      g.beginPath();
+      g.arc(lx, ly, 9, 0, Math.PI * 2);
+      g.stroke();
+      this.text('LURE', lx + 11, ly + 4, 11, '#ffb0a8');
+    }
+
+    // Command requests: a diamond where each one is, gold for the one taken on.
+    for (const r of s.requests) {
+      if (r.status !== 'open') continue;
+      const at = requestTarget(s, r, s.t);
+      if (!at) continue;
+      const rx = mx + (at.x + CITY_WIDTH / 2) * scale;
+      const ry = my + (at.z + CITY_DEPTH / 2) * scale;
+      g.fillStyle = r.tracked ? '#ffc94a' : '#e8ecdf';
+      g.strokeStyle = '#000';
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.moveTo(rx, ry - 8);
+      g.lineTo(rx + 8, ry);
+      g.lineTo(rx, ry + 8);
+      g.lineTo(rx - 8, ry);
+      g.closePath();
+      g.fill();
+      g.stroke();
+      if (r.tracked) this.text(r.title.length > 40 ? `${r.title.slice(0, 39)}…` : r.title, rx + 11, ry + 4, 11, '#ffe2a0');
     }
 
     // Traffic overlay: every street by how it flows; wrecked streets dark purple.
