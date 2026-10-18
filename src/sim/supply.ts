@@ -7,7 +7,6 @@
 //
 // Trucks and trains have fixed routes and timetables, so the 3D view can place them at any moment.
 
-import { waitingForCover, watched } from './requests';
 import { CITY_DEPTH, districtAt, districtCenter, DISTRICT_TEMPLATES } from './layout';
 import { totalZombies } from './hordes';
 import { nextRandom } from './rng';
@@ -132,9 +131,7 @@ function losses(s: CityState, emit: Emit): void {
     if (!d) return true;
     // A truck stuck in a jam with the dead about is a sitting target.
     const jam = 1 + Math.min(2, s.traffic.jam[d.id] ?? 0);
-    // Under a helicopter's eye it's safe; waiting for one, its crew keeps its head down.
-    const cover = watched(s, tr.id) ? 0 : waitingForCover(s, tr.id) ? 0.3 : 1;
-    const risk = (d.status === 'overrun' ? 0.25 : d.status === 'contested' ? 0.04 : 0) * jam * cover;
+    const risk = (d.status === 'overrun' ? 0.25 : d.status === 'contested' ? 0.04 : 0) * jam;
     if (d.rioting && nextRandom(s) < 0.08) {
       d.rations += tr.rations;
       if (s.t - (d.cooldowns.hijack ?? -Infinity) > 180) {

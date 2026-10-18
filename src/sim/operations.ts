@@ -4,7 +4,7 @@
 
 import { replaceHelicopter } from './campaign';
 import { districtAt } from './layout';
-import { assignable, credit, overwatch } from './requests';
+import { credit } from './requests';
 import { deliver, deliveryEffect, deliveryPlace } from './supplies';
 import { hasResearch, LURE_CAPACITY, LURE_HOURS, researchBlocked, startResearch } from './research';
 import { airportOf, establishJoc, hubOf, mergeTroops } from './command';
@@ -95,8 +95,6 @@ export type PlayerCommand =
   | { type: 'trackRequest'; request: number }
   /** Hand a Command request to an AI pilot as a one-off order. */
   | { type: 'assignRequest'; request: number; pilot: number }
-  /** The helicopter is watching over a request's food truck this minute. */
-  | { type: 'overwatch'; request: number }
   /** Where the next army platoon goes (null: Command's choice), or hold them at the airport. */
   | { type: 'setPlatoon'; target: number | null; hold: boolean }
   /** The dead the player's own guns killed on the ground (in the simulation's numbers). */
@@ -205,10 +203,8 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
     case 'assignRequest': {
       const r = s.requests.find((x) => x.id === cmd.request && x.status === 'open');
       const p = s.pilots.find((x) => x.id === cmd.pilot);
-      return !!r && assignable(r) && !!p && p.hired && !['dead', 'deserted', 'stranded'].includes(p.status) && validOrder(s, requestOrder(r));
+      return !!r && !!p && p.hired && !['dead', 'deserted', 'stranded'].includes(p.status) && validOrder(s, requestOrder(r));
     }
-    case 'overwatch':
-      return true;
     case 'research':
       return researchBlocked(s, cmd.id) === null;
     case 'killZombies':
@@ -379,8 +375,6 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
       emit(r.district, 'info', `${p.name} is taking on: ${r.title}.`, true);
       return true;
     }
-    case 'overwatch':
-      return overwatch(s, cmd.request, emit);
     case 'research':
       return startResearch(s, cmd.id, emit);
     case 'killZombies': {

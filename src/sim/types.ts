@@ -358,14 +358,13 @@ export interface MilitaryConvoy {
   phase: 'outbound' | 'unloading' | 'return';
 }
 
-export type RequestKind = 'supply' | 'reinforce' | 'evacuate' | 'extract' | 'overwatch';
+export type RequestKind = 'supply' | 'reinforce' | 'evacuate' | 'extract';
 
 /** What Command sends for a request done (to the base the military works from). */
 export interface Reward {
   troops?: number;
   crates?: Partial<Record<CrateKind, number>>;
   research?: number;
-  airframe?: boolean;
   pilot?: boolean;
   /** Order in the district. */
   order?: number;
@@ -377,10 +376,8 @@ export interface Request {
   kind: RequestKind;
   district: number;
   site: number | null;
-  /** For overwatch: the food truck. */
-  truck: number | null;
   crate: CrateKind | null;
-  /** Crates, troops, people or minutes of overwatch. */
+  /** Crates, troops or people. */
   needed: number;
   progress: number;
   title: string;
@@ -393,8 +390,6 @@ export interface Request {
   tracked: boolean;
   /** The AI pilot it was handed to. */
   assigned: number | null;
-  /** Last game minute the helicopter watched over its truck. */
-  lastWatch: number;
 }
 
 export type CampaignOutcome = 'running' | 'sealed' | 'fallen' | 'grounded';

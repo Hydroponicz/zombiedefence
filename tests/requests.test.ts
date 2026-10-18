@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CitySim, createCity } from '../src/sim/CitySim';
 import { hubOf, nextPlatoon } from '../src/sim/command';
-import { issueRequests, openRequests, streetName } from '../src/sim/requests';
+import { issueRequests, openRequests } from '../src/sim/requests';
 import type { CityState } from '../src/sim/types';
 
 const named = (s: CityState, name: string) => s.districts.find((d) => d.name === name)!;
@@ -113,40 +113,6 @@ describe('Command requests', () => {
     }
     expect(r.status).toBe('done');
     expect(s.pilots.some((p) => !p.hired)).toBe(true);
-  });
-
-  it('asks for overwatch of a food truck in danger, which keeps it safe and earns a helicopter', () => {
-    const s = createCity('overwatch');
-    s.flags.joc = true;
-    const sim = new CitySim(s);
-    // Wait for a truck with a way still to go, then make the city dangerous.
-    for (let k = 0; k < 1440 && !s.supply.trucks.some((t) => t.arrive - s.t > 40); k++) sim.step(1);
-    const truck = s.supply.trucks.find((t) => t.arrive - s.t > 40)!;
-    s.requests = [];
-    expect(truck).toBeTruthy();
-    // Contested, but with soldiers enough not to call for reinforcements.
-    for (const d of s.districts) {
-      if (d.kind === 'airbase') continue;
-      d.status = 'contested';
-      d.troops.strength = Math.max(d.troops.strength, 100);
-      d.troops.ammo = d.troops.strength * 300;
-    }
-    for (let k = 0; k < 5; k++) issueRequests(s, quietEmit);
-    const r = openRequests(s).find((x) => x.kind === 'overwatch' && x.truck === truck.id)!;
-    expect(r.title).toMatch(/(Avenue|Street)/);
-    const fleet = s.airframes.length;
-    while (r.status === 'open') {
-      sim.command({ type: 'overwatch', request: r.id });
-      sim.step(1);
-      for (const d of s.districts) if (d.kind !== 'airbase') d.status = 'contested';
-    }
-    expect(r.status).toBe('done');
-    expect(s.airframes.length).toBe(fleet + 1);
-  });
-
-  it('names streets by their numbers', () => {
-    expect(streetName(-2880, 0, 0)).toBe('1st Avenue');
-    expect(streetName(0, -2160 + 120 * 11, Math.PI / 2)).toBe('12th Street');
   });
 });
 

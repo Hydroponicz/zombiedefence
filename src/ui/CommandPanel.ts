@@ -9,7 +9,7 @@ import { formatClock } from '../sim/clock';
 import { nextPlatoon, platoonSize } from '../sim/command';
 import { baseOf, CRATES, requestOrder, type PlayerCommand } from '../sim/operations';
 import { JOB_LABELS, orderSummary, TRIP_FUEL, validOrder } from '../sim/pilots';
-import { assignable, describeNeed, openRequests, rewardText } from '../sim/requests';
+import { describeNeed, openRequests, rewardText } from '../sim/requests';
 import { RESEARCH, RESEARCH_ORDER, researchBlocked, researchPoints, researchRate } from '../sim/research';
 import { compliance, CURFEW_FROM, CURFEW_UNTIL, FOOD_RUN_MINUTES, foodPoints, foodRunStart, lineScreening, policyAsked, POLICY_LABELS, POLICY_TERMS } from '../sim/policy';
 import type { CityState, CrateKind, JobKind, Pilot, Policy, Request } from '../sim/types';
@@ -208,7 +208,7 @@ export class CommandPanel {
 
   /** Pilots who could take a request on. */
   private crewFor(s: CityState, r: Request): Pilot[] {
-    if (!assignable(r) || !validOrder(s, requestOrder(r))) return [];
+    if (!validOrder(s, requestOrder(r))) return [];
     return s.pilots.filter((p) => p.hired && !['dead', 'deserted', 'stranded'].includes(p.status));
   }
 
@@ -223,7 +223,7 @@ export class CommandPanel {
           <small>Pilot</small><span data-row="${i}" data-field="pilot" data-step="-1">◀</span> ${pick!.name} (${pick!.status === 'idle' ? 'idle' : pick!.status})
           <span data-row="${i}" data-field="pilot" data-step="1">▶</span></span>`
       : `<span class="cmd-field off" data-row="${i}" data-field="pilot"><small>Pilot</small>${
-        r.kind === 'overwatch' ? 'Only you can fly overwatch' : !assignable(r) || !validOrder(s, requestOrder(r)) ? 'Not a job for a pilot yet' : 'No pilots'}</span>`;
+        !validOrder(s, requestOrder(r)) ? 'Not a job for a pilot yet' : 'No pilots'}</span>`;
     return `<div class="cmd-editor">
         ${button('track', r.tracked ? 'Drop it' : 'Take it on')}
         ${pilotField}

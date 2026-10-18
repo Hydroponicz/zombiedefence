@@ -36,11 +36,19 @@ Add `?seed=1234` to the URL to replay a specific city and outbreak.
 | Release slung fuel bladder, or drop a noise lure | X | F |
 | Landed: choose operation | D-pad up / down | Up / Down arrows |
 | Landed: start / stop it | A | E or Enter |
-| Flight command (requests, pilots, research, platoons) | L3, or Y on the map; LT / RT change tab | P; [ ] change tab |
+| Flight command (requests, pilots, research, platoons, movement) | L3, or Y on the map; LT / RT change tab | P; [ ] change tab |
 | Pause | Menu | Esc |
 | Show / hide controls | | H |
+| Dev console | | ` (backquote) |
 
 Any controller using the browser's standard gamepad mapping works (Xbox, PlayStation, most others).
+
+**Dev console:** the <kbd>`</kbd> key (keyboard only) opens it. Click a switch, or type a command
+(`help` lists them):
+- `popups on|off`: whether Command requests pop up as radio calls. With pop-ups off, requests still
+  come in to the radio log and Flight Command; the call on movement restrictions still comes.
+
+Settings are kept in the browser between sessions.
 
 ## Scale
 
@@ -183,9 +191,6 @@ getting the command team there.) There are more than one helicopter can do: tria
   - **Reinforce:** a district under attack with too few soldiers. Land 8 troops. Reward: 30 troops.
   - **Evacuate:** a shelter under siege. Bring its people out. Reward: a pilot looking for work.
   - **Extract:** a research team about to be cut off. Bring the scientists out. Reward: 80 research.
-  - **Overwatch:** a food truck crawling through infested streets. Hover over it (within 160 m,
-    below 160 m) for 15 minutes; while you do it can't be lost, and while it waits for you its crew
-    keeps its head down. Reward: a helicopter for the fleet.
 - **They come in over the radio:** each new request pops up as a transmission on a cockpit radio
   (frequency display, signal bars, a squelch and call tones; one tone for routine traffic, three for a
   FLASH call), typed out as it's read: "DUSTOFF 1-1, KESSLER ACTUAL. Research team in St. Mary's…
@@ -200,10 +205,10 @@ getting the command team there.) There are more than one helicopter can do: tria
 - **Taking them on:** Flight Command (P) → Requests. "Take it on" puts the request under the clock
   with its distance and bearing, a gold beam marks the place in the world, and a gold diamond marks
   it on the map (the other requests are white diamonds).
-- **Handing them to pilots:** any request but overwatch can go to an AI pilot as a one-off trip.
+- **Handing them to pilots:** any request can go to an AI pilot as a one-off trip.
   An evacuation brings any research team out first.
 - **Credit:** deliveries and boardings by you or your pilots count toward any request they answer.
-  A request fails when its time runs out, or when its district, site, team or truck is lost. After
+  A request fails when its time runs out, or when its district, site or team is lost. After
   failing it can't come back for 10 hours (6 after it's done).
 
 ## Research

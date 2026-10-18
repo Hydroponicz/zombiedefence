@@ -20,6 +20,7 @@ import { Traffic } from './world/Traffic';
 import { Cars } from './world/Cars';
 import { cityLight } from './world/CityLight';
 import { POLICY_LABELS, ruleLine } from './sim/policy';
+import { DevConsole } from './ui/DevConsole';
 import { MilitaryConvoys } from './world/MilitaryConvoys';
 import { AirportWorks } from './world/AirportWorks';
 import { Lures } from './world/Lures';
@@ -88,7 +89,7 @@ const convoys = new MilitaryConvoys();
 scene.add(convoys.group);
 const works = new AirportWorks();
 scene.add(works.group);
-const requests = new RequestTracker((cmd) => sim.command(cmd));
+const requests = new RequestTracker();
 // New requests come in over the radio, and wait for an answer.
 const radio = new Transmission((r, how) => {
   if (how === 'take' && !r.tracked) {
@@ -104,6 +105,8 @@ const radio = new Transmission((r, how) => {
   hud.toast(policy ? `${POLICY_LABELS[policy]} ordered` : 'Standing by: Command will ask again', 3);
 });
 scene.add(requests.marker);
+// ` opens the dev console (keyboard only).
+const devConsole = new DevConsole(() => input.releasePointer());
 
 const heli = new Helicopter();
 scene.add(heli.object, heli.slingObject);
@@ -304,13 +307,14 @@ function update(dt: number): void {
     firstInput = true;
     setTimeout(() => hud.hideHelp(), 6000);
   }
+  radio.requestPopups = devConsole.settings.requestPopups;
   if (paused) return;
   // An incoming radio call holds the game until it's answered.
   if (radio.visible) {
     // Free the mouse to reach the answers.
     if (!radioWasUp) input.releasePointer();
     radioWasUp = true;
-    radio.update(dt, sim.state, heli.position, (r) => (sim.state ? requestTarget(sim.state, r, sim.time) : null));
+    radio.update(dt, sim.state, heli.position, (r) => (sim.state ? requestTarget(sim.state, r) : null));
     return;
   }
   radioWasUp = false;
@@ -398,8 +402,8 @@ function update(dt: number): void {
   lures.update(dt);
   convoys.update(sim.time);
   works.update(dt);
-  requests.update(dt, state, sim.time, heli.position, altitude);
-  radio.update(dt, state, heli.position, (r) => (state ? requestTarget(state, r, sim.time) : null));
+  requests.update(dt, state, heli.position);
+  radio.update(dt, state, heli.position, (r) => (state ? requestTarget(state, r) : null));
   effects.update(dt, night);
   farps.update(dt);
   sites.update(dt, night);

@@ -20,13 +20,12 @@ const PRIORITY: Record<RequestKind, { label: string; cls: string }> = {
   extract: { label: 'FLASH', cls: 'flash' },
   evacuate: { label: 'IMMEDIATE', cls: 'immediate' },
   reinforce: { label: 'IMMEDIATE', cls: 'immediate' },
-  overwatch: { label: 'PRIORITY', cls: 'priority' },
   supply: { label: 'ROUTINE', cls: 'routine' },
 };
 
 /** A frequency per kind of traffic, for the radio's display. */
 const FREQ: Record<RequestKind, string> = {
-  extract: '243.000', evacuate: '251.900', reinforce: '262.450', overwatch: '279.625', supply: '305.150',
+  extract: '243.000', evacuate: '251.900', reinforce: '262.450', supply: '305.150',
 };
 
 export type Answer = 'take' | 'open' | 'dismiss';
@@ -52,6 +51,8 @@ export class Transmission {
   private stickArmed = true;
   /** The policy call was answered: don't put it up again until the simulation has the answer. */
   private policyAnswered = false;
+  /** Command requests pop up as calls (the dev console can turn this off). */
+  requestPopups = true;
 
   /** The answers on the card that's up. */
   private get answers(): string[] {
@@ -99,9 +100,13 @@ export class Transmission {
     for (const r of s.requests) {
       if (r.status !== 'open' || this.seen.has(r.id)) continue;
       this.seen.add(r.id);
-      if (this.primed) this.queue.push(r.id);
+      if (this.primed && this.requestPopups) this.queue.push(r.id);
     }
     this.primed = true;
+    if (!this.requestPopups) {
+      this.queue = [];
+      if (this.shown !== null && this.shown !== POLICY_CALL) this.close();
+    }
     // Calls for requests that have closed in the meantime are dropped.
     this.queue = this.queue.filter((id) => s.requests.some((r) => r.id === id && r.status === 'open'));
     const due = policyCallDue(s);

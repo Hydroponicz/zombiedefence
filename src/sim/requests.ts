@@ -1,18 +1,14 @@
 // Command requests: what the city needs most right now, as jobs with a deadline and a reward. They
 // come from the simulation itself: a shelter out of medicine, a district under attack, a research
-// team about to be cut off, a besieged shelter, a food truck crawling through infested streets.
+// team about to be cut off, a besieged shelter.
 // There are always more than one helicopter can do. The player tracks the ones they take on, hands
 // others to AI pilots, and lets the rest go. Deliveries count whoever makes them.
 
 import { MINUTES_PER_DAY } from './clock';
 import { hubOf, mergeTroops } from './command';
-import { totalZombies } from './hordes';
-import { districtAt } from './layout';
-import { addAirframe, createPilot } from './pilots';
+import { createPilot } from './pilots';
 import { siteName } from './sites';
 import { needsMedicine } from './supplies';
-import { nodeX, nodeZ, STREET_SPACING } from './streets';
-import { truckPose } from './supply';
 import type { CityState, CrateKind, DistrictState, Request, RequestKind, Reward, Severity, Site } from './types';
 
 type Emit = (district: number | null, severity: Severity, text: string, radio?: boolean) => void;
@@ -24,11 +20,6 @@ const REPEAT_AFTER_DONE = 6;
 const REPEAT_AFTER_FAILED = 10;
 /** Command puts out at most one new request this often (game minutes). */
 const ISSUE_EVERY = 120;
-/** A truck counts as watched for this many minutes after the last overwatch report. */
-export const OVERWATCH_GRACE = 3;
-/** Helicopter within this many metres (and this low) of a truck is watching over it. */
-export const OVERWATCH_RANGE = 160;
-export const OVERWATCH_ALTITUDE = 160;
 
 const CRATE_AMOUNT: Record<CrateKind, number> = { rations: 5000, ammo: 15000, medicine: 3000 };
 const CRATE_LABEL: Record<CrateKind, string> = { rations: 'food', ammo: 'ammunition', medicine: 'medicine' };
@@ -43,24 +34,11 @@ export interface Credit {
   by: 'player' | 'ai';
 }
 
-const ordinal = (n: number) => {
-  const s = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd', 'th', 'th', 'th', 'th', 'th', 'th'][n % 10];
-  return `${n}${s}`;
-};
-
-/** A street's name: avenues run north–south, streets east–west, numbered from the west and north. */
-export function streetName(x: number, z: number, heading: number): string {
-  const northSouth = Math.abs(Math.cos(heading)) > Math.abs(Math.sin(heading));
-  if (northSouth) return `${ordinal(Math.round((x - nodeX(0)) / STREET_SPACING) + 1)} Avenue`;
-  return `${ordinal(Math.round((z - nodeZ(0)) / STREET_SPACING) + 1)} Street`;
-}
-
 export function rewardText(r: Reward): string {
   return [
     r.troops && `${r.troops} troops at base`,
     r.crates && Object.entries(r.crates).map(([k, n]) => `${n} ${CRATE_LABEL[k as CrateKind]} crate${n > 1 ? 's' : ''} at base`).join(', '),
     r.research && `${r.research} research`,
-    r.airframe && 'a helicopter for the fleet',
     r.pilot && 'a pilot to hire',
     r.order && `order +${r.order}`,
   ].filter(Boolean).join(' · ');
@@ -72,18 +50,12 @@ export function openRequests(s: CityState): Request[] {
   return s.requests.filter((r) => r.status === 'open');
 }
 
-/** Which kinds an AI pilot can take on. */
-export function assignable(r: Request): boolean {
-  return r.kind !== 'overwatch';
-}
-
 // --- Issuing ------------------------------------------------------------------------------------
 
 interface Candidate {
   kind: RequestKind;
   district: number;
   site: number | null;
-  truck: number | null;
   crate: CrateKind | null;
   needed: number;
   minutes: number;
@@ -111,7 +83,7 @@ function candidates(s: CityState): Candidate[] {
       const site = siteFor(s, d, sites);
       const place = site ? siteName(site, d) : d.name;
       out.push({
-        kind: 'supply', district: d.id, site: site?.id ?? null, truck: null, crate: kind,
+        kind: 'supply', district: d.id, site: site?.id ?? null, crate: kind,
         needed: Math.min(2, Math.max(1, Math.ceil((n * (kind === 'medicine' ? 0.15 : 0.5)) / CRATE_AMOUNT[kind]))),
         minutes: 150, title: label(place), reward: { troops: 15, order: 8 }, urgency,
       });
@@ -124,14 +96,14 @@ function candidates(s: CityState): Candidate[] {
     // A district under attack with too few soldiers.
     if (s.flags.joc && d.status === 'contested' && d.troops.strength < 40) {
       out.push({
-        kind: 'reinforce', district: d.id, site: null, truck: null, crate: null, needed: 8, minutes: 120,
+        kind: 'reinforce', district: d.id, site: null, crate: null, needed: 8, minutes: 120,
         title: `${d.name} is under attack: reinforce it`, reward: { troops: 30 }, urgency: 5,
       });
     }
     // A research team about to be cut off.
     if (d.scientists >= 1 && (d.status === 'contested' || d.flags.outbreak)) {
       out.push({
-        kind: 'extract', district: d.id, site: null, truck: null, crate: null, needed: Math.ceil(d.scientists), minutes: 180,
+        kind: 'extract', district: d.id, site: null, crate: null, needed: Math.ceil(d.scientists), minutes: 180,
         title: `Research team in ${d.name}: extract them before it falls`, reward: { research: 80 }, urgency: 7,
       });
     }
@@ -139,28 +111,16 @@ function candidates(s: CityState): Candidate[] {
     for (const x of s.sites) {
       if (x.district !== d.id || x.kind !== 'shelter' || x.status !== 'besieged' || x.sheltered < 8) continue;
       out.push({
-        kind: 'evacuate', district: d.id, site: x.id, truck: null, crate: null, needed: Math.min(24, Math.floor(x.sheltered)), minutes: 90,
+        kind: 'evacuate', district: d.id, site: x.id, crate: null, needed: Math.min(24, Math.floor(x.sheltered)), minutes: 90,
         title: `${siteName(x, d)} is under siege: bring people out`, reward: { pilot: true, order: 5 }, urgency: 6,
       });
     }
   }
-  // Food trucks crawling through dangerous streets.
-  for (const tr of s.supply.trucks) {
-    if (tr.arrive - s.t < 30) continue;
-    const { x, z, heading } = truckPose(tr, s.t);
-    const d = s.districts[districtAt(x, z)];
-    if (!d || (d.status === 'held' && totalZombies(d) < 40)) continue;
-    out.push({
-      kind: 'overwatch', district: d.id, site: null, truck: tr.id, crate: null, needed: 15, minutes: Math.floor(tr.arrive - s.t),
-      title: `Food truck in gridlock on ${streetName(x, z, heading)} in ${d.name}: needs overwatch`,
-      reward: { airframe: true }, urgency: 4.5,
-    });
-  }
   return out;
 }
 
-const keyOf = (c: { kind: RequestKind; district: number; site: number | null; truck: number | null; crate: CrateKind | null }) =>
-  `${c.kind}:${c.district}:${c.site}:${c.truck}:${c.crate}`;
+const keyOf = (c: { kind: RequestKind; district: number; site: number | null; crate: CrateKind | null }) =>
+  `${c.kind}:${c.district}:${c.site}:${c.crate}`;
 
 /** Every couple of hours: Command puts out the most urgent new request. */
 export function issueRequests(s: CityState, emit: Emit): void {
@@ -177,9 +137,9 @@ export function issueRequests(s: CityState, emit: Emit): void {
     .sort((a, b) => b.urgency - a.urgency)[0];
   if (!next) return;
   const r: Request = {
-    id: ++s.requestSeq, kind: next.kind, district: next.district, site: next.site, truck: next.truck, crate: next.crate,
+    id: ++s.requestSeq, kind: next.kind, district: next.district, site: next.site, crate: next.crate,
     needed: next.needed, progress: 0, title: next.title, issued: s.t, deadline: s.t + next.minutes,
-    reward: next.reward, status: 'open', closedAt: null, tracked: false, assigned: null, lastWatch: -Infinity,
+    reward: next.reward, status: 'open', closedAt: null, tracked: false, assigned: null,
   };
   s.requests.push(r);
   emit(r.district, 'warn', `Command request: ${r.title}. ${describeNeed(r)} within ${next.minutes >= 120 ? `${Math.round(next.minutes / 60)} hours` : `${next.minutes} minutes`}. ` +
@@ -197,8 +157,6 @@ export function describeNeed(r: Request): string {
       return `Bring out ${r.needed} people`;
     case 'extract':
       return `Bring out ${r.needed} scientist${r.needed > 1 ? 's' : ''}`;
-    case 'overwatch':
-      return `Hover over the truck for ${r.needed} minutes`;
   }
 }
 
@@ -219,26 +177,6 @@ export function credit(s: CityState, c: Credit, emit: Emit): void {
   }
 }
 
-/** The helicopter is watching over a request's truck this minute. */
-export function overwatch(s: CityState, id: number, emit: Emit): boolean {
-  const r = s.requests.find((x) => x.id === id && x.status === 'open' && x.kind === 'overwatch');
-  if (!r || r.lastWatch === s.t) return false;
-  r.lastWatch = s.t;
-  r.progress += 1;
-  if (r.progress >= r.needed) complete(s, r, emit);
-  return true;
-}
-
-/** Whether a truck has an overwatch request that's being flown right now. */
-export function watched(s: CityState, truck: number): boolean {
-  return s.requests.some((r) => r.kind === 'overwatch' && r.truck === truck && s.t - r.lastWatch <= OVERWATCH_GRACE);
-}
-
-/** Whether a truck has an open overwatch request (its crew is waiting for cover). */
-export function waitingForCover(s: CityState, truck: number): boolean {
-  return s.requests.some((r) => r.kind === 'overwatch' && r.truck === truck && r.status === 'open');
-}
-
 function complete(s: CityState, r: Request, emit: Emit): void {
   r.status = 'done';
   r.closedAt = s.t;
@@ -254,7 +192,6 @@ function complete(s: CityState, r: Request, emit: Emit): void {
     }
   }
   if (w.research) s.research += w.research;
-  if (w.airframe) addAirframe(s);
   if (w.pilot) s.pilots.push(createPilot(s));
   if (w.order) {
     const d = s.districts[r.district];
@@ -281,10 +218,6 @@ export function updateRequests(s: CityState, emit: Emit): void {
       // Brought out (by anyone) or lost.
       if (r.progress > 0) complete(s, r, emit);
       else fail(s, r, 'The research team is gone.', emit);
-    } else if (r.kind === 'overwatch' && !s.supply.trucks.some((t) => t.id === r.truck)) {
-      // Arrived (its deadline is its arrival), with enough cover; or lost on the way.
-      if (s.t >= r.deadline && r.progress >= r.needed / 2) complete(s, r, emit);
-      else fail(s, r, s.t >= r.deadline ? 'It got through, but without cover.' : 'The truck didn\'t make it.', emit);
     } else if (s.t >= r.deadline) fail(s, r, 'Out of time.', emit);
   }
   // Closed requests are kept a day for the record (and to hold off repeats).

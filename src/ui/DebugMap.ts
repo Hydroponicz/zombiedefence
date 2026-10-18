@@ -239,7 +239,7 @@ export class DebugMap {
     // Command requests: a diamond where each one is, gold for the one taken on.
     for (const r of s.requests) {
       if (r.status !== 'open') continue;
-      const at = requestTarget(s, r, s.t);
+      const at = requestTarget(s, r);
       if (!at) continue;
       const rx = mx + (at.x + CITY_WIDTH / 2) * scale;
       const ry = my + (at.z + CITY_DEPTH / 2) * scale;

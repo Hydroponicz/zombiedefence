@@ -242,7 +242,6 @@ kbd {
 #hud-request[hidden] { display: none; }
 #hud-request .what { font-weight: 600; }
 #hud-request .meta { color: var(--muted); font-size: 12px; }
-#hud-request .meta .watch { color: var(--held); font-weight: 600; }
 
 #pause {
   position: fixed;
@@ -444,3 +443,40 @@ kbd {
   mix-blend-mode: overlay;
 }
 @keyframes rc-roll { from { background-position: 0 0; } to { background-position: 0 60px; } }
+
+/* Developer console (` to open). */
+#dev-console {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  width: min(560px, calc(100vw - 32px));
+  padding: 10px 12px;
+  background: rgba(8, 12, 10, 0.92);
+  border: 1px solid #3c5a46;
+  border-radius: 6px;
+  color: #cfe8d4;
+  font-family: 'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace;
+  font-size: 13px;
+  pointer-events: auto;
+}
+#dev-console[hidden] { display: none; }
+#dev-console .dc-title { color: #7fa88a; margin-bottom: 8px; }
+#dev-console .dc-switch { display: flex; justify-content: space-between; gap: 12px; padding: 5px 6px; cursor: pointer; border-radius: 4px; }
+#dev-console .dc-switch:hover { background: rgba(127, 168, 138, 0.15); }
+#dev-console .dc-switch small { color: #7fa88a; }
+#dev-console .dc-switch b.on { color: #5fe07a; }
+#dev-console .dc-switch b.off { color: #e0705f; }
+#dev-console .dc-log { margin: 8px 0 6px; color: #9fbfa8; min-height: 1em; white-space: pre-wrap; }
+#dev-console .dc-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 6px;
+  background: #050806;
+  border: 1px solid #3c5a46;
+  border-radius: 4px;
+  color: #e6f5e9;
+  font: inherit;
+  outline: none;
+}
