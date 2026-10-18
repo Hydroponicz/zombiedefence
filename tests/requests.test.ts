@@ -26,6 +26,7 @@ describe('Command requests', () => {
     const d = named(s, 'Westfield');
     d.flags.outbreak = true;
     d.medicine = 0;
+    d.infected = 50;
     issueRequests(s, quietEmit);
     const r = openRequests(s)[0];
     expect(r.kind).toBe('supply');
@@ -36,9 +37,11 @@ describe('Command requests', () => {
     const sim = new CitySim(s);
     const camp = s.army;
     const troops = camp.troops.strength;
+    // Medicine goes to the place that asked: a pharmacy or shelter.
+    expect(r.site).not.toBeNull();
     for (let k = 0; k < r.needed; k++) {
       expect(sim.command({ type: 'loadCrate', kind: 'medicine', at: 'army' })).toBe(true);
-      expect(sim.command({ type: 'dropCrate', district: d.id })).toBe(true);
+      expect(sim.command({ type: 'dropCrate', district: d.id, site: r.site! })).toBe(true);
     }
     expect(r.status).toBe('done');
     expect(camp.troops.strength).toBe(troops + 15);
@@ -49,6 +52,7 @@ describe('Command requests', () => {
     const d = named(s, 'Eastside');
     d.flags.outbreak = true;
     d.medicine = 0;
+    d.infected = 50;
     const sim = new CitySim(s);
     sim.step(60);
     const r = s.requests[0];

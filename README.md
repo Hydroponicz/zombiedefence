@@ -394,7 +394,8 @@ How sites change over time:
   guards. A fallen shelter loses many of the people inside, and fallen sites burn. Troops can retake a
   site once the district is quiet again.
 - **Showing their status:** each site flies a flag (green held, amber under siege, black fallen),
-  has a sandbag ring while guarded, and blinks a beacon at night while it holds. The map marks every
+  has a sandbag ring while guarded, and blinks a beacon at night while it holds: green, red when its
+  district needs the medicine it takes, amber when it needs the food. The map marks every
   site (P, S, H, +), the district panel lists them, and the HUD names the one you're over.
 - **Land in the site's car park, field or plaza** to use it:
   - Garrison it with troops aboard (they stay posted there), or retake it if it has fallen.
@@ -402,8 +403,30 @@ How sites change over time:
     bitten get aboard.
   - Load crates from its stock: food from a supermarket, ammunition from a police armoury, medicine
     from a pharmacy. This works even at a fallen site, if you dare.
-  - Restock it with crates you brought.
+  - Deliver the crates it takes (see Relief crates).
 - **AI pilots** on an evacuation run take people from the fullest shelter.
+
+## Relief crates
+
+Every crate has its kind of place, and does its job the moment it lands.
+
+- **Where each goes:**
+  - **Medicine:** a pharmacy, a shelter, or anywhere at St. Mary's (the hospital).
+  - **Food:** a supermarket, a food depot or a shelter.
+  - **Ammunition:** anywhere: a street or any site. It goes to the district's troops, or, with
+    none there, arms its police for a day (they fight about a third better).
+- **The menu tells you:** landed, each kind of crate aboard gets a "Deliver" option showing what it
+  will do ("Westfield's food 0.4 → 1.1 days"), or, greyed out, where it goes instead.
+- **Straight into the district:** a delivery adds to the district's supplies at once. A site under
+  siege loses 30% of it in the fighting; a fallen site can't take it. A toast and the radio say what
+  changed.
+- **What medicine does:** once a district's outbreak is confirmed, medicine lets it find and isolate
+  the bitten before they turn (15% of them an hour, 10 doses each). They die in isolation, or are
+  cured once you have the antiviral.
+- **Needs:** the district panel and the map sidebar show what a district is short of: medicine (more
+  bitten than its doses can isolate), food (under a day left) or ammunition (under 100 rounds a
+  soldier).
+- **AI pilots** on a resupply run set down at the right place for what they carry.
 
 ## Hordes
 

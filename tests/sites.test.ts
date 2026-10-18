@@ -176,7 +176,7 @@ describe('sites in the simulation', () => {
 });
 
 describe('player at a site', () => {
-  it('garrisons, evacuates the shelter, takes stock away and restocks', () => {
+  it('garrisons, evacuates the shelter, takes stock away and delivers food there', () => {
     const s = city();
     const d = s.districts[westfield];
     const shelter = siteOf(s, 'shelter');
@@ -196,8 +196,10 @@ describe('player at a site', () => {
     const stock = store.rations;
     expect(applyCommand(s, { type: 'loadCrate', kind: 'rations', site: store.id }, quiet)).toBe(true);
     expect(store.rations).toBeCloseTo(stock - 5000, 6);
+    // Delivered to the shelter, the food goes straight into the district's supplies.
+    const food = s.districts[westfield].rations;
     expect(applyCommand(s, { type: 'dropCrate', district: westfield, site: shelter.id }, quiet)).toBe(true);
-    expect(shelter.rations).toBeGreaterThanOrEqual(5000);
+    expect(s.districts[westfield].rations).toBeGreaterThanOrEqual(food + 5000 * 0.7 - 1e-6);
   });
 
   it('cannot take more than a site holds', () => {

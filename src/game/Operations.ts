@@ -3,6 +3,7 @@
 // operation runs one person, crate or pump-load at a time and pauses while zombies are at the
 // doors. Refuelling at the base or a forward refuelling point happens on its own.
 
+import { deliveryEffect, deliveryPlace } from '../sim/supplies';
 import { hasResearch, LURE_CAPACITY, LURE_HOURS } from '../sim/research';
 import type { Action } from '../input/Input';
 import {
@@ -25,7 +26,7 @@ import {
   type PlayerCommand,
 } from '../sim/operations';
 import { guardsNeeded, SITE_LABELS, siteNear } from '../sim/sites';
-import type { CityState, CrateKind, Site } from '../sim/types';
+import type { CityState, CrateKind, DistrictState, Site } from '../sim/types';
 
 export interface GroundContext {
   /** On the ground and nearly stopped. */
@@ -164,7 +165,7 @@ export class Operations {
     }
 
     const options = atBase ? this.baseOptions(state, ctx)
-      : [...this.jocOptions(state, ctx), ...(site ? this.siteOptions(state, ctx, site) : []), ...this.districtOptions(state, ctx)];
+      : [...this.jocOptions(state, ctx), ...(site ? this.siteOptions(state, ctx, site) : []), ...this.districtOptions(state, ctx, site)];
     if (actions.has('dpadUp') || actions.has('arrowUp')) this.selected--;
     if (actions.has('dpadDown') || actions.has('arrowDown')) this.selected++;
     this.selected = (this.selected + options.length) % options.length;
@@ -380,18 +381,31 @@ export class Operations {
         enabled: canApply(s, load), command: load, interval: 3, repeat: false,
       });
     }
-    if (c.crates.length) {
-      const drop: PlayerCommand = { type: 'dropCrate', district: d.id, site: site.id };
-      options.push({
-        id: 'site-drop', label: `Restock the ${label}`,
-        detail: `${c.crates.map((k) => CRATES[k].label).join(', ')} · stocked here, handed out when ${d.name} runs short`,
-        enabled: canApply(s, drop), command: drop, interval: 2, repeat: true,
-      });
-    }
-    return options;
+    return [...this.deliveryOptions(s, d, site), ...options];
   }
 
-  private districtOptions(s: CityState, ctx: GroundContext): Option[] {
+  /** One option per kind of crate aboard: deliver it here (and what it'll do), or why it can't go here. */
+  private deliveryOptions(s: CityState, d: DistrictState, site?: Site): Option[] {
+    return [...new Set(s.cargo.crates)].map((kind) => {
+      const place = deliveryPlace(s, kind, d.id, site);
+      const n = s.cargo.crates.filter((k) => k === kind).length;
+      const effect = place.ok ? deliveryEffect(s, kind, d.id, place.share) : '';
+      const command: PlayerCommand = { type: 'dropCrate', district: d.id, site: site?.id, kind };
+      return {
+        id: `deliver-${kind}`,
+        label: `Deliver ${CRATES[kind].label}${n > 1 ? ` (${n} aboard)` : ''}`,
+        detail: place.ok ? `${effect}${place.share < 1 ? ' · some will be lost to the siege' : ''}` : place.reason,
+        enabled: place.ok && canApply(s, command),
+        command,
+        interval: 2,
+        repeat: true,
+        after: place.ok ? () => this.onToast(`Delivered: ${effect}`) : undefined,
+      };
+    });
+  }
+
+  /** @param site the site the helicopter is at, which handles its own deliveries */
+  private districtOptions(s: CityState, ctx: GroundContext, site?: Site): Option[] {
     const d = s.districts[ctx.district];
     const c = s.cargo;
     const stairs = ctx.onRoof ? ROOF_SLOWDOWN : 1;
@@ -407,15 +421,7 @@ export class Operations {
         interval: 0.5 * Math.sqrt(stairs),
         repeat: true,
       },
-      {
-        id: 'drop',
-        label: 'Unload crates',
-        detail: c.crates.length ? `${c.crates.map((k) => CRATES[k].label).join(', ')} · straight into ${d.name}'s supplies` : 'None aboard',
-        enabled: canApply(s, { type: 'dropCrate', district: d.id }),
-        command: { type: 'dropCrate', district: d.id },
-        interval: 2,
-        repeat: true,
-      },
+      ...(site ? [] : this.deliveryOptions(s, d)),
       ...(c.lures > 0 ? [{
         id: 'drop-lure', label: 'Set down a noise lure',
         detail: `${c.lures} aboard · the dead come to it for ${LURE_HOURS} hours`,

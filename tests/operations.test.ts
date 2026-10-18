@@ -33,19 +33,60 @@ describe('player operations in the simulation', () => {
     expect(sim.command({ type: 'loadTroop' })).toBe(false);
   });
 
-  it('carries relief crates from base stores to a district', () => {
+  it('carries relief crates from base stores to a district, each kind to its kind of place', () => {
     const sim = deployed(new CitySim('crates'));
-    const base = baseOf(sim.state);
+    const s = sim.state;
+    const base = baseOf(s);
     const market = byName(sim, 'Market District');
     const stock = base.rations;
     for (let i = 0; i < 3; i++) sim.command({ type: 'loadCrate', kind: 'rations' });
-    expect(sim.state.cargo.crates).toHaveLength(CRATE_SLOTS);
+    expect(s.cargo.crates).toHaveLength(CRATE_SLOTS);
     expect(base.rations).toBe(stock - CRATE_SLOTS * CRATES.rations.amount);
+    // Food doesn't go out on the street, only to a supermarket, a depot or a shelter.
+    expect(sim.command({ type: 'dropCrate', district: market.id })).toBe(false);
+    const store = s.sites.find((x) => x.district === market.id && x.kind === 'supermarket')!;
+    store.status = 'held';
     market.order = 40;
     const food = market.rations;
-    sim.command({ type: 'dropCrate', district: market.id });
+    expect(sim.command({ type: 'dropCrate', district: market.id, site: store.id })).toBe(true);
     expect(market.rations).toBe(food + CRATES.rations.amount);
     expect(market.order).toBe(40 + CRATES.rations.order);
+    // Ammunition goes anywhere: to the troops.
+    sim.command({ type: 'dropCrate', district: market.id, site: store.id });
+    sim.command({ type: 'loadCrate', kind: 'ammo' });
+    const ammo = market.troops.ammo;
+    expect(sim.command({ type: 'dropCrate', district: market.id })).toBe(true);
+    expect(market.troops.ammo).toBe(ammo + CRATES.ammo.amount);
+    // A fallen site takes nothing.
+    sim.command({ type: 'loadCrate', kind: 'rations' });
+    store.status = 'fallen';
+    expect(sim.command({ type: 'dropCrate', district: market.id, site: store.id })).toBe(false);
+  });
+
+  it('medicine goes to a pharmacy, a shelter or the hospital, and isolates the bitten', () => {
+    const sim = deployed(new CitySim('medicine'));
+    const s = sim.state;
+    const westfield = byName(sim, 'Westfield');
+    sim.command({ type: 'loadCrate', kind: 'medicine' });
+    expect(sim.command({ type: 'dropCrate', district: westfield.id })).toBe(false);
+    const hospital = s.districts.find((d) => d.features.hospital)!;
+    expect(sim.command({ type: 'dropCrate', district: hospital.id })).toBe(true);
+
+    // With medicine, the bitten are found and isolated before they turn.
+    const turnedFrom = (medicine: number) => {
+      const t = deployed(new CitySim('isolation'));
+      const d = t.state.districts.find((x) => x.name === 'Westfield')!;
+      for (const x of t.state.districts) {
+        x.zombies = 0;
+        x.infected = 0;
+      }
+      d.flags.outbreak = true;
+      d.infected = 400;
+      d.medicine = medicine;
+      t.step(4 * 60);
+      return d.zombies + d.infected;
+    };
+    expect(turnedFrom(20000)).toBeLessThan(turnedFrom(0) * 0.8);
   });
 
   it('evacuates civilians to the base, where the bitten among them are caught at the gate', () => {

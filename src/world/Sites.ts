@@ -1,15 +1,18 @@
 // Status markers at the strategic sites: a flag (green held, amber under siege, black fallen),
 // a sandbag ring around the landing zone while soldiers are posted, and a beacon that blinks at
-// night over the sites still holding, so they can be found in the dark.
+// night over the sites still holding, so they can be found in the dark: green, or red when its
+// district is short of the medicine it takes, amber when short of the food.
 
 import * as THREE from 'three';
 import { planSites, type SitePlan } from '../sim/sites';
-import type { Site, SiteStatus } from '../sim/types';
+import { siteNeed } from '../sim/supplies';
+import type { DistrictState, Site, SiteStatus } from '../sim/types';
 
 const POLE_HEIGHT = 12;
 const BAGS = 12;
 const BAG_RING = 12.5;
 const FLAG_COLOR: Record<SiteStatus, number> = { held: 0x3fae4f, besieged: 0xe0a030, fallen: 0x1c1c1c };
+const BEACON = { held: 0x9dff7a, medicine: 0xff3a30, food: 0xffb23a };
 
 export class Sites {
   readonly group = new THREE.Group();
@@ -19,6 +22,7 @@ export class Sites {
   private bags: THREE.InstancedMesh;
   private guarded: boolean[];
   private holding: boolean[];
+  private beaconColor: number[] = [];
   private time = 0;
   private m = new THREE.Matrix4();
   private q = new THREE.Quaternion();
@@ -31,6 +35,7 @@ export class Sites {
     const n = this.plans.length;
     this.guarded = this.plans.map(() => false);
     this.holding = this.plans.map(() => true);
+    this.beaconColor = this.plans.map(() => BEACON.held);
 
     const poleGeo = new THREE.CylinderGeometry(0.12, 0.12, POLE_HEIGHT, 6);
     poleGeo.translate(0, POLE_HEIGHT / 2, 0);
@@ -40,7 +45,8 @@ export class Sites {
     this.flags = new THREE.InstancedMesh(flagGeo, new THREE.MeshLambertMaterial(), n);
     const beaconGeo = new THREE.SphereGeometry(0.45, 8, 6);
     beaconGeo.translate(0, POLE_HEIGHT + 0.4, 0);
-    this.beacons = new THREE.InstancedMesh(beaconGeo, new THREE.MeshBasicMaterial({ color: 0x9dff7a }), n);
+    this.beacons = new THREE.InstancedMesh(beaconGeo, new THREE.MeshBasicMaterial(), n);
+    this.beacons.setColorAt(0, this.c.setHex(BEACON.held));
     const bagGeo = new THREE.BoxGeometry(2.6, 1, 0.9);
     bagGeo.translate(0, 0.5, 0);
     this.bags = new THREE.InstancedMesh(bagGeo, new THREE.MeshLambertMaterial({ color: 0x8b7d5a }), n * BAGS);
@@ -61,12 +67,16 @@ export class Sites {
     this.group.add(poles, this.flags, this.beacons, this.bags);
   }
 
-  sync(sites: Site[]): void {
+  /** @param districts for what each site's district needs: its beacon shows it */
+  sync(sites: Site[], districts: DistrictState[] = []): void {
     const byId = new Map(sites.map((x) => [x.id, x]));
     let bag = 0;
     this.plans.forEach((p, i) => {
       const site = byId.get(p.id);
       if (!site) return;
+      const d = districts[site.district];
+      const need = d ? siteNeed(d, site, sites) : null;
+      this.beaconColor[i] = need === 'medicine' ? BEACON.medicine : need === 'rations' ? BEACON.food : BEACON.held;
       this.flags.setColorAt(i, this.c.setHex(FLAG_COLOR[site.status]));
       this.guarded[i] = site.status !== 'fallen' && site.guards >= 1;
       this.holding[i] = site.status !== 'fallen';
@@ -93,11 +103,13 @@ export class Sites {
       this.plans.forEach((p, i) => {
         if (!this.holding[i]) return;
         this.m.makeTranslation(...this.polePos(p));
+        this.beacons.setColorAt(n, this.c.setHex(this.beaconColor[i]));
         this.beacons.setMatrixAt(n++, this.m);
       });
     }
     this.beacons.count = n;
     this.beacons.instanceMatrix.needsUpdate = true;
+    if (this.beacons.instanceColor) this.beacons.instanceColor.needsUpdate = true;
   }
 
   private polePos(p: SitePlan): [number, number, number] {

@@ -4,6 +4,7 @@
 
 import { replaceHelicopter } from './campaign';
 import { assignable, credit, overwatch } from './requests';
+import { deliver, deliveryEffect, deliveryPlace } from './supplies';
 import { hasResearch, LURE_CAPACITY, LURE_HOURS, researchBlocked, startResearch } from './research';
 import { airportOf, establishJoc, hubOf, mergeTroops } from './command';
 import { addAirframe, maybeRecruit, validOrder } from './pilots';
@@ -60,8 +61,11 @@ export type PlayerCommand =
   | { type: 'establishJoc' }
   /** Into the district; with `site`, posted to guard that site. */
   | { type: 'deployTroop'; district: number; site?: number }
-  /** Into the district's stocks, or a site's when `site` is given. */
-  | { type: 'dropCrate'; district: number; site?: number }
+  /**
+   * Deliver a crate here (the street, or `site`): `kind`, or the first aboard that can go here.
+   * Each kind has its places (see supplies.ts).
+   */
+  | { type: 'dropCrate'; district: number; site?: number; kind?: CrateKind }
   /** With `site`, civilians come out of that shelter. */
   | { type: 'board'; district: number; kind: BoardKind; site?: number }
   | { type: 'unloadAtBase'; at?: BaseId }
@@ -170,7 +174,7 @@ export function canApply(s: CityState, cmd: PlayerCommand): boolean {
     case 'deployTroop':
       return c.troops >= 1 && (cmd.site === undefined || !!siteOf(s, cmd.site));
     case 'dropCrate':
-      return c.crates.length > 0 && (cmd.site === undefined || !!siteOf(s, cmd.site));
+      return crateToDrop(s, cmd) !== null;
     case 'board': {
       if (!seatFree) return false;
       const d = s.districts[cmd.district];
@@ -292,27 +296,18 @@ export function applyCommand(s: CityState, cmd: PlayerCommand, emit: Emit): bool
     }
     case 'dropCrate': {
       const d = s.districts[cmd.district];
-      const kind = c.crates.shift()!;
-      const crate = CRATES[kind];
+      const index = crateToDrop(s, cmd)!;
+      const kind = c.crates[index];
       const site = cmd.site === undefined ? undefined : siteOf(s, cmd.site);
-      if (site) {
-        // Stocked at a site, handed out from there as long as it holds.
-        if (kind === 'rations') site.rations += crate.amount;
-        else if (kind === 'medicine') site.medicine += crate.amount;
-        else site.ammo += crate.amount;
-        d.order = Math.min(100, d.order + crate.order);
-        s.stats.cratesDelivered += 1;
-        emit(d.id, 'info', `A crate of ${crate.label} has been delivered to ${siteName(site, d)}, to hand out when ${d.name} runs short.`, true);
-        credit(s, { what: 'crate', district: d.id, site: site.id, crate: kind, amount: 1, by: 'player' }, emit);
-        return true;
-      }
-      if (kind === 'rations') d.rations += crate.amount;
-      else if (kind === 'medicine') d.medicine += crate.amount;
-      else d.troops.ammo += crate.amount;
-      d.order = Math.min(100, d.order + crate.order);
+      const place = deliveryPlace(s, kind, d.id, site) as { ok: true; share: number };
+      const effect = deliveryEffect(s, kind, d.id, place.share);
+      c.crates.splice(index, 1);
+      deliver(s, kind, d, place.share);
+      d.order = Math.min(100, d.order + CRATES[kind].order);
       s.stats.cratesDelivered += 1;
-      emit(d.id, 'info', `A relief crate of ${crate.label} has been delivered to ${d.name}.`, true);
-      credit(s, { what: 'crate', district: d.id, crate: kind, amount: 1, by: 'player' }, emit);
+      emit(d.id, 'info', `A crate of ${CRATES[kind].label} has reached ${site ? siteName(site, d) : d.name}` +
+        `${place.share < 1 ? ', some of it lost in the fighting' : ''}: ${effect}.`, true);
+      credit(s, { what: 'crate', district: d.id, site: site?.id, crate: kind, amount: 1, by: 'player' }, emit);
       return true;
     }
     case 'board': {
@@ -572,4 +567,12 @@ function takeBaseStock(base: DistrictState, kind: CrateKind, amount: number): vo
 export function requestOrder(r: Request): Order {
   const kind: JobKind = r.kind === 'supply' ? 'resupply' : r.kind === 'reinforce' ? 'reinforce' : 'evacuate';
   return { kind, district: r.district, crate: r.crate ?? 'rations', repeat: false };
+}
+
+/** Which crate aboard a drop would deliver (its index), or null if none can go there. */
+export function crateToDrop(s: CityState, cmd: { district: number; site?: number; kind?: CrateKind }): number | null {
+  const site = cmd.site === undefined ? undefined : siteOf(s, cmd.site);
+  if (cmd.site !== undefined && !site) return null;
+  const i = s.cargo.crates.findIndex((k) => (cmd.kind === undefined || k === cmd.kind) && deliveryPlace(s, k, cmd.district, site).ok);
+  return i < 0 ? null : i;
 }

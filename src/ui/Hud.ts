@@ -7,6 +7,7 @@ import { totalZombies } from '../sim/hordes';
 import { CRATES, SEATS } from '../sim/operations';
 import { SITE_LABELS } from '../sim/sites';
 import { roadStatus } from '../sim/traffic';
+import { needs } from '../sim/supplies';
 
 const POLICE_STAGE = { patrol: 'patrols', checkpoints: 'checkpoints', support: 'with the army' } as const;
 import type { Cargo, DistrictState, PlayerStats, SimEvent, Site, Traffic } from '../sim/types';
@@ -212,8 +213,9 @@ export class Hud {
         (nearby.capacity && nearby.status !== 'fallen' ? ` · ${approx(nearby.sheltered)} sheltered` : '')
       : '';
     const roads = district && traffic && district.kind !== 'airbase' && district.kind !== 'army' ? roadStatus(traffic, district.id) : '';
+    const need = district ? needs(district, sites).join(' · ') : '';
     const key = district
-      ? `${roads}|${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${district?.police.stage}|${siteLine}|${near}`
+      ? `${need}|${roads}|${district.id}|${district.status}|${district.power}|${Math.round(district.order)}|${district.rioting}|${zombies}|${troops}|${police}|${district?.police.stage}|${siteLine}|${near}`
       : 'none';
     if (key !== this.lastDistrictKey) {
       this.lastDistrictKey = key;
@@ -224,6 +226,7 @@ export class Hud {
            <div class="meta">Zombies ${zombies} · Troops ${troops}${police ? ` · Police ${police} (${POLICE_STAGE[district.police.stage]})` : ''}</div>
            ${siteLine ? `<div class="meta">Sites: ${siteLine}</div>` : ''}
            ${roads ? `<div class="meta">Roads: ${roads}</div>` : ''}
+           ${need ? `<div class="meta need">Needs: ${need}</div>` : ''}
            ${near ? `<div class="meta site ${nearby!.status}">${SITE_LABELS[nearby!.kind]}: ${near}</div>` : ''}`
         : `<div class="name">Outside the city</div>`;
     }

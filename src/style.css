@@ -58,6 +58,7 @@ html, body {
 #hud-district .name { font-size: 16px; font-weight: 600; }
 #hud-district .meta { font-size: 12px; color: var(--muted); }
 #hud-district .site { color: var(--text); }
+#hud-district .need { color: var(--warn); }
 #hud-district .site.besieged { color: var(--warn); }
 #hud-district .site.fallen { color: var(--critical); }
 

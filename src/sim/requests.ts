@@ -10,6 +10,7 @@ import { totalZombies } from './hordes';
 import { districtAt } from './layout';
 import { addAirframe, createPilot } from './pilots';
 import { siteName } from './sites';
+import { needsMedicine } from './supplies';
 import { nodeX, nodeZ, STREET_SPACING } from './streets';
 import { truckPose } from './supply';
 import type { CityState, CrateKind, DistrictState, Request, RequestKind, Reward, Severity, Site } from './types';
@@ -115,7 +116,7 @@ function candidates(s: CityState): Candidate[] {
         minutes: 150, title: label(place), reward: { troops: 15, order: 8 }, urgency,
       });
     };
-    if (d.flags.outbreak && d.medicine < n * 0.05) shortOf('medicine', ['pharmacy', 'shelter'], 3, (p) => `${p} is out of medicine`);
+    if (needsMedicine(d)) shortOf('medicine', ['pharmacy', 'shelter'], 3, (p) => `${p} is out of medicine`);
     if (d.rations < n * 0.25) shortOf('rations', ['supermarket', 'depot', 'shelter'], 2, (p) => `${p} is running out of food`);
     if (d.troops.strength >= 10 && d.troops.ammo < d.troops.strength * 60) {
       shortOf('ammo', ['police'], 4, () => `Troops in ${d.name} are low on ammunition`);

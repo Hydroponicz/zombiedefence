@@ -329,7 +329,7 @@ function update(dt: number): void {
     state.districts.forEach((d, i) => city.setDistrictLight(i, POWER_LIGHT[d.power]));
     effects.syncWithSim(state);
     farps.sync(state.farps);
-    sites.sync(state.sites);
+    sites.sync(state.sites, state.districts);
     joc.sync(state);
     lures.sync(state.lures);
   }

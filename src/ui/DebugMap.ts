@@ -1,6 +1,7 @@
 // Full-screen 2D debug map of the city simulation: district overlays, a detail panel,
 // city-wide history and the event log. Navigable by mouse, keyboard or controller.
 
+import { needs } from '../sim/supplies';
 import { requestTarget } from '../game/Requests';
 import { formatClock, MINUTES_PER_DAY, NIGHT_START, DAY_START } from '../sim/clock';
 import { ARMY_BASE, CITY_DEPTH, CITY_WIDTH, DISTRICT_SIZE, DISTRICT_TEMPLATES, GRID_COLS, GRID_ROWS } from '../sim/layout';
@@ -427,8 +428,9 @@ export class DebugMap {
       ['Order', d.order.toFixed(0)],
       // Stock held at the district's sites is handed out once the district runs short.
       ['Food & water', `${(d.rations / Math.max(1, people)).toFixed(1)} days${atSites('rations', 1)}`],
-      ['Medicine', `${(d.medicine / Math.max(1, people)).toFixed(2)} days${atSites('medicine', 2)}`],
+      ['Medicine', `${fmt(d.medicine)} doses${d.infected >= 1 ? ` (${fmt(d.infected)} bitten)` : ''}`],
       ['Fuel', `${fmt(d.fuel)} L`],
+      ['Needs', needs(d, s.sites).join(', ') || 'nothing urgent'],
       ['Roads', roadStatus(s.traffic, d.id)],
     ];
     this.text(d.name, x + 14, y + 28, 18, '#e8ecdf', 'left', true);

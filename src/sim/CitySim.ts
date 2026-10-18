@@ -15,6 +15,7 @@ import { baseSealed, checkSeal, isBase, screenAtGate } from './quarantine';
 import { compareDay, createCampaign, describeReport, finalEvacuation, updateCampaign } from './campaign';
 import { ISSUE_EVERY, issueRequests, updateRequests } from './requests';
 import { hasResearch, updateLures } from './research';
+import { DOSES_PER_ISOLATION, policeArmed } from './supplies';
 import { hashSeed, nextRandom } from './rng';
 import type { CityState, DistrictState, Severity, SimEvent } from './types';
 
@@ -29,6 +30,8 @@ export const TUNING = {
   biteRateNight: 0.14,
   /** Average hours from bite to turning. */
   turnHours: 4,
+  /** Share of the bitten found and isolated an hour where there's medicine to do it. */
+  isolationRate: 0.15,
   /** Kills per effective soldier per hour when fully engaged. */
   soldierKillRate: 2,
   /**
@@ -418,11 +421,12 @@ function updatePower(s: CityState, day: number, night: boolean, emit: Emit): voi
 }
 
 /** How well the police fight: morale, light and riots; they have no ammunition problem to speak of. */
-function policeEffectiveness(d: DistrictState, night: boolean): number {
+function policeEffectiveness(s: CityState, d: DistrictState, night: boolean): number {
   const light = night ? (d.power === 'dark' ? 0.6 : 0.85) : 1;
-  // Working alongside soldiers, they fight better.
+  // Working alongside soldiers, they fight better; so they do with ammunition flown in.
   const support = d.police.stage === 'support' ? 1.2 : 1;
-  return (0.35 + 0.65 * d.police.morale) * light * (d.rioting ? 0.8 : 1) * support;
+  const armed = policeArmed(s, d) ? 1.3 : 1;
+  return (0.35 + 0.65 * d.police.morale) * light * (d.rioting ? 0.8 : 1) * support * armed;
 }
 
 function effectiveness(d: DistrictState, night: boolean): number {
@@ -446,7 +450,7 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const O = pol.officers;
   // Riot squads only fight once they're called out; in reserve at the station they don't.
   const R = pol.riotOut ? pol.riot : 0;
-  const pe = O + pol.riot > 0 ? policeEffectiveness(d, night) : 0;
+  const pe = O + pol.riot > 0 ? policeEffectiveness(s, d, night) : 0;
 
   // --- Outbreak and combat ---
   // Soldiers and police only protect the part of the district they can cover. Officers patrol
@@ -513,6 +517,15 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
     tr.strength = 0;
   }
 
+  // Once the outbreak is known, medicine lets the district find and isolate the bitten before
+  // they turn: they die in isolation, or with the antiviral, are cured.
+  if (d.flags.outbreak && d.medicine > 0 && d.infected > 0) {
+    const isolated = Math.min(d.infected * TUNING.isolationRate * H, d.medicine / DOSES_PER_ISOLATION);
+    d.infected -= isolated;
+    d.medicine -= isolated * DOSES_PER_ISOLATION;
+    if (hasResearch(s, 'antiviral')) d.population += isolated;
+    else d.dead += isolated;
+  }
   const turned = d.infected * (H / TUNING.turnHours);
   d.infected -= turned;
   d.zombies += turned;

@@ -5,6 +5,7 @@
 import { districtCenter, DISTRICT_TEMPLATES } from './layout';
 import { credit } from './requests';
 import { hasResearch } from './research';
+import { deliver } from './supplies';
 import { BASE_RESERVE_TROOPS, baseOf, bladderLitres, CRATES, mergeTroops, ROUNDS_PER_TROOP, SEATS, type Emit } from './operations';
 import { hubPosition } from './command';
 import { totalZombies } from './hordes';
@@ -244,10 +245,9 @@ function land(s: CityState, p: Pilot, d: DistrictState, emit: Emit): void {
     credit(s, { what: 'troops', district: d.id, amount: trip.troops, by: 'ai' }, emit);
     trip.troops = 0;
   }
+  // Pilots set down at the right place for what they carry.
   for (const crate of trip.crates) {
-    if (crate === 'rations') d.rations += CRATES.rations.amount;
-    else if (crate === 'medicine') d.medicine += CRATES.medicine.amount;
-    else d.troops.ammo += CRATES.ammo.amount;
+    deliver(s, crate, d, 1);
     d.order = Math.min(100, d.order + CRATES[crate].order);
     s.stats.cratesDelivered += 1;
     credit(s, { what: 'crate', district: d.id, crate, amount: 1, by: 'ai' }, emit);
