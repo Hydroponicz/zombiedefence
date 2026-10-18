@@ -918,9 +918,10 @@ export class City {
     this.boxes.push({ x: cx, z: cz, w: DISTRICT_SIZE - 40, d: DISTRICT_SIZE - 40, h: 0.15, color: 0x5d6a4e, district });
     // A 1,400 m runway, a parallel taxiway, links and the apron.
     this.boxes.push({ x: cx, z: cz + 420, w: 1360, d: 45, h: 0.3, color: 0x3a3a3c, district });
-    for (let k = 0; k < 20; k++) this.boxes.push({ x: cx - 620 + k * 65, z: cz + 420, w: 30, d: 1, h: 0.32, color: 0xe8e8e2, district });
+    for (let k = 0; k < 20; k++) this.boxes.push({ x: cx - 620 + k * 65, z: cz + 420, w: 30, d: 1, h: 0.4, color: 0xe8e8e2, district });
     this.boxes.push({ x: cx, z: cz + 330, w: 1100, d: 23, h: 0.3, color: 0x46464a, district });
-    for (const dx of [-450, 0, 450]) this.boxes.push({ x: cx + dx, z: cz + 375, w: 23, d: 90, h: 0.3, color: 0x46464a, district });
+    // The links sit just under the taxiway and runway they join, so the overlaps don't fight.
+    for (const dx of [-450, 0, 450]) this.boxes.push({ x: cx + dx, z: cz + 375, w: 23, d: 90, h: 0.22, color: 0x46464a, district });
     this.boxes.push({ x: cx - 80, z: cz + 60, w: 720, d: 260, h: 0.3, color: 0x6c6c6c, district });
     // The terminal: a long glass hall with three piers out to the gates.
     this.building(district, cx - 170, cz - 175, 520, 60, 18, 0x8a99a6, 2);
@@ -966,10 +967,13 @@ export class City {
   private buildArmyBase(): void {
     const district = DISTRICT_TEMPLATES.findIndex((d) => d.kind === 'airbase');
     const { x: cx, z: cz } = ARMY_BASE;
-    const ground = (x: number, z: number, w: number, d: number, color: number) =>
-      this.boxes.push({ x, z, w, d, h: 0.75, y: -0.6, color, district });
+    // Layers 10 cm apart, never level with each other: the logarithmic depth buffer ignores polygon
+    // offset, so surfaces at the same height would fight over every pixel.
+    const ground = (x: number, z: number, w: number, d: number, color: number, top = 0.15) =>
+      this.boxes.push({ x, z, w, d, h: top + 0.6, y: -0.6, color, district });
     ground(cx, cz, 900, 700, 0x6b6a52);
-    ground(cx - 120, cz - 160, 520, 140, 0x8a8a84);
+    // The concrete apron under the pads (pad markings sit just above it, at the landing height).
+    ground(cx - 120, cz - 160, 520, 140, 0x8a8a84, 0.25);
     // The road east to the city's edge.
     ground((cx + 450 + (-CITY_WIDTH / 2)) / 2, cz, -CITY_WIDTH / 2 - cx - 450, 14, 0x3a3a3c);
     for (const [w, d, dx, dz] of [[900, 0.4, 0, -350], [900, 0.4, 0, 350], [0.4, 700, -450, 0], [0.4, 280, 450, -210], [0.4, 280, 450, 210]]) {
@@ -1153,7 +1157,7 @@ export class City {
     for (const pad of this.helipads) {
       const m = new THREE.Mesh(new THREE.CircleGeometry(10, 32), padMat);
       m.rotation.x = -Math.PI / 2;
-      m.position.set(pad.x, pad.y + 0.05, pad.z);
+      m.position.set(pad.x, pad.y + 0.08, pad.z);
       this.group.add(m);
     }
   }
