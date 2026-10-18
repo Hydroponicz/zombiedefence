@@ -3,6 +3,8 @@ import { CitySim, createCity } from '../src/sim/CitySim';
 import { districtAt } from '../src/sim/layout';
 import { nodeX, nodeZ } from '../src/sim/streets';
 import { clean, RAIL, TRAIN_RATIONS, TRUCK_RATIONS, truckPose, updateSupply } from '../src/sim/supply';
+import { ACCESS_END } from '../src/sim/airportGrounds';
+import { closedEdge, edgeIndex } from '../src/sim/traffic';
 import type { CityState } from '../src/sim/types';
 
 const quiet = () => {};
@@ -83,6 +85,23 @@ describe('food supply', () => {
     // A clean district's shelves are never bare, even before the trucks arrive.
     expect(hungry.rations).toBeGreaterThan(0);
     expect(clean(sick)).toBe(false);
+  });
+
+  it('brings the airport its food by its access road, never across the airfield', () => {
+    const s = cleanCity();
+    const airport = s.districts.find((d) => d.kind === 'airbase')!;
+    const sim = new CitySim(s);
+    let truck: (typeof s.supply.trucks)[number] | undefined;
+    for (let m = 0; m < 1440 * 3 && !truck; m++) {
+      airport.rations = 0;
+      sim.step(1);
+      truck = s.supply.trucks.find((t) => t.to === airport.id);
+    }
+    expect(truck).toBeTruthy();
+    const path = truck!.path;
+    expect([path[path.length - 2], path[path.length - 1]]).toEqual(ACCESS_END);
+    for (let k = 2; k < path.length; k += 2) expect(closedEdge(edgeIndex(path[k - 2], path[k - 1], path[k], path[k + 1]))).toBe(false);
+    expect(s.log.some((e) => /can't get through to Kessler/.test(e.text))).toBe(false);
   });
 
   it('drives trucks along the streets and unloads on arrival', () => {

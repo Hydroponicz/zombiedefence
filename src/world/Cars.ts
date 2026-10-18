@@ -11,7 +11,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, STREET_SPACING } from '../sim/streets';
 import { DISTRICT_TEMPLATES, districtAt } from '../sim/layout';
 import { cityLight, Glow, vehicleLamps } from './CityLight';
-import { checkpointNodes, congestion, districtOfEdge, edgeIndex, isAvenue, speedFactor } from '../sim/traffic';
+import { checkpointNodes, closedEdge, congestion, districtOfEdge, edgeIndex, isAvenue, speedFactor } from '../sim/traffic';
 import type { CityState, Traffic } from '../sim/types';
 
 const MOVING = 2600;
@@ -264,7 +264,8 @@ export class Cars {
     const options: { axis: 0 | 1; line: number; dir: 1 | -1; s: number; w: number }[] = [];
     const weigh = (e: number, straight: boolean) => {
       const b = t.blocked[e];
-      return b > 0.9 ? 0 : (t.load[e] + 30) * (1 - b) ** 2 * (straight ? 5 : 1);
+      // Nobody drives into the airport but by its access road.
+      return b > 0.9 || closedEdge(e) ? 0 : (t.load[e] + 30) * (1 - b) ** 2 * (straight ? 5 : 1);
     };
     const n = nodesAlong(c.axis);
     if (k + c.dir >= 0 && k + c.dir < n) {
@@ -476,6 +477,7 @@ export class Cars {
           const d = Math.hypot((nodeX(i) + nodeX(ni)) / 2 - cx, (nodeZ(j) + nodeZ(nj)) / 2 - cz);
           if (d > RADIUS) continue;
           const e = edgeIndex(i, j, ni, nj);
+          if (closedEdge(e)) continue;
           const line = axis === 0 ? j : i;
           const k = axis === 0 ? i : j;
           const inset = roadWidth(axis === 0 ? i : j) / 2 + 2;
@@ -599,6 +601,7 @@ export class Cars {
             const bz = nodeZ(nj);
             if (Math.hypot((ax + bx) / 2 - cx, (az + bz) / 2 - cz) > RADIUS) continue;
             const e = edgeIndex(i, j, ni, nj);
+            if (closedEdge(e)) continue;
             const blocked = t.blocked[e];
             // Keep clear of the cross streets' intersections.
             const inset = roadWidth(ni === i ? j : i) / 2 + 2;

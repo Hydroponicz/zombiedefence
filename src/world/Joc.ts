@@ -1,9 +1,11 @@
 // The Joint Operations Command at the airport: command tents behind sandbags on the apron beside
-// the helicopter pads, antenna masts, generators, army trucks and a flag. It appears once the JOC
-// is established.
+// the helicopter pads, antenna masts, generators, army trucks and a flag; and a checkpoint on the
+// access road inside the north gate, where the airport's staff are screened on their way in to work
+// and everyone else is turned back. It appears once the JOC is established.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { northGate } from '../sim/airportGrounds';
 import { districtCenter, DISTRICT_TEMPLATES } from '../sim/layout';
 import type { CityState } from '../sim/types';
 
@@ -60,6 +62,21 @@ export class Joc {
     for (const [dx, dz, h] of [[48, 30, 24], [52, 24, 18], [-56, -8, 20]] as const) parts.push(mast(h, x0 + dx, z0 + dz));
     parts.push(mast(12, x0, z0 - 10));
     parts.push(box(3.2, 1.9, 0.08, x0 + 1.6, 9.8, z0 - 10, 0x3f6b35));
+    // The checkpoint inside the north gate: a chicane of concrete barriers to slow every car, a
+    // screening tent and a sandbagged post beside the road, and a Humvee pulled across the far side.
+    const gate = northGate();
+    const CONCRETE = 0xbdb9ad;
+    for (let k = 0; k < 4; k++) {
+      const side = k % 2 === 0 ? -1 : 1;
+      parts.push(box(6, 0.9, 0.7, gate.x + side * 3.5, 0, gate.z + 16 + k * 10, CONCRETE));
+    }
+    parts.push(box(8, 3, 6, gate.x - 15, 0, gate.z + 22, TAN));
+    parts.push(box(8.4, 0.5, 2.4, gate.x - 15, 3, gate.z + 22, 0x4a5138));
+    for (const [w, d, dx, dz] of [[6, 1, 0, -2.5], [6, 1, 0, 2.5], [1, 6, -2.5, 0]] as const) {
+      parts.push(box(w, 1.3, d, gate.x + 13 + dx, 0, gate.z + 30 + dz, 0x8b7d5a));
+    }
+    parts.push(box(2.2, 1.4, 4.6, gate.x + 13, 0.5, gate.z + 44, OLIVE));
+    parts.push(box(2, 0.7, 2.2, gate.x + 13, 1.9, gate.z + 44.4, OLIVE));
     const mesh = new THREE.Mesh(mergeGeometries(parts), new THREE.MeshLambertMaterial({ vertexColors: true }));
     mesh.castShadow = true;
     mesh.receiveShadow = true;

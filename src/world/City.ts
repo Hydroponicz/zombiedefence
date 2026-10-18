@@ -20,6 +20,8 @@ import {
 import { makeRandom } from '../sim/rng';
 import { planSites, type SitePlan } from '../sim/sites';
 import { RAIL } from '../sim/supply';
+import { ACCESS_GATE, FENCE_INSET, northGate } from '../sim/airportGrounds';
+import { airportGate, convoyRoute } from '../sim/convoys';
 import { Bake, cityLight } from './CityLight';
 import { BLOCKS_PER_DISTRICT, blockLot, NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, SIDEWALK, STREET_SPACING } from '../sim/streets';
 
@@ -128,6 +130,8 @@ const SHOPPER_CARS = [0x7d2a24, 0x2b4a72, 0xb9b9b4, 0x3c3c3c, 0x6d6f4a];
 
 const COLLISION_CELL = 40;
 const LAMP_SPACING = 32;
+/** Half the width of the gaps in the airport fence for its gates. */
+const GATE_HALF = 12;
 const LAMP_HEIGHT = 8.5;
 
 const hash2 = (x: number, z: number) => {
@@ -951,12 +955,82 @@ export class City {
     // Fuel farm.
     for (let i = 0; i < 3; i++) this.cylinders.push({ x: cx + 560, z: cz + 60 + i * 30, r: 11, h: 13, color: 0xcfcbc2 });
     this.fuelSites.push({ district, x: cx + 560, z: cz + 90 });
-    // Perimeter fence.
-    for (const [w, d, dx, dz] of [[DISTRICT_SIZE - 40, 0.4, 0, -half + 20], [DISTRICT_SIZE - 40, 0.4, 0, half - 20], [0.4, DISTRICT_SIZE - 40, -half + 20, 0], [0.4, DISTRICT_SIZE - 40, half - 20, 0]]) {
-      this.boxes.push({ x: cx + dx, z: cz + dz, w, d, h: 3, color: 0x55584f, district, solid: true });
-    }
+    this.buildAirportRoads(district);
+    // Perimeter fence, open at the north gate (the access road) and the west gate (the military road).
+    const north = northGate();
+    const west = airportGate();
+    const edge = half - FENCE_INSET;
+    const fence = (x0: number, z0: number, x1: number, z1: number) => this.boxes.push({
+      x: (x0 + x1) / 2, z: (z0 + z1) / 2, w: Math.max(0.4, x1 - x0), d: Math.max(0.4, z1 - z0), h: 3, color: 0x55584f, district, solid: true,
+    });
+    fence(cx - edge, cz - edge, north.x - GATE_HALF, cz - edge);
+    fence(north.x + GATE_HALF, cz - edge, cx + edge, cz - edge);
+    fence(cx - edge, cz + edge, cx + edge, cz + edge);
+    fence(cx - edge, cz - edge, cx - edge, west.z - GATE_HALF);
+    fence(cx - edge, west.z + GATE_HALF, cx - edge, cz + edge);
+    fence(cx + edge, cz - edge, cx + edge, cz + edge);
+    this.buildGate(district, north.x, north.z, 0);
+    this.buildGate(district, west.x, west.z, Math.PI / 2);
     // Helicopter pads on the general-aviation apron, where the JOC sets up.
     for (let i = 0; i < 6; i++) this.addHelipad(cx - 360 + i * 60, cz + 40, 0.3, `${name} pad ${i + 1}`);
+  }
+
+  /**
+   * The airport's roads: the landside access road from the north gate down to the terminal car
+   * park, with its lane lines, and the military road in at the west gate from Camp Ridgeway, round
+   * to the JOC on the apron.
+   */
+  private buildAirportRoads(district: number): void {
+    const road = (x0: number, z0: number, x1: number, z1: number, width: number, color = 0x3c3d40) => this.boxes.push({
+      x: (x0 + x1) / 2, z: (z0 + z1) / 2, w: Math.abs(x1 - x0) || width, d: Math.abs(z1 - z0) || width, h: 0.26, color, district,
+    });
+    const line = (x0: number, z0: number, x1: number, z1: number, color: number) => this.boxes.push({
+      x: (x0 + x1) / 2, z: (z0 + z1) / 2, w: Math.abs(x1 - x0) || 0.25, d: Math.abs(z1 - z0) || 0.25, h: 0.27, color, district,
+    });
+    // Landside: from the boundary street, through the gate, to the car park (which it runs under).
+    const x = nodeX(ACCESS_GATE[0]);
+    const from = nodeZ(ACCESS_GATE[1]) + roadWidth(ACCESS_GATE[1]) / 2;
+    const to = northGate().z + 420;
+    road(x, from, x, to, 14);
+    line(x - 6.4, from, x - 6.4, to, 0xe8e4d8);
+    line(x + 6.4, from, x + 6.4, to, 0xe8e4d8);
+    for (let z = from + 4; z < to - 4; z += 9) line(x, z, x, z + 4, 0xc9a227);
+    // The military road: the convoy route from the city's edge to the JOC.
+    const route = convoyRoute();
+    const start = nodeX(0) + roadWidth(0) / 2;
+    for (let k = 1; k < route.length; k++) {
+      const [ax, az] = route[k - 1];
+      const [bx, bz] = route[k];
+      // Each leg runs 5 m past its ends, so the bends are filled in.
+      if (az === bz) {
+        const x0 = Math.max(start, Math.min(ax, bx) - 5);
+        const x1 = Math.max(ax, bx) + 5;
+        if (x1 > x0) road(x0, az, x1, az, 10, 0x45463f);
+      } else road(ax, Math.min(az, bz) - 5, ax, Math.max(az, bz) + 5, 10, 0x45463f);
+    }
+  }
+
+  /**
+   * A gate in the airport fence: a guard booth and boom barriers across the in and out lanes. `yaw`
+   * 0 for a road running north–south through it, π/2 for one running east–west.
+   */
+  private buildGate(district: number, x: number, z: number, yaw: number): void {
+    const across = yaw === 0;
+    // Positions across and along the road, turned to the gate's way.
+    const at = (a: number, b: number) => (across ? { x: x + a, z: z + b } : { x: x + b, z: z + a });
+    const sized = (wa: number, wb: number) => (across ? { w: wa, d: wb } : { w: wb, d: wa });
+    const booth = at(10.5, 6);
+    this.building(district, booth.x, booth.z, 4, 4, 3, 0xd8d4c8, 2);
+    this.roofs.push({ x: booth.x, z: booth.z, w: 5, d: 5, h: 0.4, y: 3, yaw: 0, color: 0x6c6f72 });
+    for (const lane of [-1, 1]) {
+      const post = at(lane * 7.2, 2);
+      this.boxes.push({ ...post, ...sized(0.5, 0.5), h: 1.2, color: 0x3a3a3a, district, solid: true });
+      // The arm, red and white.
+      for (let k = 0; k < 6; k++) {
+        const p = at(lane * (6.6 - k - 0.5), 2);
+        this.boxes.push({ ...p, ...sized(1, 0.18), h: 0.18, y: 1.0, color: k % 2 ? 0xd8d8d8 : 0xc0302a, district });
+      }
+    }
   }
 
   /**

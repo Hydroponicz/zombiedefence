@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createCity } from '../src/sim/CitySim';
 import { districtCenter } from '../src/sim/layout';
 import { nearestNode, NODES_X, NODES_Z } from '../src/sim/streets';
-import { EDGES, edgeIndex, EXITS, route, updateTraffic } from '../src/sim/traffic';
+import { ACCESS_END, accessRoad } from '../src/sim/airportGrounds';
+import { closedEdge, EDGES, edgeEnds, edgeIndex, EXITS, route, updateTraffic } from '../src/sim/traffic';
 import type { CityState } from '../src/sim/types';
 
 const quiet = () => {};
@@ -114,5 +115,49 @@ describe('traffic', () => {
     expect(t.traffic.fled).toBe(0);
     expect(events.some((x) => x.includes('trapped'))).toBe(true);
     expect(EXITS.length).toBeGreaterThan(2);
+  });
+});
+
+describe('Kessler Airport grounds', () => {
+  const airport = (s: CityState) => s.districts.find((d) => d.kind === 'airbase')!;
+  const inside = (e: number) => {
+    const [i, j, ni, nj] = edgeEnds(e);
+    return [[i, j], [ni, nj]].some(([a, b]) => a > 0 && a < 12 && b > 24 && b < 36);
+  };
+
+  it('has no through streets: nothing drives inside the fence but on the access road', () => {
+    const s = createCity('grounds');
+    for (let k = 0; k < 6; k++) {
+      s.t += 60;
+      updateTraffic(s, false, () => {});
+    }
+    for (let e = 0; e < EDGES; e++) {
+      if (!inside(e)) continue;
+      if (closedEdge(e)) expect(s.traffic.load[e]).toBe(0);
+      else expect(accessRoad(...edgeEnds(e))).toBe(true);
+    }
+    // A drive across the city's west side goes round it.
+    const r = route(s, [0, 23], [12, 36])!;
+    for (let k = 2; k < r.path.length; k += 2) {
+      expect(closedEdge(edgeIndex(r.path[k - 2], r.path[k - 1], r.path[k], r.path[k + 1]))).toBe(false);
+    }
+    // The terminal is reached by its access road.
+    expect(route(s, [6, 20], ACCESS_END)).not.toBeNull();
+  });
+
+  it('lets only staff in once the military has it, screened at the gate', () => {
+    const access = (joc: boolean) => {
+      const s = createCity('gate');
+      s.flags.joc = joc;
+      s.t = 8 * 60;
+      updateTraffic(s, false, () => {});
+      return { load: s.traffic.load[edgeIndex(ACCESS_END[0], ACCESS_END[1] - 1, ACCESS_END[0], ACCESS_END[1])], slow: s.traffic.slow![airport(s).id] };
+    };
+    const open = access(false);
+    const held = access(true);
+    expect(open.load).toBeGreaterThan(200);
+    expect(held.load).toBeGreaterThan(0);
+    expect(held.load).toBeLessThan(open.load * 0.25);
+    expect(held.slow).toBeLessThan(1);
   });
 });

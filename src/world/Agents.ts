@@ -11,7 +11,7 @@ import { DISTRICT_SIZE, DISTRICT_TEMPLATES, districtAt } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
 import { planSites } from '../sim/sites';
 import { checkpointNodes } from '../sim/traffic';
-import { compliance, foodPoints, foodRunOn, movement } from '../sim/policy';
+import { compliance, foodPoints, foodRunOn, foodSource, movement } from '../sim/policy';
 import { BLOCKS_PER_DISTRICT, nearestNode, neighbors, nodeX, nodeZ, NODES_X, NODES_Z, roadWidth, SIDEWALK, stepToward } from '../sim/streets';
 import type { CityState, DistrictState } from '../sim/types';
 import type { WalkGrid } from './City';
@@ -377,21 +377,14 @@ export class Agents {
     const targets: [Kind, number, number, ('cp' | 'q')?][] = [];
     for (const [district, frac] of share) {
       const d = state.districts[district];
-      const out = civiliansOut(d, night, movement(state, d, time));
-      // Under quarantine, the food run: most of those out are queueing at the food points (the
-      // supermarkets in view each get their share of the whole district's line).
-      const queueing = state.policy === 'quarantine' && foodRunOn(d, time) && d.status !== 'overrun' ? compliance(state, d) : 0;
-      const points = queueing > 0 ? foodPoints(state, d).filter((x) => x.kind === 'supermarket') : [];
-      const inLine = points.length ? out * queueing * 0.75 : 0;
-      const living = (out - inLine) * frac;
+      // Inside the airport fence people are in the terminal and the compound, not on the grass.
+      const out = d.kind === 'airbase' ? 0 : civiliansOut(d, night, movement(state, d, time));
+      // Under quarantine, the food run: most of those out are in the food line (counted below).
+      const living = (out - this.inFoodLine(state, d, out, time)) * frac;
       const infectedShare = d.infected / Math.max(1, d.population + d.infected);
       const bitten = living * infectedShare;
       targets.push([Kind.Civilian, district, living - bitten]);
       targets.push([Kind.Bitten, district, bitten]);
-      const lines = points.filter((x) => Math.hypot(x.x - cx, x.z - cz) < ACTIVE_RADIUS).length;
-      const queued = (inLine * lines) / Math.max(1, points.length);
-      targets.push([Kind.Civilian, district, queued * (1 - infectedShare), 'q']);
-      targets.push([Kind.Bitten, district, queued * infectedShare, 'q']);
       let soldiers = 0;
       this.posts.forEach((p, i) => {
         if (p.district === district && this.postVisible[i] && Math.hypot(p.x - cx, p.z - cz) < ACTIVE_RADIUS) soldiers += this.postSoldiers[i];
@@ -411,6 +404,34 @@ export class Agents {
       }
       // Riot squads come out only when called out, with their trucks.
       if (d.status !== 'overrun' && d.police.riotOut) targets.push([Kind.Riot, district, d.police.riot * frac]);
+    }
+
+    // The food lines in view, at their districts' food points or a neighbour's: each point in view
+    // gets its share of every line that comes to it. They're counted under the district whose
+    // points they are.
+    const lines = new Map<number, [number, number]>();
+    for (const d of state.districts) {
+      const out = d.kind === 'airbase' ? 0 : civiliansOut(d, night, movement(state, d, time));
+      const inLine = this.inFoodLine(state, d, out, time);
+      if (inLine <= 0) continue;
+      const food = foodSource(state, d)!;
+      const inView = food.points.filter((x) => Math.hypot(x.x - cx, x.z - cz) < ACTIVE_RADIUS).length;
+      if (!inView) continue;
+      const queued = (inLine * inView) / food.points.length;
+      const infectedShare = d.infected / Math.max(1, d.population + d.infected);
+      const line = lines.get(food.district.id) ?? [0, 0];
+      line[0] += queued * (1 - infectedShare);
+      line[1] += queued * infectedShare;
+      lines.set(food.district.id, line);
+    }
+    for (const [district, [healthy, bitten]] of lines) {
+      targets.push([Kind.Civilian, district, healthy, 'q']);
+      targets.push([Kind.Bitten, district, bitten, 'q']);
+    }
+    // Lines that have broken up go.
+    for (const key of counts.keys()) {
+      const [kind, district, tag] = key.split('-');
+      if (tag === 'q' && !lines.has(Number(district))) targets.push([Number(kind) as Kind, Number(district), 0, 'q']);
     }
 
     // One scale for all of it, and for the dead (the crowd and the hordes in view): as close to one
@@ -488,7 +509,7 @@ export class Agents {
     }
     // Districts out of range keep nobody; a patrol whose lead has gone goes too, and squads
     // leave with their trucks.
-    this.people = this.people.filter((p) => share.has(p.district) || p.car !== undefined);
+    this.people = this.people.filter((p) => share.has(p.district) || p.car !== undefined || p.post >= QUEUE_POST);
     this.dropOrphans();
   }
 
@@ -537,12 +558,19 @@ export class Agents {
     };
   }
 
+  /** Of a district's people out, those in its food line under quarantine (during its food run). */
+  private inFoodLine(state: CityState, d: DistrictState, out: number, time: number): number {
+    if (state.policy !== 'quarantine' || d.status === 'overrun' || !foodRunOn(d, time) || !foodSource(state, d)) return 0;
+    return out * compliance(state, d) * 0.75;
+  }
+
   /**
-   * Someone in a food line under quarantine: standing in rows across a supermarket's parking lot,
+   * Someone in a food line under quarantine: standing in rows across a food point's lot (a
+   * supermarket's parking lot, a shelter's playing field, an emergency point's yard),
    * facing its doors, in a free place in the line.
    */
   private spawnInLine(state: CityState, district: number, cx: number, cz: number, kind: Kind, have: Person[]): Person | null {
-    const stores = foodPoints(state, state.districts[district]).filter((x) => x.kind === 'supermarket' && Math.hypot(x.x - cx, x.z - cz) < ACTIVE_RADIUS);
+    const stores = foodPoints(state, state.districts[district]).filter((x) => Math.hypot(x.x - cx, x.z - cz) < ACTIVE_RADIUS);
     if (!stores.length) return null;
     const taken = new Set(this.people.filter((p) => p.post >= QUEUE_POST).map((p) => p.post));
     const slots = QUEUE_COLUMNS * QUEUE_ROWS;

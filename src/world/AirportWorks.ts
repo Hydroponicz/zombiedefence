@@ -9,6 +9,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { northGate } from '../sim/airportGrounds';
 import { airportGate } from '../sim/convoys';
 import { districtCenter, DISTRICT_SIZE } from '../sim/layout';
 import { cityLight, Glow } from './CityLight';
@@ -34,6 +35,12 @@ function box(w: number, h: number, d: number, x: number, y: number, z: number, c
   const g = new THREE.BoxGeometry(w, h, d);
   g.translate(x, y + h / 2, z);
   return tint(g, color);
+}
+
+/** Whether a place on the line round the airport is in the way of the north gate's road. */
+function atNorthGate(x: number, z: number): boolean {
+  const north = northGate();
+  return Math.abs(x - north.x) < GATE_GAP && z < north.z + 40;
 }
 
 interface Placed {
@@ -68,7 +75,7 @@ export class AirportWorks {
     this.addBarriers(1, [...gateBarriers, ...jocRing]);
 
     // Stage 2: the line round the airport, built out from the gate.
-    const line = this.ring(c.x, c.z, half, half, GATE_GAP, gate.z);
+    const line = this.ring(c.x, c.z, half, half, GATE_GAP, gate.z).filter((p) => !atNorthGate(p.x, p.z));
     this.addBarriers(2, line);
 
     // Stage 3: razor wire coils in front of the line: a helix drawn as lines (one draw call).
@@ -79,7 +86,7 @@ export class AirportWorks {
       { x: c.x - half, z: c.z - half, yaw: 0 }, { x: c.x + half, z: c.z - half, yaw: 0 },
       { x: c.x - half, z: c.z + half, yaw: 0 }, { x: c.x + half, z: c.z + half, yaw: 0 },
       { x: gate.x + 22, z: gate.z - 20, yaw: 0 }, { x: gate.x + 22, z: gate.z + 20, yaw: 0 },
-      { x: c.x, z: c.z - half, yaw: 0 }, { x: c.x, z: c.z + half, yaw: 0 }, { x: c.x + half, z: c.z, yaw: 0 },
+      { x: northGate().x + 22, z: c.z - half, yaw: 0 }, { x: c.x, z: c.z + half, yaw: 0 }, { x: c.x + half, z: c.z, yaw: 0 },
     ];
     this.addTowers(4, towers);
 
@@ -194,6 +201,7 @@ export class AirportWorks {
         if (run + d < GATE_GAP || run + d > perimeter - GATE_GAP) continue;
         const x = ax + dx * d;
         const z = az + dz * d;
+        if (atNorthGate(x, z)) continue;
         // A loop across the line: points round a circle in the plane across it.
         const n = 8;
         for (let i = 0; i < n; i++) {

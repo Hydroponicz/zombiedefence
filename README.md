@@ -447,7 +447,25 @@ also have costs:
 How well a rule holds in each district depends on the police and soldiers there to enforce it, and
 it falls apart in a riot. The HUD shows the rule over each district: the food run time, how well the
 line is screened and how many keep to it. On the ground, the streets empty outside curfew hours, and
-under quarantine people stand in rows in the supermarket lots during their food run.
+under quarantine people stand in rows in the lots of the food points during their food run (an
+emergency point's yard, or a neighbouring district's, too).
+
+## Kessler Airport's grounds
+
+There are no city streets inside the airport fence: just runways, taxiways, the apron and grass.
+- **The north gate:** the one way in from the city. The landside access road runs from it down to
+  the terminal car park, past a guard booth and boom barriers.
+- **The west gate:** the military road from Camp Ridgeway comes in here and runs round to the JOC.
+  It has its own booth and barriers.
+- **Traffic:** nothing drives across the airfield, and traffic between districts goes round it.
+  Food trucks for the airport come in by the access road.
+- **Once the JOC is up,** civilians are turned back at the north gate. Only the airport's staff,
+  coming in to work, are let through, after screening at a military checkpoint inside the gate:
+  - a chicane of concrete barriers;
+  - a screening tent and a sandbagged post;
+  - a Humvee.
+
+  Traffic on the access road drops to a trickle and crawls through the checkpoint.
 
 ## Kessler Airport is sealed
 

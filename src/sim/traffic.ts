@@ -9,6 +9,7 @@
 import { CITY_DEPTH, CITY_WIDTH, districtAt, districtCenter } from './layout';
 import { totalZombies } from './hordes';
 import { travel } from './policy';
+import { ACCESS_END, accessRoad, closedStreet } from './airportGrounds';
 import { nearestNode, NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, STREET_SPACING } from './streets';
 import type { CityState, DistrictState, Severity, Traffic } from './types';
 
@@ -94,6 +95,29 @@ const EDGE_DISTRICT = (() => {
   return out;
 })();
 
+/** Streets inside the airport fence: no traffic, ever (see airportGrounds.ts). */
+const CLOSED = (() => {
+  const out = new Uint8Array(EDGES);
+  for (let e = 0; e < EDGES; e++) out[e] = closedStreet(...edgeEnds(e)) ? 1 : 0;
+  return out;
+})();
+
+/** The airport's access road, from its north gate to the terminal car park. */
+const ACCESS = (() => {
+  const out: number[] = [];
+  for (let e = 0; e < EDGES; e++) if (accessRoad(...edgeEnds(e))) out.push(e);
+  return out;
+})();
+
+/** Whether no vehicle may drive this street (it runs inside the airport fence). */
+export function closedEdge(e: number): boolean {
+  return CLOSED[e] === 1;
+}
+
+/** Cars an hour on the airport's access road at the rush: travellers and staff, or staff alone. */
+const AIRPORT_CARS = 320;
+const STAFF_CARS = 45;
+
 // --- Routing ---------------------------------------------------------------------------------
 
 const NODES = NODES_X * NODES_Z;
@@ -150,6 +174,7 @@ function dijkstra(t: Traffic, source: number, congested: boolean): { dist: Float
     for (const [ni, nj] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
       if (ni < 0 || nj < 0 || ni >= NODES_X || nj >= NODES_Z) continue;
       const e = edgeIndex(i, j, ni, nj);
+      if (CLOSED[e]) continue;
       const f = congested ? speedFactor(t, e) : t.blocked[e] > IMPASSABLE ? 0 : 1 - t.blocked[e] * 0.5;
       if (f <= 0) continue;
       // Avenues are quicker; drivers prefer them.
@@ -218,6 +243,8 @@ interface Routes {
 const routeCache = new WeakMap<Traffic, Routes>();
 
 function centreNode(d: DistrictState): [number, number] {
+  // The airport is reached by its access road, at the terminal.
+  if (d.kind === 'airbase') return ACCESS_END;
   const c = districtCenter(d.col, d.row);
   return nearestNode(c.x, c.z);
 }
@@ -301,8 +328,9 @@ export function updateTraffic(s: CityState, night: boolean, emit: Emit): void {
   const t = s.traffic;
   const r = routes(s);
   const load = t.load;
-  // Checkpoints at the intersections hold every car up.
-  t.slow = s.districts.map((d) => (d.police.stage !== 'patrol' && d.police.officers >= 5 ? 0.75 : 1));
+  // Checkpoints at the intersections hold every car up; so does the screening at the airport gate.
+  t.slow = s.districts.map((d) => (d.kind === 'airbase' ? (s.flags.joc ? 0.4 : 1)
+    : d.police.stage !== 'patrol' && d.police.officers >= 5 ? 0.75 : 1));
   load.fill(0);
   const curve = rush(((s.t % 1440) + 1440) % 1440);
   const total = s.districts.reduce((n, d) => n + (civilian(d) ? d.population : 0), 0) + 1;
@@ -318,6 +346,13 @@ export function updateTraffic(s: CityState, night: boolean, emit: Emit): void {
   const allowed = s.districts.map((d) => travel(s, d));
   const local = s.districts.map((d) => (civilian(d) ? (d.population * 0.03 * curve * 10 * allowed[d.id]) / Math.max(1, edgesIn[d.id]) : 0));
   for (let e = 0; e < EDGES; e++) if (EDGE_DISTRICT[e] >= 0) load[e] += local[EDGE_DISTRICT[e]];
+  // The airport's access road: travellers and staff; once the military has it, only staff coming
+  // in to work, screened at the gate.
+  const airport = s.districts.find((d) => d.kind === 'airbase');
+  if (airport && airport.status !== 'overrun') {
+    const cars = (s.flags.joc ? STAFF_CARS : AIRPORT_CARS) * curve;
+    for (const e of ACCESS) load[e] += cars;
+  }
 
   const fear = s.districts.map((d) => (civilian(d) ? fearOf(s, d) : 0));
   for (const a of s.districts) {

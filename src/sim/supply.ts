@@ -11,6 +11,7 @@ import { CITY_DEPTH, districtAt, districtCenter, DISTRICT_TEMPLATES } from './la
 import { totalZombies } from './hordes';
 import { nextRandom } from './rng';
 import { blockLot, BLOCKS_PER_DISTRICT, nearestNode, nodeX, nodeZ } from './streets';
+import { ACCESS_END } from './airportGrounds';
 import { siteHolds } from './sites';
 import { EXITS, routesFrom } from './traffic';
 import type { CityState, DistrictState, Severity, Supply, Truck, Train } from './types';
@@ -215,7 +216,8 @@ function dispatch(s: CityState, emit: Emit): void {
     // Drivers go into a district with the dead in it only while it holds, or is still fighting with order kept.
     if (!isClean && !(d.status === 'held' || (d.status === 'contested' && d.order > 30 && !d.rioting))) continue;
     let need = people(d) * TARGET_DAYS - d.rations - (inbound.get(d.id) ?? 0);
-    const dest = nearestNode(districtCenter(d.col, d.row).x, districtCenter(d.col, d.row).z);
+    // The airport's food comes in by its access road, to the terminal.
+    const dest = d.kind === 'airbase' ? ACCESS_END : nearestNode(districtCenter(d.col, d.row).x, districtCenter(d.col, d.row).z);
     // Small places (the airport) call for a truck before they're half a truckload short.
     const order = Math.min(TRUCK_RATIONS * 0.5, people(d) * 0.5);
     for (let n = 0; n < TRUCKS_PER_HOUR && need > order; n++) {
