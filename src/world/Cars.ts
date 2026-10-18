@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, STREET_SPACING } from '../sim/streets';
-import { DISTRICT_TEMPLATES } from '../sim/layout';
+import { DISTRICT_TEMPLATES, districtAt } from '../sim/layout';
 import { cityLight, Glow, vehicleLamps } from './CityLight';
 import { checkpointNodes, congestion, districtOfEdge, edgeIndex, isAvenue, speedFactor } from '../sim/traffic';
 import type { CityState, Traffic } from '../sim/types';
@@ -43,6 +43,28 @@ function hash(a: number, b: number): number {
   return x - Math.floor(x);
 }
 
+/** What a patrol car's crew can do on foot (the people on the street are Agents'). */
+export interface Crews {
+  zombieNear(x: number, z: number, range: number): boolean;
+  dismount(car: number, x: number, z: number, heading: number, district: number): void;
+  crewOut(car: number): number;
+  recall(car: number, now?: boolean): void;
+}
+
+/** Patrol cars pull over for the dead within this range, if the player is close enough to see it. */
+const PULL_OVER_RANGE = 40;
+const PULL_OVER_VIEW = 360;
+/** Quiet seconds before the crew gets back in; seconds before the car will stop again. */
+const ALL_CLEAR = 8;
+const BACK_ON_PATROL = 25;
+
+const enum Stop {
+  Driving,
+  PullingOver,
+  CrewOut,
+  PullingOut,
+}
+
 /**
  * A car driving the grid: along an x street (axis 0, at z line `line`) or a z street (axis 1, at x
  * line `line`), at `s` along it, one way or the other, in one of its lanes. `ox`, `oz` and `oh` are
@@ -59,6 +81,13 @@ interface Car {
   police: boolean;
   /** Light-bar rhythm, for the police. */
   phase: number;
+  /** For a patrol car: an id for its crew, whether it's stopped for them, and how far to the curb. */
+  id: number;
+  stop: Stop;
+  curb: number;
+  check: number;
+  quiet: number;
+  cool: number;
   ox: number;
   oz: number;
   oh: number;
@@ -101,6 +130,8 @@ export class Cars {
   private one = new THREE.Vector3(1, 1, 1);
   private c = new THREE.Color();
   private cars: Car[] = [];
+  private nextId = 1;
+  private crews: Crews | null = null;
   private lastCx = NaN;
   private lastCz = NaN;
   private spawnTimer = 0;
@@ -182,7 +213,9 @@ export class Cars {
 
   /** Where a car is and which way it faces, before any turn's swing. */
   private place(c: Car): { x: number; z: number; h: number } {
-    const off = lanesOf(c.line)[c.lane];
+    const lane = lanesOf(c.line)[c.lane];
+    // Pulled over: eased across to the curb.
+    const off = lane + c.curb * (roadWidth(c.line) / 2 - 1.4 - lane);
     const p = this.pos;
     if (c.axis === 0) {
       p.x = c.s;
@@ -271,7 +304,10 @@ export class Cars {
   private drive(dt: number, state: CityState, t: Traffic, cx: number, cz: number, police: number): { moving: number; police: number } {
     // A teleport (or the first frame): fill the streets around the new spot at once.
     const fill = !(Math.hypot(cx - this.lastCx, cz - this.lastCz) < 200);
-    if (fill) this.cars.length = 0;
+    if (fill) {
+      for (const c of this.cars) if (c.stop !== Stop.Driving) this.crews?.recall(c.id, true);
+      this.cars.length = 0;
+    }
     this.lastCx = cx;
     this.lastCz = cz;
 
@@ -291,7 +327,8 @@ export class Cars {
         const c = list[n];
         if (Cars.laneKey(c.axis, c.line, c.dir, c.lane) !== key) continue;
         const e = edgeOf(c);
-        const limitSpeed = CRUISE * speedFactor(t, e) * (c.police ? 1.15 : 1);
+        const stopping = c.stop === Stop.PullingOver || c.stop === Stop.CrewOut;
+        const limitSpeed = stopping ? 0 : CRUISE * speedFactor(t, e) * (c.police ? 1.15 : 1);
         const k0 = (c.s - startAlong(c.axis)) / STREET_SPACING;
         const next = c.dir > 0 ? Math.floor(k0 + 1e-6) + 1 : Math.ceil(k0 - 1e-6) - 1;
         const p = c.dir * c.s;
@@ -299,7 +336,8 @@ export class Cars {
         // The car ahead, if it's still in this lane.
         for (let m = n - 1; m >= 0; m--) {
           const a = list[m];
-          if (Cars.laneKey(a.axis, a.line, a.dir, a.lane) !== key) continue;
+          // A patrol car pulled over at the curb is passed.
+          if (Cars.laneKey(a.axis, a.line, a.dir, a.lane) !== key || a.stop === Stop.CrewOut) continue;
           room = a.dir * a.s - QUEUE_GAP - p;
           break;
         }
@@ -327,13 +365,16 @@ export class Cars {
         c.ox *= ease;
         c.oz *= ease;
         c.oh *= ease;
+        if (c.police && this.crews) this.patrol(c, dt, cx, cz);
       }
     }
 
-    // Out of range: gone.
+    // Out of range: gone (taking any crew with them).
     this.cars = this.cars.filter((c) => {
       const p = this.place(c);
-      return Math.hypot(p.x - cx, p.z - cz) < RADIUS + 60;
+      const keep = Math.hypot(p.x - cx, p.z - cz) < RADIUS + 60;
+      if (!keep && c.stop !== Stop.Driving) this.crews?.recall(c.id, true);
+      return keep;
     });
 
     // Join the streets out at the edge of view, as many as each street's flow calls for.
@@ -365,6 +406,48 @@ export class Cars {
       }
     }
     return { moving, police };
+  }
+
+  /**
+   * A patrol car keeps order by being seen; it doesn't fight from behind the wheel. With the dead
+   * close by it pulls over to the curb and its two officers get out to deal with them, then get
+   * back in once it's been quiet a while and drive on.
+   */
+  private patrol(c: Car, dt: number, cx: number, cz: number): void {
+    const crews = this.crews!;
+    c.check -= dt;
+    const look = c.check <= 0;
+    if (look) c.check = 0.5;
+    const p = this.place(c);
+    switch (c.stop) {
+      case Stop.Driving:
+        c.cool -= dt;
+        if (look && c.cool <= 0 && Math.hypot(p.x - cx, p.z - cz) < PULL_OVER_VIEW && crews.zombieNear(p.x, p.z, PULL_OVER_RANGE)) c.stop = Stop.PullingOver;
+        break;
+      case Stop.PullingOver:
+        c.curb = Math.min(1, c.curb + dt * 0.8);
+        if (c.v < 0.2 && c.curb >= 1) {
+          const at = this.place(c);
+          crews.dismount(c.id, at.x, at.z, at.h, districtAt(at.x, at.z));
+          c.stop = Stop.CrewOut;
+          c.quiet = 0;
+        }
+        break;
+      case Stop.CrewOut:
+        if (look) {
+          c.quiet = crews.zombieNear(p.x, p.z, PULL_OVER_RANGE * 1.5) ? 0 : c.quiet + 0.5;
+          if (c.quiet > ALL_CLEAR) crews.recall(c.id);
+          if (crews.crewOut(c.id) === 0) c.stop = Stop.PullingOut;
+        }
+        break;
+      case Stop.PullingOut:
+        c.curb = Math.max(0, c.curb - dt * 0.6);
+        if (c.curb <= 0) {
+          c.stop = Stop.Driving;
+          c.cool = BACK_ON_PATROL;
+        }
+        break;
+    }
   }
 
   /** Bring each lane in range up to (or down to) its street's share of the traffic. */
@@ -415,6 +498,7 @@ export class Cars {
                     axis, line, dir, lane, s, v: CRUISE * speedFactor(t, e),
                     color: PAINT[Math.floor(Math.random() * PAINT.length)],
                     police: Math.random() < patrol, phase: Math.random(), ox: 0, oz: 0, oh: 0,
+                    id: this.nextId++, stop: Stop.Driving, curb: 0, check: 0, quiet: 0, cool: 0,
                   };
                 },
               });
@@ -459,7 +543,8 @@ export class Cars {
     }
   }
 
-  update(dt: number, state: CityState | null, cx: number, cz: number): void {
+  update(dt: number, state: CityState | null, cx: number, cz: number, crews: Crews | null = null): void {
+    this.crews = crews;
     this.time += dt;
     let moving = 0;
     let abandoned = 0;

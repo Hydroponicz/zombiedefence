@@ -11,10 +11,10 @@ import { DISTRICT_SIZE, DISTRICT_TEMPLATES, districtAt } from '../sim/layout';
 import { makeRandom } from '../sim/rng';
 import { planSites } from '../sim/sites';
 import { checkpointNodes } from '../sim/traffic';
-import { BLOCKS_PER_DISTRICT, nearestNode, neighbors, nodeX, nodeZ, NODES_X, NODES_Z, stepToward } from '../sim/streets';
+import { BLOCKS_PER_DISTRICT, nearestNode, neighbors, nodeX, nodeZ, NODES_X, NODES_Z, roadWidth, SIDEWALK, stepToward } from '../sim/streets';
 import type { CityState, DistrictState } from '../sim/types';
 import type { WalkGrid } from './City';
-import { cityLight, Glow } from './CityLight';
+import { cityLight, Glow, vehicleLamps } from './CityLight';
 import { Crowd, CROWD_CAPACITY, RESIDENT_RADIUS, type HumanRef } from './Crowd';
 import type { Effects } from './Effects';
 
@@ -67,6 +67,35 @@ interface Person extends HumanRef {
   post: number;
   /** Clothes and skin, fixed for life so the figure keeps its colours. */
   look: number;
+  /**
+   * Walking the sidewalks: which corner of its intersection (ni, nj) it's making for (qx, qz: the
+   * block's side of each street) and the waypoints left on the way (crosswalks first). Unset while
+   * out in the street (fleeing, or walking a district that has broken down).
+   */
+  qx?: number;
+  qz?: number;
+  route?: number[];
+  /** A foot patrol's lead officer, for the others in the group. */
+  leader?: Person;
+  /** Crew of a patrol car (the car's id), out on foot. */
+  car?: number;
+  /** A riot squad's truck. */
+  truck?: Truck;
+  /** Where a car's crew or a riot squad member stands when there's nothing to fight. */
+  homeX?: number;
+  homeZ?: number;
+  /** Called back to the car: walking to it, gone once there. */
+  recalled?: boolean;
+  gone?: boolean;
+}
+
+/** A riot squad's truck, parked at the curb with its squad formed up beside it. */
+interface Truck {
+  x: number;
+  z: number;
+  heading: number;
+  district: number;
+  phase: number;
 }
 
 const CLOTHES = [0x2f5f9a, 0xa83a32, 0xd8c9a8, 0x3d6b45, 0x7a4f8c, 0xc98f2b, 0x2c2c2c, 0xe0e0dc];
@@ -91,6 +120,13 @@ const BITTEN_SECONDS = 18;
 const POLICE_VISIBLE = 30;
 const RIOT_VISIBLE = 20;
 const PISTOL_RANGE = 45;
+/** Officers on a foot patrol, together: 2 or 3. */
+const PATROL_GROUP = [2, 3];
+/** A riot squad and its truck. */
+const SQUAD = 8;
+/** How far a riot squad leaves its truck to break up the dead. */
+const SQUAD_REACH = 70;
+const TRUCKS = 12;
 const BATON_RANGE = 2.2;
 const RIOT_ADVANCE = 30;
 
@@ -130,6 +166,10 @@ export class Agents {
   private heliY = 0;
   private doorGunTimer = 0;
   private people: Person[] = [];
+  private trucks: Truck[] = [];
+  private truckMesh!: THREE.InstancedMesh;
+  private truckPhase!: THREE.InstancedBufferAttribute;
+  private state: CityState | null = null;
   private rand: () => number;
   private reconcileTimer = 0;
   /** Street posts, and posts at strategic sites (`site` set; their sandbags are drawn by Sites). */
@@ -164,6 +204,7 @@ export class Agents {
     this.sandbags = this.buildSandbags();
     this.buildMeshes();
     this.shafts = this.buildShafts();
+    this.buildTrucks();
     const pipGeo = new THREE.BufferGeometry();
     pipGeo.setAttribute('position', new THREE.BufferAttribute(this.pipPos, 3).setUsage(THREE.DynamicDrawUsage));
     pipGeo.setAttribute('color', new THREE.BufferAttribute(this.pipColor, 3).setUsage(THREE.DynamicDrawUsage));
@@ -233,8 +274,9 @@ export class Agents {
         this.crowd.spawnResident(p.x, p.z);
         return false;
       }
-      return Math.hypot(p.x - cx, p.z - cz) <= DESPAWN_RADIUS;
+      return !p.gone && Math.hypot(p.x - cx, p.z - cz) <= DESPAWN_RADIUS;
     });
+    this.dropOrphans();
 
     this.render();
     if (this.sensor) this.renderPips();
@@ -272,11 +314,13 @@ export class Agents {
   // --- Reconciliation with the simulation -----------------------------------------------
 
   private reconcile(state: CityState, cx: number, cz: number, night: boolean, share: Map<number, number>): void {
+    this.state = state;
     const counts = new Map<string, Person[]>();
     for (const p of this.people) {
-      // Those turning on screen play out their story whatever the counts say.
-      if (p.mode === Mode.Turning || (p.kind === Kind.Bitten && Number.isFinite(p.timer))) continue;
-      const key = `${p.kind}-${p.district}`;
+      // Those turning on screen play out their story whatever the counts say, and a patrol car's
+      // crew belongs to its car.
+      if (p.mode === Mode.Turning || (p.kind === Kind.Bitten && Number.isFinite(p.timer)) || p.car !== undefined) continue;
+      const key = `${p.kind}-${p.district}${p.post === CHECKPOINT_POST ? '-cp' : ''}`;
       const list = counts.get(key);
       if (list) list.push(p);
       else counts.set(key, [p]);
@@ -300,7 +344,7 @@ export class Agents {
     });
     this.updateSandbags();
 
-    const targets: [Kind, number, number][] = [];
+    const targets: [Kind, number, number, boolean?][] = [];
     for (const [district, frac] of share) {
       const d = state.districts[district];
       // Some of those on the street are the district's hidden bitten.
@@ -313,10 +357,20 @@ export class Agents {
         if (p.district === district && this.postVisible[i] && Math.hypot(p.x - cx, p.z - cz) < ACTIVE_RADIUS) soldiers += this.postSoldiers[i];
       });
       targets.push([Kind.Soldier, district, soldiers]);
-      if (d.status !== 'overrun') {
-        targets.push([Kind.Police, district, Math.min(d.police.officers * frac, POLICE_VISIBLE)]);
-        targets.push([Kind.Riot, district, Math.min(d.police.riot * frac, RIOT_VISIBLE)]);
+      if (d.status !== 'overrun' && d.police.officers >= 1) {
+        // Most officers patrol in their cars (drawn with the traffic); some walk a beat in twos and
+        // threes, mostly in the busy shopping and office streets.
+        const kind = DISTRICT_TEMPLATES[district].kind;
+        const dense = kind === 'downtown' || kind === 'commercial';
+        targets.push([Kind.Police, district, Math.min(d.police.officers * frac * (dense ? 0.3 : 0.06), POLICE_VISIBLE)]);
+        // Once there are checkpoints, a few officers man each one in view.
+        if (d.police.stage !== 'patrol') {
+          const checkpoints = checkpointNodes(d).filter(([i, j]) => Math.hypot(nodeX(i) - cx, nodeZ(j) - cz) < ACTIVE_RADIUS).length;
+          targets.push([Kind.Police, district, Math.min(checkpoints * 3, d.police.officers * frac, POLICE_VISIBLE), true]);
+        }
       }
+      // Riot squads come out only when called out, with their trucks.
+      if (d.status !== 'overrun' && d.police.riotOut) targets.push([Kind.Riot, district, Math.min(d.police.riot * frac, RIOT_VISIBLE)]);
     }
 
     // Respect overall capacity.
@@ -327,10 +381,13 @@ export class Agents {
 
     // Each kind gets its own spawn budget so a big crowd can't starve the soldiers.
     const budget = KINDS.map(() => SPAWNS_PER_RECONCILE);
-    for (const [kind, district, want] of targets) {
-      const have = counts.get(`${kind}-${district}`) ?? [];
-      const target = Math.round(want);
-      if (have.length > target) {
+    for (const [kind, district, want, checkpoint] of targets) {
+      const have = counts.get(`${kind}-${district}${checkpoint ? '-cp' : ''}`) ?? [];
+      // Riot squads turn out at least four strong.
+      const target = kind === Kind.Riot ? Math.ceil(want / 4) * 4 : Math.round(want);
+      // Groups come and go whole: keep a little slack so they don't flicker.
+      const slack = kind === Kind.Riot ? SQUAD : kind === Kind.Police && !checkpoint ? 3 : 0;
+      if (have.length > target + slack || (target === 0 && have.length > 0)) {
         // Remove the furthest first, they are least likely to be watched.
         have.sort((a, b) => Math.hypot(b.x - cx, b.z - cz) - Math.hypot(a.x - cx, a.z - cz));
         const remove = new Set(have.slice(0, have.length - target));
@@ -338,10 +395,32 @@ export class Agents {
       } else {
         for (let n = have.length; n < target && budget[kind] > 0; n++, budget[kind]--) {
           const d = state.districts[district];
-          // Once the police run checkpoints, most officers stand at them.
-          const checkpoint = kind === Kind.Police && d.police.stage !== 'patrol' && this.rand() < 0.6 ? this.checkpointNear(d, cx, cz) : null;
+          if (kind === Kind.Police && !checkpoint) {
+            // A foot patrol: a lead officer and one or two partners.
+            const lead = this.spawnCivilian(district, cx, cz, kind);
+            if (!lead) continue;
+            const size = PATROL_GROUP[Math.floor(this.rand() * PATROL_GROUP.length)];
+            for (let k = 0; k < size; k++) {
+              const p = k === 0 ? lead : { ...lead, leader: lead, route: undefined, ox: k === 1 ? 0.9 : -0.9, oz: 1.4 * k, look: this.rand() * 1024 };
+              if (k > 0) p.x += (this.rand() - 0.5) * 2;
+              this.people.push(p);
+              have.push(p);
+            }
+            n += size - 1;
+            continue;
+          }
+          if (kind === Kind.Riot) {
+            const p = this.spawnRiot(district, cx, cz);
+            if (p) {
+              this.people.push(p);
+              have.push(p);
+            }
+            continue;
+          }
+          const post = checkpoint ? this.checkpointNear(d, cx, cz) : null;
+          if (checkpoint && !post) break;
           const p = kind === Kind.Soldier ? this.spawnSoldier(district, cx, cz, have)
-            : checkpoint ? this.spawnAtCheckpoint(district, checkpoint)
+            : post ? this.spawnAtCheckpoint(district, post)
               : this.spawnCivilian(district, cx, cz, kind);
           // The simulation's bitten turn when it says so; on screen they just stagger about.
           if (p && kind === Kind.Bitten) p.timer = Infinity;
@@ -352,8 +431,18 @@ export class Agents {
         }
       }
     }
-    // Districts out of range keep nobody.
-    this.people = this.people.filter((p) => share.has(p.district));
+    // Districts out of range keep nobody; a patrol whose lead has gone goes too, and squads
+    // leave with their trucks.
+    this.people = this.people.filter((p) => share.has(p.district) || p.car !== undefined);
+    this.dropOrphans();
+  }
+
+  /** Nobody walks a beat alone: partners whose lead has gone leave too; trucks with no squad drive off. */
+  private dropOrphans(): void {
+    const present = new Set(this.people);
+    this.people = this.people.filter((p) => !p.leader || present.has(p.leader));
+    const manned = new Set(this.people.map((p) => p.truck));
+    this.trucks = this.trucks.filter((t) => manned.has(t));
   }
 
   /** Fraction of each district's area inside the active circle, by sampling. */
@@ -405,15 +494,110 @@ export class Agents {
       const x = nodeX(i) + (nodeX(ni) - nodeX(i)) * t;
       const z = nodeZ(j) + (nodeZ(nj) - nodeZ(j)) * t;
       if (districtAt(x, z) !== district || Math.hypot(x - cx, z - cz) > ACTIVE_RADIUS) continue;
-      return {
+      const p: Person = {
         kind, civilian: kind === Kind.Civilian, mode: Mode.Walk, district, x, z, heading: 0,
         ni, nj, pi: i, pj: j,
         ox: (this.rand() - 0.5) * 16, oz: (this.rand() - 0.5) * 16,
         speed: 1.2 + this.rand() * 0.5, phase: this.rand() * 10, timer: 0, cooldown: 0, post: -1,
         look: Math.floor(this.rand() * 1024),
       };
+      if (!this.brokenDown(district)) {
+        // On the sidewalk, somewhere along the block from its corner.
+        p.ni = i;
+        p.nj = j;
+        p.pi = -1;
+        p.qx = this.rand() < 0.5 ? -1 : 1;
+        p.qz = this.rand() < 0.5 ? -1 : 1;
+        const [sx, sz] = this.corner(i, j, p.qx, p.qz, p);
+        p.route = [];
+        this.planLeg(p);
+        const n = p.route.length;
+        const [ax, az] = n >= 4 ? [p.route[n - 4], p.route[n - 3]] : [sx, sz];
+        const u = this.rand();
+        p.x = ax + (p.route[n - 2] - ax) * u;
+        p.z = az + (p.route[n - 1] - az) * u;
+        p.route = p.route.slice(n - 2);
+      }
+      return p;
     }
     return null;
+  }
+
+  /** A district past saving: people go where they like, down the middle of the street. */
+  private brokenDown(district: number): boolean {
+    const d = this.state?.districts[district];
+    return !!d && (d.status === 'overrun' || !!d.flags.anarchy);
+  }
+
+  /** The sidewalk corner of block quadrant (qx, qz) at an intersection, nudged by the walker's own line. */
+  private corner(i: number, j: number, qx: number, qz: number, p: Person): [number, number] {
+    // Each walker keeps to its own line along the sidewalk.
+    const line = SIDEWALK / 2 + Math.max(-1.1, Math.min(1.1, p.ox * 0.14));
+    return [nodeX(i) + qx * (roadWidth(i) / 2 + line), nodeZ(j) + qz * (roadWidth(j) / 2 + line)];
+  }
+
+  /**
+   * The next block along the sidewalk: pick a way on from the corner (rarely back), crossing at the
+   * crosswalk first if the street to follow is on the other side, then walk to the far corner.
+   */
+  private planLeg(p: Person): void {
+    const i = p.ni;
+    const j = p.nj;
+    const qx = p.qx ?? 1;
+    const qz = p.qz ?? 1;
+    const options = neighbors(i, j);
+    const ahead = options.filter(([a, b]) => a !== p.pi || b !== p.pj);
+    const pick = (ahead.length ? ahead : options)[Math.floor(this.rand() * (ahead.length || options.length))];
+    if (!pick) return;
+    const [ni, nj] = pick;
+    const route = (p.route ??= []);
+    if (ni !== i) {
+      const dx = ni > i ? 1 : -1;
+      if (qx !== dx) route.push(...this.corner(i, j, dx, qz, p));
+      route.push(...this.corner(ni, j, -dx, qz, p));
+      p.qx = -dx;
+    } else {
+      const dz = nj > j ? 1 : -1;
+      if (qz !== dz) route.push(...this.corner(i, j, qx, dz, p));
+      route.push(...this.corner(i, nj, qx, -dz, p));
+      p.qz = -dz;
+    }
+    p.pi = i;
+    p.pj = j;
+    p.ni = ni;
+    p.nj = nj;
+  }
+
+  /** Walk the sidewalks; back onto them from wherever it is if it wasn't on them. */
+  private walkSidewalk(p: Person, speed: number, dt: number): void {
+    if (!p.route) {
+      const [i, j] = nearestNode(p.x, p.z);
+      p.ni = i;
+      p.nj = j;
+      p.pi = -1;
+      p.qx = p.x >= nodeX(i) ? 1 : -1;
+      p.qz = p.z >= nodeZ(j) ? 1 : -1;
+      p.route = [...this.corner(i, j, p.qx, p.qz, p)];
+    }
+    if (p.route.length < 2) this.planLeg(p);
+    if (p.route.length < 2) return;
+    const tx = p.route[0];
+    const tz = p.route[1];
+    if (Math.hypot(tx - p.x, tz - p.z) < 0.6) {
+      p.route.splice(0, 2);
+      return;
+    }
+    this.moveToward(p, tx, tz, speed, dt);
+  }
+
+  /** Walk as people do here: the sidewalks, or anywhere in a district that has broken down. */
+  private stroll(p: Person, speed: number, dt: number): void {
+    if (this.brokenDown(p.district)) {
+      p.route = undefined;
+      if (this.walkStreets(p, speed, dt)) this.wander(p);
+      return;
+    }
+    this.walkSidewalk(p, speed, dt);
   }
 
   private spawnSoldier(district: number, cx: number, cz: number, have: Person[]): Person | null {
@@ -477,7 +661,9 @@ export class Agents {
       const tx = this.crowd.posX(threat);
       const tz = this.crowd.posZ(threat);
       if (p.mode !== Mode.Flee) {
+        // Running for it: off the sidewalk and down the street.
         p.mode = Mode.Flee;
+        p.route = undefined;
         this.retarget(p);
         [p.ni, p.nj] = stepToward(p.pi, p.pj, tx, tz, true);
       }
@@ -485,7 +671,7 @@ export class Agents {
       return;
     }
     if (p.mode === Mode.Flee) p.mode = Mode.Walk;
-    if (this.walkStreets(p, p.speed, dt)) this.wander(p);
+    this.stroll(p, p.speed, dt);
   }
 
   private updateSoldier(p: Person, dt: number): void {
@@ -518,18 +704,32 @@ export class Agents {
       p.timer = TURN_SECONDS;
       return;
     }
-    if (this.walkStreets(p, p.speed * 0.45, dt)) this.wander(p);
+    this.stroll(p, p.speed * 0.45, dt);
   }
 
   /** Patrol officers walk their beat and stop to fire their pistols at the dead nearby. */
   private updateOfficer(p: Person, dt: number): void {
     p.cooldown -= dt;
-    const target = this.crowd.nearest(p.x, p.z, PISTOL_RANGE);
+    const target = p.recalled ? -1 : this.crowd.nearest(p.x, p.z, PISTOL_RANGE);
     if (target < 0) {
-      // Checkpoint officers hold their post; patrols walk their beat.
+      // Checkpoint officers hold their post; a car's crew stands by its car (or gets back in);
+      // patrols walk their beat together.
       if (p.post === CHECKPOINT_POST) return;
+      if (p.car !== undefined) {
+        const d = Math.hypot(p.homeX! - p.x, p.homeZ! - p.z);
+        if (p.recalled && d < 1.2) {
+          p.gone = true;
+        } else if (d > 1) {
+          p.mode = Mode.Walk;
+          this.moveToward(p, p.homeX!, p.homeZ!, p.recalled ? 2.6 : 1.6, dt);
+        } else {
+          p.mode = Mode.Post;
+        }
+        return;
+      }
       p.mode = Mode.Walk;
-      if (this.walkStreets(p, p.speed * 0.8, dt)) this.wander(p);
+      if (p.leader) this.keepUp(p, p.leader, dt);
+      else this.stroll(p, p.speed * 0.8, dt);
       return;
     }
     p.mode = Mode.Post;
@@ -551,14 +751,22 @@ export class Agents {
   /** Riot police close on the dead behind their shields and club them down. */
   private updateRiot(p: Person, dt: number): void {
     p.cooldown -= dt;
+    const truck = p.truck;
     const target = this.crowd.nearest(p.x, p.z, RIOT_ADVANCE);
-    if (target < 0) {
-      p.mode = Mode.Walk;
-      if (this.walkStreets(p, p.speed * 0.7, dt)) this.wander(p);
+    const tx = target >= 0 ? this.crowd.posX(target) : 0;
+    const tz = target >= 0 ? this.crowd.posZ(target) : 0;
+    if (target < 0 || (truck && Math.hypot(tx - truck.x, tz - truck.z) > SQUAD_REACH)) {
+      // Nothing to break up within reach of the truck: back into the shield line beside it.
+      const d = Math.hypot(p.homeX! - p.x, p.homeZ! - p.z);
+      if (d > 0.5) {
+        p.mode = Mode.Walk;
+        this.moveToward(p, p.homeX!, p.homeZ!, 1.6, dt);
+      } else {
+        p.mode = Mode.Post;
+        if (truck) p.heading = truck.heading + Math.PI / 2;
+      }
       return;
     }
-    const tx = this.crowd.posX(target);
-    const tz = this.crowd.posZ(target);
     const dx = tx - p.x;
     const dz = tz - p.z;
     const d = Math.hypot(dx, dz);
@@ -608,6 +816,132 @@ export class Agents {
       }
     }
     return kills;
+  }
+
+  /** A patrol partner keeps its place beside and a step behind the lead officer. */
+  private keepUp(p: Person, lead: Person, dt: number): void {
+    const fx = -Math.sin(lead.heading);
+    const fz = -Math.cos(lead.heading);
+    const tx = lead.x + Math.cos(lead.heading) * p.ox - fx * p.oz;
+    const tz = lead.z - Math.sin(lead.heading) * p.ox - fz * p.oz;
+    const d = Math.hypot(tx - p.x, tz - p.z);
+    if (d < 0.3) {
+      p.heading = lead.heading;
+      return;
+    }
+    this.moveToward(p, tx, tz, Math.min(d * 2, 3.2), dt);
+  }
+
+  // --- Patrol cars (driven by Cars) -----------------------------------------------------
+
+  /** Whether any of the dead are within `range` of (x, z): a patrol car pulls over for them. */
+  zombieNear(x: number, z: number, range: number): boolean {
+    return this.crowd.nearest(x, z, range) >= 0;
+  }
+
+  /** A patrol car's two officers get out, one from each front door, and stand by the car. */
+  dismount(car: number, x: number, z: number, heading: number, district: number): void {
+    const rx = Math.cos(heading);
+    const rz = -Math.sin(heading);
+    const fx = -Math.sin(heading);
+    const fz = -Math.cos(heading);
+    for (const side of [-1, 1]) {
+      const px = x + rx * side * 1.3 + fx * 0.5;
+      const pz = z + rz * side * 1.3 + fz * 0.5;
+      this.people.push({
+        kind: Kind.Police, civilian: false, mode: Mode.Post, district, x: px, z: pz, heading: heading - side * 0.6,
+        ni: 0, nj: 0, pi: 0, pj: 0, ox: 0, oz: 0, speed: 1.4, phase: 0, timer: 0, cooldown: 0.5 + this.rand(), post: -1,
+        look: Math.floor(this.rand() * 1024), car, homeX: px + rx * side * 1.2 + fx * 1.5, homeZ: pz + rz * side * 1.2 + fz * 1.5,
+      });
+    }
+  }
+
+  /** How many of a patrol car's crew are still out of it. */
+  crewOut(car: number): number {
+    let n = 0;
+    for (const p of this.people) if (p.car === car && !p.gone) n++;
+    return n;
+  }
+
+  /** Call a patrol car's crew back to it; `now` when the car has gone and they go with it. */
+  recall(car: number, now = false): void {
+    for (const p of this.people) {
+      if (p.car !== car) continue;
+      p.recalled = true;
+      if (now) p.gone = true;
+    }
+    if (now) this.people = this.people.filter((p) => !p.gone);
+  }
+
+  // --- Riot squads ----------------------------------------------------------------------
+
+  /** A riot officer for the district, into a squad with room, or a new squad with its own truck. */
+  private spawnRiot(district: number, cx: number, cz: number): Person | null {
+    const members = new Map<Truck, number>();
+    for (const p of this.people) if (p.truck) members.set(p.truck, (members.get(p.truck) ?? 0) + 1);
+    let truck = this.trucks.find((t) => t.district === district && (members.get(t) ?? 0) < SQUAD && Math.hypot(t.x - cx, t.z - cz) < ACTIVE_RADIUS);
+    if (!truck) {
+      if (this.trucks.length >= TRUCKS) return null;
+      const placed = this.placeTruck(district, cx, cz);
+      if (!placed) return null;
+      truck = placed;
+      this.trucks.push(truck);
+    }
+    // In line along the truck's street side, shields out.
+    const k = members.get(truck) ?? 0;
+    const fx = -Math.sin(truck.heading);
+    const fz = -Math.cos(truck.heading);
+    const rx = Math.cos(truck.heading);
+    const rz = -Math.sin(truck.heading);
+    const along = (k - (SQUAD - 1) / 2) * 1.15;
+    const hx = truck.x + fx * along - rx * 3;
+    const hz = truck.z + fz * along - rz * 3;
+    return {
+      kind: Kind.Riot, civilian: false, mode: Mode.Walk, district,
+      // Stepping down from the back of the truck.
+      x: truck.x - fx * 3.8 + (this.rand() - 0.5), z: truck.z - fz * 3.8 + (this.rand() - 0.5), heading: truck.heading,
+      ni: 0, nj: 0, pi: 0, pj: 0, ox: 0, oz: 0, speed: 1.3, phase: this.rand() * 10, timer: 0, cooldown: this.rand(), post: -1,
+      look: 0, truck, homeX: hx, homeZ: hz,
+    };
+  }
+
+  /**
+   * Park a riot truck at the curb where the trouble is: near the closest of the dead in the
+   * district, or else on one of its streets in view.
+   */
+  private placeTruck(district: number, cx: number, cz: number): Truck | null {
+    const near = this.crowd.nearest(cx, cz, ACTIVE_RADIUS);
+    for (let attempt = 0; attempt < 24; attempt++) {
+      let px: number;
+      let pz: number;
+      if (near >= 0 && attempt < 8 && districtAt(this.crowd.posX(near), this.crowd.posZ(near)) === district) {
+        px = this.crowd.posX(near) + (this.rand() - 0.5) * 80;
+        pz = this.crowd.posZ(near) + (this.rand() - 0.5) * 80;
+      } else {
+        const r = ACTIVE_RADIUS * 0.8 * Math.sqrt(this.rand());
+        const a = this.rand() * Math.PI * 2;
+        px = cx + Math.cos(a) * r;
+        pz = cz + Math.sin(a) * r;
+      }
+      const [i, j] = nearestNode(px, pz);
+      const options = neighbors(i, j);
+      const [ni, nj] = options[Math.floor(this.rand() * options.length)];
+      const u = 0.3 + this.rand() * 0.4;
+      const side = this.rand() < 0.5 ? -1 : 1;
+      let x = nodeX(i) + (nodeX(ni) - nodeX(i)) * u;
+      let z = nodeZ(j) + (nodeZ(nj) - nodeZ(j)) * u;
+      let heading: number;
+      if (ni !== i) {
+        z += side * (roadWidth(j) / 2 - 2);
+        heading = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+      } else {
+        x += side * (roadWidth(i) / 2 - 2);
+        heading = side > 0 ? 0 : Math.PI;
+      }
+      if (districtAt(x, z) !== district || Math.hypot(x - cx, z - cz) > ACTIVE_RADIUS) continue;
+      return { x, z, heading, district, phase: this.rand() };
+    }
+    return null;
   }
 
   /** Walk toward the current target intersection. Returns true on arrival. */
@@ -845,8 +1179,56 @@ export class Agents {
     return mesh;
   }
 
+  /** Riot trucks: a tall navy van with a white band, a caged windscreen and a flashing light bar. */
+  private buildTrucks(): void {
+    const part = (w: number, h: number, d: number, x: number, y: number, z: number, color: number, glow = 0) => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      g.translate(x, y, z);
+      const c = new THREE.Color(color);
+      const n = g.getAttribute('position').count;
+      g.setAttribute('color', new THREE.Float32BufferAttribute(Array.from({ length: n }, () => [c.r, c.g, c.b]).flat(), 3));
+      g.setAttribute('aGlow', new THREE.Float32BufferAttribute(new Float32Array(n).fill(glow), 1));
+      return g;
+    };
+    const NAVY = 0x1b2a4a;
+    const geometry = mergeGeometries([
+      part(2.5, 0.9, 7.2, 0, 0.75, 0, 0x15181d),
+      part(2.5, 2.2, 5.0, 0, 2.3, 1.0, NAVY),
+      part(2.5, 1.6, 2.0, 0, 2.0, -2.5, NAVY),
+      part(2.52, 0.35, 5.02, 0, 2.0, 1.0, 0xe8e8e2),
+      part(2.3, 0.75, 0.06, 0, 2.3, -3.52, 0x2a3440),
+      part(2.3, 0.08, 0.1, 0, 2.5, -3.6, 0x111111),
+      part(0.7, 0.18, 0.4, -0.45, 3.0, -2.8, 0xd42020, 3),
+      part(0.7, 0.18, 0.4, 0.45, 3.0, -2.8, 0x2040e0, 4),
+      part(0.45, 0.2, 0.06, -0.85, 0.95, -3.62, 0xdddddd, 1),
+      part(0.45, 0.2, 0.06, 0.85, 0.95, -3.62, 0xdddddd, 1),
+      part(0.35, 0.25, 0.06, -1.0, 1.1, 3.62, 0x881010, 2),
+      part(0.35, 0.25, 0.06, 1.0, 1.1, 3.62, 0x881010, 2),
+    ]);
+    this.truckPhase = new THREE.InstancedBufferAttribute(new Float32Array(TRUCKS), 1).setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute('aPhase', this.truckPhase);
+    const material = new THREE.MeshLambertMaterial({ vertexColors: true });
+    vehicleLamps(material, true);
+    cityLight.patch(material);
+    this.truckMesh = new THREE.InstancedMesh(geometry, material, TRUCKS);
+    this.truckMesh.count = 0;
+    this.truckMesh.frustumCulled = false;
+    this.truckMesh.castShadow = true;
+    this.group.add(this.truckMesh);
+  }
+
   private render(): void {
     const counts = KINDS.map(() => 0);
+    this.trucks.forEach((t, i) => {
+      this.q.setFromAxisAngle(this.v.set(0, 1, 0), t.heading);
+      this.m.compose(this.v.set(t.x, 0, t.z), this.q, this.s.set(1, 1, 1));
+      this.truckMesh.setMatrixAt(i, this.m);
+      this.truckPhase.setX(i, t.phase);
+      if (cityLight.night > 0.15) cityLight.add(Glow.Police, t.x, t.z, 0, 24, 0, 0.9, t.phase);
+    });
+    this.truckMesh.count = this.trucks.length;
+    this.truckMesh.instanceMatrix.needsUpdate = true;
+    this.truckPhase.needsUpdate = true;
     // Soldiers and police carry lights on their weapons after dark.
     const night = cityLight.night;
     const lights = night > 0.3;

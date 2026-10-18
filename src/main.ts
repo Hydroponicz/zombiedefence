@@ -287,7 +287,7 @@ function update(dt: number): void {
   farps.update(dt);
   sites.update(dt, night);
   traffic.update(state, sim.time);
-  cars.update(dt, state, heli.position.x, heli.position.z);
+  cars.update(dt, state, heli.position.x, heli.position.z, agents);
   fleet.update(dt, state, sim.time);
 
   // Ground operations: loading, deploying, evacuating.

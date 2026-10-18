@@ -174,6 +174,18 @@ narrow windows.
   and the bitten among them turn.
 - **Against riots:** riot police are what keeps order. A shield line raises the district's order
   target and restores order faster than soldiers can.
+- **Riot squads:** riot police stay in reserve at the station until they're called out: by a riot,
+  by unrest (order below 40), or by the infected starting to gather in the district. They stand down
+  once the streets are quiet. Only squads that are out fight the dead; in reserve they still steady
+  people a little. On the street they arrive as squads of four to eight with a riot truck parked
+  at the curb, form a shield line beside it, and go out up to 70 m from it to club down the dead.
+- **On the street:**
+  - **Patrol cars** keep order by being seen; they don't fight from behind the wheel. When the
+    dead come within 40 m, the car pulls over to the curb and its two officers get out to deal
+    with them. Once it has been quiet for a while, they get back in and drive on.
+  - **Foot patrols** walk in twos and threes, never alone, mostly in the downtown and commercial
+    districts.
+  - **Checkpoints:** once they're set up, a few officers man each checkpoint in view.
 - **Morale:** police morale wears down every day of the outbreak, and with losses, riots, darkness
   and fear. Below about a third, officers walk off the job and go home as civilians. Most districts
   lose their police between days 7 and 10.
@@ -181,6 +193,13 @@ narrow windows.
   nobody is left to guard it.
 - **Where to see them:** the HUD shows "Police N" for the district, and the map sidebar shows officers,
   riot police and morale.
+
+## People on the street
+
+- Civilians keep to the sidewalks: they walk the blocks, cross at the crosswalks and turn at the
+  corners. They run down the middle of the street only when fleeing the dead, or once a district has
+  broken down (civil order has collapsed or it has been overrun).
+- The bitten stagger along the sidewalks with everyone else until they turn.
 
 ## Traffic
 

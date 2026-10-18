@@ -396,8 +396,9 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   const fort = d.features.fortified ? 2 : 1;
   const pol = d.police;
   const O = pol.officers;
-  const R = pol.riot;
-  const pe = O + R > 0 ? policeEffectiveness(d, night) : 0;
+  // Riot squads only fight once they're called out; in reserve at the station they don't.
+  const R = pol.riotOut ? pol.riot : 0;
+  const pe = O + pol.riot > 0 ? policeEffectiveness(d, night) : 0;
 
   // --- Outbreak and combat ---
   // Soldiers and police only protect the part of the district they can cover. Officers patrol
@@ -451,7 +452,7 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   d.infected += bitten + (troopLoss + policeLoss) * 0.5;
   d.dead += civDeaths + (troopLoss + policeLoss) * 0.5 + civKills + fighterKills;
   pol.officers = Math.max(0, O - officerLoss);
-  pol.riot = Math.max(0, R - riotLoss);
+  pol.riot = Math.max(0, pol.riot - riotLoss);
   const kills = civKills + fighterKills;
   const residentShare = Z > 0 ? d.zombies / Z : 1;
   const hordeLosses = kills * (1 - residentShare);
@@ -528,8 +529,9 @@ function updateDistrict(s: CityState, d: DistrictState, day: number, night: bool
   }
   const fearNow = clamp(threat + neighborThreat * 0.6);
   // Riot police are what keep order: a shield line breaks up a riot far better than rifles do.
-  const security = clamp((tr.strength + pol.officers * 0.8 * pe + pol.riot * 3 * pe) / Math.max(1, d.population / 400));
-  const quell = d.rioting ? Math.min(20, pol.riot * pe * 0.8) : 0;
+  // Squads held in reserve still steady people a little: they're known to be ready.
+  const security = clamp((tr.strength + pol.officers * 0.8 * pe + pol.riot * (pol.riotOut ? 3 : 0.8) * pe) / Math.max(1, d.population / 400));
+  const quell = d.rioting && pol.riotOut ? Math.min(20, pol.riot * pe * 0.8) : 0;
   const dread = Math.min(15, (day - 1) * 2);
   const dark = d.power === 'dark' ? (night ? 18 : 10) : 0;
   // Guarded police stations, shelters and food points steady people.
@@ -608,6 +610,24 @@ function updatePolice(s: CityState, d: DistrictState, day: number, night: boolea
   } else if (pol.stage === 'support' && d.troops.strength < 1) {
     pol.stage = 'checkpoints';
   }
+  // Riot squads roll out in their trucks for a riot, for unrest, or when the infected start to
+  // gather; they stand down once the streets are quiet again.
+  const gathering = totalZombies(d) >= 5 || (d.flags.outbreak && d.infected >= 20);
+  const callOut = pol.riot >= 1 && d.status !== 'overrun' && (d.rioting || d.order < 40 || gathering);
+  if (callOut && !pol.riotOut) {
+    pol.riotOut = true;
+    emit(d.id, 'warn', d.rioting || d.order < 40
+      ? `Riot police are rolling out in ${d.name} to restore order.`
+      : d.flags.outbreak
+        ? `Riot police are rolling out in ${d.name}: the infected are gathering.`
+        : `Riot police are rolling out in ${d.name} after reports of violent attacks.`);
+  } else if (pol.riotOut && (!callOut && !d.rioting && d.order > 45 && totalZombies(d) < 1)) {
+    pol.riotOut = false;
+    emit(d.id, 'info', `Riot police in ${d.name} have stood down.`);
+  } else if (pol.riotOut && (pol.riot < 1 || d.status === 'overrun')) {
+    pol.riotOut = false;
+  }
+
   // Checkpoints catch the bitten: held in isolation, and put down when they turn.
   if (pol.stage !== 'patrol' && d.infected > 0) {
     const screened = d.infected * 0.02 * Math.min(1, pol.officers / 40) * pol.morale * H;
