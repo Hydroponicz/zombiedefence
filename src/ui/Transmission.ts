@@ -51,8 +51,8 @@ export class Transmission {
   private stickArmed = true;
   /** The policy call was answered: don't put it up again until the simulation has the answer. */
   private policyAnswered = false;
-  /** Command requests pop up as calls (the dev console can turn this off). */
-  requestPopups = true;
+  /** Calls pop up at all: requests and Command's decisions (the dev console can turn this off). */
+  popups = true;
 
   /** The answers on the card that's up. */
   private get answers(): string[] {
@@ -100,12 +100,13 @@ export class Transmission {
     for (const r of s.requests) {
       if (r.status !== 'open' || this.seen.has(r.id)) continue;
       this.seen.add(r.id);
-      if (this.primed && this.requestPopups) this.queue.push(r.id);
+      if (this.primed && this.popups) this.queue.push(r.id);
     }
     this.primed = true;
-    if (!this.requestPopups) {
+    if (!this.popups) {
       this.queue = [];
-      if (this.shown !== null && this.shown !== POLICY_CALL) this.close();
+      if (this.shown !== null) this.close();
+      return;
     }
     // Calls for requests that have closed in the meantime are dropped.
     this.queue = this.queue.filter((id) => s.requests.some((r) => r.id === id && r.status === 'open'));

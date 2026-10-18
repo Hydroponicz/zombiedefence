@@ -45,8 +45,9 @@ Any controller using the browser's standard gamepad mapping works (Xbox, PlaySta
 
 **Dev console:** the <kbd>`</kbd> key (keyboard only) opens it. Click a switch, or type a command
 (`help` lists them):
-- `popups on|off`: whether Command requests pop up as radio calls. With pop-ups off, requests still
-  come in to the radio log and Flight Command; the call on movement restrictions still comes.
+- `popups on|off`: whether radio calls pop up and hold the game: Command's requests and its call on
+  movement restrictions. With pop-ups off, requests still come in to the radio log and Flight
+  Command, and you can set movement restrictions in Flight Command → Movement whenever you like.
 
 Settings are kept in the browser between sessions.
 

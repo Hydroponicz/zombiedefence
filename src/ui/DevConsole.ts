@@ -5,20 +5,27 @@
 const STORAGE_KEY = 'zd-dev-settings';
 
 export interface DevSettings {
-  /** Command requests pop up as radio calls (they still come in, to the log and Flight Command). */
-  requestPopups: boolean;
+  /**
+   * Radio calls pop up and hold the game: Command's requests and its call on movement restrictions.
+   * Off, requests still come in (to the log and Flight Command) and restrictions are set in Flight Command.
+   */
+  popups: boolean;
 }
 
-const DEFAULTS: DevSettings = { requestPopups: true };
+const DEFAULTS: DevSettings = { popups: true };
 
 /** The switches, by command name. */
 const SWITCHES: { name: string; key: keyof DevSettings; label: string }[] = [
-  { name: 'popups', key: 'requestPopups', label: 'Command request radio pop-ups' },
+  { name: 'popups', key: 'popups', label: 'Radio call pop-ups (requests and Command decisions)' },
 ];
 
 function load(): DevSettings {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') };
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
+    // Saved before the switch covered every call.
+    if (saved.requestPopups !== undefined && saved.popups === undefined) saved.popups = saved.requestPopups;
+    delete saved.requestPopups;
+    return { ...DEFAULTS, ...saved };
   } catch {
     return { ...DEFAULTS };
   }

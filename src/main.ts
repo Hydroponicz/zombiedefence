@@ -307,7 +307,7 @@ function update(dt: number): void {
     firstInput = true;
     setTimeout(() => hud.hideHelp(), 6000);
   }
-  radio.requestPopups = devConsole.settings.requestPopups;
+  radio.popups = devConsole.settings.popups;
   if (paused) return;
   // An incoming radio call holds the game until it's answered.
   if (radio.visible) {
