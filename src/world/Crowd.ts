@@ -33,6 +33,12 @@ const HORDE_WIDTH = 22;
 /** The longest column drawn, metres of street. */
 const MAX_COLUMN = 800;
 
+/**
+ * How far a horde member strays from its place in the horde, drawn off by the rotors or after prey,
+ * before the horde pulls it back: the simulation says where the horde is, and the dead go with it.
+ */
+const LEASH = 120;
+
 const SIGHT = 18;
 const BITE = 1.1;
 const CORPSE_SECONDS = 25;
@@ -172,6 +178,8 @@ export class Crowd {
   private remove = new Uint8Array(CROWD_CAPACITY);
   /** Time owed to an agent skipped by its update tier. */
   private lag = new Float32Array(CROWD_CAPACITY);
+  /** Horde members the horde has pulled back: they keep with it while the rotors still call. */
+  private recalled = new Uint8Array(CROWD_CAPACITY);
   /** The sealed base's ground, a wall to the dead until the city falls (see sim/quarantine.ts). */
   private sealed: { x0: number; x1: number; z0: number; z1: number } | null = null;
   private slotX = 0;
@@ -485,6 +493,7 @@ export class Crowd {
     this.horde[i] = horde;
     this.remove[i] = 0;
     this.lag[i] = 0;
+    this.recalled[i] = 0;
     return i;
   }
 
@@ -554,6 +563,22 @@ export class Crowd {
         this.timer[i] -= dt;
         if (this.timer[i] <= 0) this.mode[i] = this.horde[i] ? Mode.Follow : Mode.Wander;
         continue;
+      }
+
+      // Strayed too far from the horde: back to it, whatever is about, and kept with it until out
+      // of the rotors' call (so it doesn't turn back at the leash's end).
+      if (this.horde[i]) {
+        const t = this.tracks.get(this.horde[i]);
+        if (t) {
+          if (this.recalled[i] && !(f.attract && toHeli < ATTRACT_RANGE * 1.5)) this.recalled[i] = 0;
+          this.slotTarget(i, t);
+          if (this.recalled[i] || dist2(this.slotX, this.slotZ, this.x[i], this.z[i]) > LEASH * LEASH) {
+            this.recalled[i] = 1;
+            this.mode[i] = Mode.Follow;
+            this.follow(i, t, dt);
+            continue;
+          }
+        }
       }
 
       // Look for prey every fourth frame (staggered), or every frame once chasing.
@@ -858,6 +883,7 @@ export class Crowd {
         this.tint[w] = this.tint[i];
         this.horde[w] = this.horde[i];
         this.lag[w] = this.lag[i];
+        this.recalled[w] = this.recalled[i];
       }
       this.remove[w] = 0;
       w++;

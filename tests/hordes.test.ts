@@ -211,4 +211,49 @@ describe('crowd', () => {
     expect(offStreet / samples).toBeLessThan(0.02);
     expect(worstJump).toBeLessThan(2);
   });
+
+  it('leaves no one behind under a hovering helicopter when the horde marches on', () => {
+    const s = emptyCity();
+    const from = districtCenter(DISTRICT_TEMPLATES[4].col, DISTRICT_TEMPLATES[4].row);
+    const h = horde(s, 1, from.x, from.z, 3000);
+    const prey = s.districts.find((d) => d.kind === 'hospital')!;
+    for (const d of s.districts) {
+      if (d !== prey) d.population = 0;
+      d.police.officers = 0;
+      d.police.riot = 0;
+      d.troops.strength = 0;
+    }
+    h.target = prey.id;
+    const agents = new Agents('hover', effects);
+    const crowd = agents.crowd;
+    // Hovering low where the horde starts: the rotors draw the dead in.
+    const heli = new THREE.Vector3(from.x, 20, from.z);
+    let time = s.t;
+    const dt = 1 / 30;
+    const perFrame = (dt / 1.43) * 20;
+    let drawn = 0;
+    while (Math.hypot(h.x - heli.x, h.z - heli.z) < 500) {
+      time += perFrame;
+      while (s.t + 1 <= time) {
+        s.t++;
+        moveHordes(s, false, quiet);
+      }
+      agents.update(dt, heli, 20, 1, s, 0, 20, time);
+      drawn = Math.max(drawn, agents.attract.drawn);
+    }
+    // A few seconds more for stragglers to rejoin.
+    for (let f = 0; f < 30 * 5; f++) {
+      time += perFrame;
+      while (s.t + 1 <= time) {
+        s.t++;
+        moveHordes(s, false, quiet);
+      }
+      agents.update(dt, heli, 20, 1, s, 0, 20, time);
+    }
+    let below = 0;
+    for (let i = 0; i < crowd.count; i++) if (Math.hypot(crowd.posX(i) - heli.x, crowd.posZ(i) - heli.z) < 80) below++;
+    expect(drawn).toBeGreaterThan(50);
+    expect(crowd.count).toBeGreaterThan(1000);
+    expect(below).toBe(0);
+  });
 });
