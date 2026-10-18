@@ -14,6 +14,7 @@ import { checkpointNodes } from '../sim/traffic';
 import { BLOCKS_PER_DISTRICT, nearestNode, neighbors, nodeX, nodeZ, NODES_X, NODES_Z, stepToward } from '../sim/streets';
 import type { CityState, DistrictState } from '../sim/types';
 import type { WalkGrid } from './City';
+import { cityLight, Glow } from './CityLight';
 import { Crowd, CROWD_CAPACITY, RESIDENT_RADIUS, type HumanRef } from './Crowd';
 import type { Effects } from './Effects';
 
@@ -147,6 +148,9 @@ export class Agents {
   private s = new THREE.Vector3(1, 1, 1);
   private c = new THREE.Color();
   private sensor = false;
+  /** Visible shafts of the soldiers' and police officers' weapon lights at night. */
+  private shafts: THREE.InstancedMesh;
+  private shaftNight = { value: 0 };
   /** Sensor pips: a fixed-size dot over every figure, coloured by what it is. */
   private pips: THREE.Points;
   private pipPos = new Float32Array((CROWD_CAPACITY + PIP_PEOPLE) * 3);
@@ -159,6 +163,7 @@ export class Agents {
     this.buildPosts(seed);
     this.sandbags = this.buildSandbags();
     this.buildMeshes();
+    this.shafts = this.buildShafts();
     const pipGeo = new THREE.BufferGeometry();
     pipGeo.setAttribute('position', new THREE.BufferAttribute(this.pipPos, 3).setUsage(THREE.DynamicDrawUsage));
     pipGeo.setAttribute('color', new THREE.BufferAttribute(this.pipColor, 3).setUsage(THREE.DynamicDrawUsage));
@@ -801,8 +806,52 @@ export class Agents {
     }
   }
 
+  /**
+   * A weapon light's beam through the night air: an open cone from the muzzle, faint and fading
+   * along its length, additive so it costs no sorting. One draw call for every light.
+   */
+  private buildShafts(): THREE.InstancedMesh {
+    const length = 16;
+    const cone = new THREE.ConeGeometry(2.6, length, 14, 1, true);
+    cone.translate(0, -length / 2, 0);
+    cone.rotateX(Math.PI / 2);
+    const material = new THREE.ShaderMaterial({
+      uniforms: { uNight: this.shaftNight },
+      vertexShader: `
+        uniform float uNight;
+        varying float vAlong;
+        void main() {
+          vAlong = -position.z / ${length.toFixed(1)};
+          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        uniform float uNight;
+        varying float vAlong;
+        void main() {
+          float a = pow(1.0 - vAlong, 2.2) * smoothstep(0.0, 0.05, vAlong) * 0.16 * uNight;
+          gl_FragColor = vec4(vec3(0.8, 0.88, 1.0) * a, 1.0);
+        }`,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const capacity = CAPACITY[Kind.Soldier] + CAPACITY[Kind.Police] + CAPACITY[Kind.Riot];
+    const mesh = new THREE.InstancedMesh(cone, material, capacity);
+    mesh.count = 0;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 3;
+    this.group.add(mesh);
+    return mesh;
+  }
+
   private render(): void {
     const counts = KINDS.map(() => 0);
+    // Soldiers and police carry lights on their weapons after dark.
+    const night = cityLight.night;
+    const lights = night > 0.3;
+    this.shaftNight.value = Math.min(1, (night - 0.3) / 0.4);
+    let shafts = 0;
     for (const p of this.people) {
       const kind = p.kind;
       const i = counts[kind]++;
@@ -819,12 +868,25 @@ export class Agents {
       this.m.compose(this.v.set(p.x, lying ? 0.2 : bob, p.z), this.q, this.s.set(1, 1, 1));
       this.bodies[kind].setMatrixAt(i, this.m);
       this.heads[kind].setMatrixAt(i, this.m);
+      if (lights && !lying && (kind === Kind.Soldier || kind === Kind.Police || kind === Kind.Riot)) {
+        // Swept a little as they walk; pointed low at the street ahead.
+        const sweep = p.heading + (moving ? Math.sin(p.phase * 0.5) * 0.25 : Math.sin(p.phase * 0.2 + p.look) * 0.35);
+        const fx = -Math.sin(sweep);
+        const fz = -Math.cos(sweep);
+        cityLight.add(Glow.Flashlight, p.x + fx * 0.6, p.z + fz * 0.6, sweep, 28, 9, 1.1);
+        this.e.set(-0.1, sweep, 0, 'YXZ');
+        this.q.setFromEuler(this.e);
+        this.m.compose(this.v.set(p.x + fx * 0.6, 1.3 + bob, p.z + fz * 0.6), this.q, this.s.set(1, 1, 1));
+        this.shafts.setMatrixAt(shafts++, this.m);
+      }
       // Colours follow the person, not the slot: slots shift as people come and go.
       if (kind === Kind.Civilian) {
         this.bodies[kind].setColorAt(i, this.c.setHex(CLOTHES[p.look % CLOTHES.length]));
         this.heads[kind].setColorAt(i, this.c.setHex(SKINS[(p.look >> 3) % SKINS.length]));
       }
     }
+    this.shafts.count = shafts;
+    this.shafts.instanceMatrix.needsUpdate = true;
     for (const kind of KINDS) {
       const n = Math.min(counts[kind], CAPACITY[kind]);
       for (const mesh of [this.bodies[kind], this.heads[kind]]) {

@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, STREET_SPACING } from '../sim/streets';
 import { DISTRICT_TEMPLATES } from '../sim/layout';
+import { cityLight, Glow, vehicleLamps } from './CityLight';
 import { checkpointNodes, congestion, districtOfEdge, edgeIndex, isAvenue, speedFactor } from '../sim/traffic';
 import type { CityState, Traffic } from '../sim/types';
 
@@ -56,6 +57,8 @@ interface Car {
   v: number;
   color: number;
   police: boolean;
+  /** Light-bar rhythm, for the police. */
+  phase: number;
   ox: number;
   oz: number;
   oh: number;
@@ -86,6 +89,8 @@ export class Cars {
   private abandoned: THREE.InstancedMesh;
   /** Police cruisers on patrol and parked at checkpoints. */
   private police: THREE.InstancedMesh;
+  /** Each cruiser's light-bar rhythm. */
+  private phase: THREE.InstancedBufferAttribute;
   /** Concrete barriers at checkpoints. */
   private barriers: THREE.InstancedMesh;
   private time = 0;
@@ -102,13 +107,30 @@ export class Cars {
   private pos = { x: 0, z: 0, h: 0 };
 
   constructor() {
+    // Lamps are marked per vertex for the night glow: headlights at the front (-z), tail lights behind.
+    const glow = (g: THREE.BufferGeometry, kind: number) => {
+      g.setAttribute('aGlow', new THREE.Float32BufferAttribute(new Float32Array(g.getAttribute('position').count).fill(kind), 1));
+      return g;
+    };
+    const lamp = (w: number, h: number, d: number, x: number, y: number, z: number, kind: number) => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      g.translate(x, y, z);
+      return glow(g, kind);
+    };
+    const lamps = (front: number, back: number) => [
+      lamp(0.45, 0.18, 0.06, -0.6, 0.72, front, 1), lamp(0.45, 0.18, 0.06, 0.6, 0.72, front, 1),
+      lamp(0.4, 0.16, 0.06, -0.62, 0.75, back, 2), lamp(0.4, 0.16, 0.06, 0.62, 0.75, back, 2),
+    ];
     const body = new THREE.BoxGeometry(1.9, 0.75, 4.3);
     body.translate(0, 0.6, 0);
     const cabin = new THREE.BoxGeometry(1.7, 0.6, 2.2);
     cabin.translate(0, 1.25, 0.2);
-    const geometry = mergeGeometries([body, cabin]);
-    const make = (count: number) => {
-      const mesh = new THREE.InstancedMesh(geometry, new THREE.MeshLambertMaterial(), count);
+    const geometry = mergeGeometries([glow(body, 0), glow(cabin, 0), ...lamps(-2.16, 2.16)]);
+    const make = (count: number, lit: boolean) => {
+      const material = new THREE.MeshLambertMaterial();
+      if (lit) vehicleLamps(material, false);
+      cityLight.patch(material);
+      const mesh = new THREE.InstancedMesh(geometry, material, count);
       mesh.setColorAt(0, this.c.setHex(0xffffff));
       mesh.count = 0;
       mesh.frustumCulled = false;
@@ -116,8 +138,8 @@ export class Cars {
       this.group.add(mesh);
       return mesh;
     };
-    this.moving = make(MOVING);
-    this.abandoned = make(ABANDONED);
+    this.moving = make(MOVING, true);
+    this.abandoned = make(ABANDONED, false);
     // A cruiser: white body, black bonnet and doors band, and a red-and-blue light bar.
     const tint = (g: THREE.BufferGeometry, color: number) => {
       const c = new THREE.Color(color);
@@ -125,22 +147,31 @@ export class Cars {
       g.setAttribute('color', new THREE.Float32BufferAttribute(Array.from({ length: n }, () => [c.r, c.g, c.b]).flat(), 3));
       return g;
     };
-    const part = (w: number, h: number, d: number, x: number, y: number, z: number, color: number) => {
+    const part = (w: number, h: number, d: number, x: number, y: number, z: number, color: number, kind = 0) => {
       const g = new THREE.BoxGeometry(w, h, d);
       g.translate(x, y, z);
-      return tint(g, color);
+      return glow(tint(g, color), kind);
     };
     const cruiser = mergeGeometries([
       part(1.9, 0.75, 4.5, 0, 0.6, 0, 0xf2f2f2),
       part(1.92, 0.3, 1.6, 0, 0.75, -1.4, 0x16181c),
       part(1.7, 0.6, 2.2, 0, 1.25, 0.2, 0x16181c),
-      part(0.6, 0.15, 0.3, -0.35, 1.62, 0.2, 0xd42020),
-      part(0.6, 0.15, 0.3, 0.35, 1.62, 0.2, 0x2040e0),
+      part(0.6, 0.15, 0.3, -0.35, 1.62, 0.2, 0xd42020, 3),
+      part(0.6, 0.15, 0.3, 0.35, 1.62, 0.2, 0x2040e0, 4),
+      ...lamps(-2.26, 2.26).map((g) => tint(g, 0xdddddd)),
     ]);
-    this.police = new THREE.InstancedMesh(cruiser, new THREE.MeshLambertMaterial({ vertexColors: true }), POLICE);
+    // Each cruiser's light bar flashes in its own rhythm.
+    this.phase = new THREE.InstancedBufferAttribute(new Float32Array(POLICE), 1).setUsage(THREE.DynamicDrawUsage);
+    cruiser.setAttribute('aPhase', this.phase);
+    const cruiserMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+    vehicleLamps(cruiserMaterial, true);
+    cityLight.patch(cruiserMaterial);
+    this.police = new THREE.InstancedMesh(cruiser, cruiserMaterial, POLICE);
     const barrier = new THREE.BoxGeometry(0.6, 0.9, 3.4);
     barrier.translate(0, 0.45, 0);
-    this.barriers = new THREE.InstancedMesh(barrier, new THREE.MeshLambertMaterial({ color: 0xc9c5ba }), BARRIERS);
+    const barrierMaterial = new THREE.MeshLambertMaterial({ color: 0xc9c5ba });
+    cityLight.patch(barrierMaterial);
+    this.barriers = new THREE.InstancedMesh(barrier, barrierMaterial, BARRIERS);
     for (const mesh of [this.police, this.barriers]) {
       mesh.count = 0;
       mesh.frustumCulled = false;
@@ -313,12 +344,20 @@ export class Cars {
     }
 
     let moving = 0;
+    const lit = cityLight.night > 0.15;
     for (const c of this.cars) {
       const p = this.place(c);
-      this.q.setFromAxisAngle(this.up, p.h + c.oh);
-      this.m.compose(this.v.set(p.x + c.ox, 0, p.z + c.oz), this.q, this.one);
+      const h = p.h + c.oh;
+      const x = p.x + c.ox;
+      const z = p.z + c.oz;
+      this.q.setFromAxisAngle(this.up, h);
+      this.m.compose(this.v.set(x, 0, z), this.q, this.one);
+      // Headlights down the street ahead.
+      if (lit) cityLight.add(Glow.Headlight, x - Math.sin(h) * 2.2, z - Math.cos(h) * 2.2, h, 26, 11, 0.85);
       if (c.police && police < POLICE) {
+        this.phase.setX(police, c.phase);
         this.police.setMatrixAt(police++, this.m);
+        if (lit) cityLight.add(Glow.Police, x, z, 0, 20, 0, 0.8, c.phase);
       } else if (moving < MOVING) {
         this.moving.setMatrixAt(moving, this.m);
         this.moving.setColorAt(moving, this.c.setHex(c.color));
@@ -375,7 +414,7 @@ export class Cars {
                   return {
                     axis, line, dir, lane, s, v: CRUISE * speedFactor(t, e),
                     color: PAINT[Math.floor(Math.random() * PAINT.length)],
-                    police: Math.random() < patrol, ox: 0, oz: 0, oh: 0,
+                    police: Math.random() < patrol, phase: Math.random(), ox: 0, oz: 0, oh: 0,
                   };
                 },
               });
@@ -427,6 +466,7 @@ export class Cars {
     let police = 0;
     let barriers = 0;
     const t = state?.traffic;
+    const lit = cityLight.night > 0.15;
     if (t && state) {
       // Checkpoints: barriers across part of each road into the intersection and two cruisers.
       for (const d of state.districts) {
@@ -450,7 +490,10 @@ export class Cars {
             if (police >= POLICE) break;
             this.q.setFromAxisAngle(this.up, 0.6 + k * 2.2);
             this.m.compose(this.v.set(x + (k ? -7 : 7), 0, z + (k ? 6 : -6)), this.q, this.one);
+            const phase = hash(i * 2 + k, j);
+            this.phase.setX(police, phase);
             this.police.setMatrixAt(police++, this.m);
+            if (lit) cityLight.add(Glow.Police, x + (k ? -7 : 7), z + (k ? 6 : -6), 0, 22, 0, 0.9, phase);
           }
         }
       }
@@ -508,6 +551,7 @@ export class Cars {
     for (const [mesh, n] of [[this.moving, moving], [this.abandoned, abandoned], [this.police, police], [this.barriers, barriers]] as const) {
       mesh.count = n;
       mesh.instanceMatrix.needsUpdate = true;
+      if (mesh === this.police) this.phase.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
   }

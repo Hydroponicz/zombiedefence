@@ -345,6 +345,29 @@ How sites change over time:
     every 2nd frame and the rest every 4th. Crowd separation runs at half rate.
   - Measured: about 4–5 ms of CPU per frame for 9,000 zombies, on a slow cloud CPU.
 
+## The city at night
+
+- **Streets:** streetlights pool on the road while a district has grid power. In the dense districts,
+  ground-floor shop fronts and lobbies glow and spill light across the sidewalks, some blocks under
+  pink, cyan, orange or violet neon. Houses have porch lights, the port and industry are floodlit,
+  and the airport has a floodlit apron, car park and runway edge lights. Towers over 60 m blink red
+  aviation lights. A blackout still takes a district dark: streets, shops and windows together.
+- **Moving lights:** every car drives with headlights and tail lights, police cruisers flash red and
+  blue (and wash the street around them in it), and after dark soldiers and police carry weapon
+  lights that sweep the street ahead, with a faint visible beam. The dead walking into any of these
+  are lit by them.
+- **How it stays fast:** there are no real lights (a forward renderer pays for each one on every
+  pixel). Instead:
+  - **Baked light:** the static lights are splatted once, when the city is built, into a top-down
+    texture over the whole city at 4 m per texel. Its three channels hold streetlight, building
+    spill and neon, and the shader switches each district's share by its power.
+  - **Light buffer:** the moving lights near the helicopter (up to 4,096) are drawn each frame as
+    soft additive shapes into a small top-down buffer, 512 × 512 at 1.5 m per texel, in one draw
+    call.
+  - **Cost per surface:** every lit material reads both with two texture lookups, fading with
+    height above the street, so walls, cars, people and the dead are lit without any per-light
+    cost.
+
 ## Project layout
 
 ```

@@ -18,6 +18,7 @@ import { Farps } from './world/Farps';
 import { Sites } from './world/Sites';
 import { Traffic } from './world/Traffic';
 import { Cars } from './world/Cars';
+import { cityLight } from './world/CityLight';
 import { Joc } from './world/Joc';
 import { siteNear } from './sim/sites';
 
@@ -74,6 +75,14 @@ scene.add(fleet.group);
 
 const heli = new Helicopter();
 scene.add(heli.object, heli.slingObject);
+// Everything solid in the scene is lit by the city's night lights (see CityLight).
+scene.traverse((o) => {
+  const material = (o as THREE.Mesh).material;
+  for (const m of Array.isArray(material) ? material : material ? [material] : []) {
+    if (m instanceof THREE.MeshLambertMaterial || m instanceof THREE.MeshPhongMaterial || m instanceof THREE.MeshStandardMaterial) cityLight.patch(m);
+  }
+});
+let lightClock = 0;
 /** Pad 1 at the hub: Camp Ridgeway, then the airport once the JOC is set up. */
 function spawnPad(base = sim.state ? baseOf(sim.state).name : ARMY_BASE.name): Helipad {
   return city.helipads.find((p) => p.name.startsWith(base)) ?? { x: ARMY_BASE.x, y: 0, z: ARMY_BASE.z, name: ARMY_BASE.name };
@@ -255,6 +264,9 @@ function update(dt: number): void {
   chase.update(dt, heli, overlay ? { ...frame, lookX: 0, lookY: 0, mouseX: 0, mouseY: 0, zoom: 0 } : frame, (x, z) => city.surfaceHeight(x, z));
   const night = environment.update(sim.time, heli.position);
   city.setNight(night);
+  lightClock += dt;
+  cityLight.setNight(night, lightClock);
+  cityLight.begin(heli.position.x, heli.position.z);
 
   const state = sim.state;
   if (state && state !== lastSyncedState) {
@@ -345,6 +357,7 @@ const timer = new THREE.Timer();
 renderer.setAnimationLoop((time) => {
   timer.update(time);
   update(Math.min(timer.getDelta(), 0.1));
+  cityLight.render(renderer);
   renderer.render(scene, camera);
 });
 
@@ -355,4 +368,4 @@ window.addEventListener('resize', () => {
 });
 
 // Handy for debugging from the console.
-Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops, command, fleet, sites, traffic, cars, camera } });
+Object.assign(window, { game: { sim, heli, city, seed, input, map, agents, effects, ops, command, fleet, sites, traffic, cars, camera, cityLight } });

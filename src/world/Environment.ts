@@ -5,7 +5,8 @@ import { daylight, skyProgress } from '../sim/clock';
 
 const DAY_SKY = new THREE.Color(0x9cc3dd);
 const DUSK_SKY = new THREE.Color(0xd08a5c);
-const NIGHT_SKY = new THREE.Color(0x0a0f1a);
+// A city's night sky: dark, but lifted by the glow of its lights.
+const NIGHT_SKY = new THREE.Color(0x0e1422);
 const SHADOW_EXTENT = 260;
 
 export class Environment {
@@ -73,10 +74,10 @@ export class Environment {
     (this.scene.fog as THREE.Fog).far = 9000 - night * 4500;
 
     // Moonlight stays faint: beyond the shadow map's reach it would light every facade evenly.
-    this.sun.intensity = sun ? 0.4 + 1.8 * light : 0.12;
+    this.sun.intensity = sun ? 0.4 + 1.8 * light : 0.17;
     this.sun.color.setHex(sun ? 0xfff2dd : 0x8fa6d6).lerp(new THREE.Color(0xffb27a), duskness * 0.7);
-    this.hemi.intensity = 0.4 + 0.7 * light;
-    this.hemi.color.setHex(0xbfd8ff).lerp(new THREE.Color(0x24324f), night);
+    this.hemi.intensity = 0.5 + 0.6 * light;
+    this.hemi.color.setHex(0xbfd8ff).lerp(new THREE.Color(0x2c3a5a), night);
     this.hemi.groundColor.setHex(0x4a5a3a).lerp(new THREE.Color(0x10141a), night);
 
     (this.stars.material as THREE.PointsMaterial).opacity = Math.max(0, night - 0.3) / 0.7;

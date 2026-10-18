@@ -20,6 +20,7 @@ import {
 import { makeRandom } from '../sim/rng';
 import { planSites, type SitePlan } from '../sim/sites';
 import { RAIL } from '../sim/supply';
+import { Bake, cityLight } from './CityLight';
 import { BLOCKS_PER_DISTRICT, blockLot, NODES_X, NODES_Z, nodeX, nodeZ, roadWidth, SIDEWALK, STREET_SPACING } from '../sim/streets';
 
 interface Box {
@@ -129,6 +130,11 @@ const COLLISION_CELL = 40;
 const LAMP_SPACING = 32;
 const LAMP_HEIGHT = 8.5;
 
+const hash2 = (x: number, z: number) => {
+  const v = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+  return v - Math.floor(v);
+};
+
 const CONCRETE = 0x9a9a95;
 const GRASS = 0x4a6e3c;
 const PARK = 0x3f6b35;
@@ -153,7 +159,7 @@ export class City {
     uDistrictLight: { value: this.districtLight },
   };
   private lampHeads!: THREE.InstancedMesh;
-  private lampPools!: THREE.InstancedMesh;
+  private beacons!: THREE.Points;
   private lampsOn: boolean[] = DISTRICT_TEMPLATES.map(() => false);
   private night = 0;
   /** Strategic sites by block, built in place of ordinary buildings. */
@@ -172,18 +178,30 @@ export class City {
     this.buildRoadMarkings();
     this.buildColliders();
     this.walk = this.buildWalkGrid();
+    this.bakeLight();
+    // Everything solid is lit by the streets at night.
+    const patched = new Set<THREE.Material>();
+    this.group.traverse((o) => {
+      const material = (o as THREE.Mesh).material as THREE.Material | undefined;
+      if (material && !patched.has(material) && (material instanceof THREE.MeshLambertMaterial || material instanceof THREE.MeshPhongMaterial)) {
+        patched.add(material);
+        cityLight.patch(material);
+      }
+    });
   }
 
   /** 0 = day, 1 = full night. */
   setNight(amount: number): void {
     this.windowUniforms.uNight.value = amount;
     this.night = amount;
+    if (this.beacons) this.beacons.visible = amount > 0.3;
     this.refreshLamps();
   }
 
   /** Window light level per district (1 = grid power, ~0.35 = generators, 0 = dark). */
   setDistrictLight(index: number, level: number): void {
     this.districtLight[index] = level;
+    cityLight.setDistrictPower(index, level);
     this.refreshLamps();
   }
 
@@ -1233,6 +1251,66 @@ export class City {
     this.buildLamps();
   }
 
+  /**
+   * Bake the city's night light (see CityLight): streetlights pool on the street; shop fronts spill
+   * onto the sidewalks of the dense districts, some under neon; houses have porch lights; industry,
+   * the port and the airport are floodlit. Tall towers get red aviation lights.
+   */
+  private bakeLight(): void {
+    const SHOPS: Partial<Record<DistrictKind, number>> = { downtown: 1, commercial: 1, apartments: 0.6, university: 0.45, hospital: 0.5, airbase: 0.7 };
+    const NEON: Partial<Record<DistrictKind, number>> = { downtown: 0.3, commercial: 0.45, apartments: 0.12 };
+    const FLOOD: Partial<Record<DistrictKind, number>> = { industrial: 0.7, harbor: 0.8 };
+    for (const l of this.lamps) cityLight.splat(Bake.Street, l.x + Math.sin(l.yaw) * 3, l.z + Math.cos(l.yaw) * 3, 17, 1);
+    const beacons: number[] = [];
+    let n = 0;
+    for (const b of this.boxes) {
+      if (!b.solid || (b.y ?? 0) > 1 || b.district < 0) continue;
+      const kind = DISTRICT_TEMPLATES[b.district].kind;
+      const x0 = b.x - b.w / 2;
+      const x1 = b.x + b.w / 2;
+      const z0 = b.z - b.d / 2;
+      const z1 = b.z + b.d / 2;
+      if (b.windows && b.h >= 60) beacons.push(b.x, b.h + 1.5, b.z);
+      const shops = SHOPS[kind] ?? 0;
+      const flood = FLOOD[kind] ?? 0;
+      if (b.windows && shops > 0 && b.h >= 7 && b.w > 8 && b.d > 8) {
+        // Lit shop fronts and lobbies along every side, out over the sidewalk.
+        const o = 2.5;
+        const neon = hash2(b.x, b.z) < (NEON[kind] ?? 0);
+        for (const [ax, az, bx, bz] of [[x0, z0 - o, x1, z0 - o], [x0, z1 + o, x1, z1 + o], [x0 - o, z0, x0 - o, z1], [x1 + o, z0, x1 + o, z1]]) {
+          cityLight.strip(Bake.Spill, ax, az, bx, bz, 7, shops);
+          if (neon) cityLight.strip(Bake.Neon, ax, az, bx, bz, 9, 0.8);
+        }
+      } else if (b.windows && b.h < 12 && (kind === 'residential' || kind === 'university' || kind === 'hospital')) {
+        // Porch and garden lights.
+        if ((n++ & 1) === 0) cityLight.splat(Bake.Spill, b.x, b.z, Math.max(b.w, b.d) / 2 + 6, 0.35);
+      } else if (flood > 0 && b.w * b.d > 600) {
+        // Floodlights at a yard building's corners.
+        for (const [x, z] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1]]) cityLight.splat(Bake.Spill, x, z, 20, flood);
+      }
+    }
+    // The airport: a floodlit apron and car park, and runway edge lights.
+    const airport = DISTRICT_TEMPLATES.find((d) => d.kind === 'airbase')!;
+    const { x: ax, z: az } = districtCenter(airport.col, airport.row);
+    for (let x = -420; x <= 260; x += 50) for (const z of [-40, 60, 160]) cityLight.splat(Bake.Spill, ax + x, az + z, 55, 0.45);
+    for (let x = -400; x <= 60; x += 60) for (const z of [-320, -240]) cityLight.splat(Bake.Street, ax + x, az + z, 16, 0.9);
+    for (let x = -680; x <= 680; x += 60) for (const z of [397, 443]) cityLight.splat(Bake.Street, ax + x, az + z, 5, 0.7);
+    for (const pad of this.helipads) cityLight.splat(Bake.Spill, pad.x, pad.z, 22, 0.6);
+    cityLight.finishBake();
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(beacons, 3));
+    const material = new THREE.PointsMaterial({ color: 0xff2a1a, size: 3.5, sizeAttenuation: false, transparent: true, depthWrite: false });
+    this.beacons = new THREE.Points(geometry, material);
+    this.beacons.frustumCulled = false;
+    this.beacons.visible = false;
+    // All the towers' lights blink together, once every 1.5 s.
+    this.beacons.onBeforeRender = () => {
+      material.opacity = (performance.now() / 1500) % 1 < 0.45 ? 1 : 0.08;
+    };
+    this.group.add(this.beacons);
+  }
+
   /** Streetlight poles, heads that glow at night while the district has grid power, and pools of light on the road. */
   private buildLamps(): void {
     const m = new THREE.Matrix4();
@@ -1253,27 +1331,18 @@ export class City {
     headGeo.translate(0, LAMP_HEIGHT - 0.25, 2.1);
     this.lampHeads = new THREE.InstancedMesh(headGeo, new THREE.MeshBasicMaterial(), this.lamps.length);
 
-    const poolGeo = new THREE.CircleGeometry(9, 20);
-    poolGeo.rotateX(-Math.PI / 2);
-    poolGeo.translate(0, 0.06, 2.6);
-    this.lampPools = new THREE.InstancedMesh(poolGeo, new THREE.MeshBasicMaterial({
-      map: poolTexture(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-    }), this.lamps.length);
-
     this.lamps.forEach((l, i) => {
       m.compose(v.set(l.x, 0, l.z), q.setFromAxisAngle(up, l.yaw), s);
       poles.setMatrixAt(i, m);
       this.lampHeads.setMatrixAt(i, m);
-      this.lampPools.setMatrixAt(i, m);
     });
-    this.group.add(poles, this.lampHeads, this.lampPools);
+    this.group.add(poles, this.lampHeads);
     this.lamps.forEach((_, i) => this.colorLamp(i, false));
   }
 
   private colorLamp(i: number, on: boolean): void {
     const c = new THREE.Color(on ? 0xffd9a0 : 0x2a2c2e);
     this.lampHeads.setColorAt(i, c);
-    this.lampPools.setColorAt(i, on ? c.setRGB(0.55, 0.42, 0.22) : c.setRGB(0, 0, 0));
   }
 
   /** Streetlights burn at night while the grid powers the district (generators don't run them). */
@@ -1291,7 +1360,6 @@ export class City {
     }
     if (changed) {
       this.lampHeads.instanceColor!.needsUpdate = true;
-      this.lampPools.instanceColor!.needsUpdate = true;
     }
   }
 
@@ -1341,6 +1409,16 @@ export class City {
         .replace(
           '#include <emissivemap_fragment>',
           `#include <emissivemap_fragment>
+          // Shop fronts: the ground floor glows where the baked light says there are shops.
+          if (vWinLit > 0.5 && abs(vWinNormal.y) < 0.5 && vWinPos.y < 3.8 && uNight > 0.05) {
+            vec3 shopLight = cityBaked(vWinPos.xz + vWinNormal.xz * 2.5);
+            float shop = smoothstep(0.3, 0.55, shopLight.g) * cityPowerAt(vWinPos.xz).y;
+            float shopAlong = abs(vWinNormal.x) > 0.5 ? vWinPos.z : vWinPos.x;
+            float bay = fract(shopAlong / 4.5);
+            float shopPane = step(0.08, bay) * step(bay, 0.92) * step(0.5, vWinPos.y) * step(vWinPos.y, 3.2);
+            vec3 shopColor = mix(vec3(1.0, 0.86, 0.62), cityNeon(vWinPos.xz), shopLight.b * 0.8);
+            totalEmissiveRadiance += shopColor * shopPane * shop * uNight * 1.4;
+          }
           // Windows are always drawn; only their night glow depends on the district's power.
           // Styles: 1 punched windows, 2 glass curtain wall, 3 apartments with balconies, 4 stone offices.
           if (vWinLit > 0.5 && abs(vWinNormal.y) < 0.5 && vWinPos.y > 1.2) {
@@ -1352,7 +1430,7 @@ export class City {
             float dark = 0.35;
             float rate = 0.55;
             float warmth = 0.8;
-            if (style > 1.5 && style < 2.5) { bay = vec2(1.5, 4.0); pane4 = vec4(0.04, 0.96, 0.1, 0.94); dark = 0.5; rate = 0.42; warmth = 0.15; }
+            if (style > 1.5 && style < 2.5) { bay = vec2(1.5, 4.0); pane4 = vec4(0.04, 0.96, 0.1, 0.94); dark = 0.5; rate = 0.32; warmth = 0.15; }
             else if (style > 2.5 && style < 3.5) { bay = vec2(2.6, 3.0); pane4 = vec4(0.25, 0.75, 0.3, 0.78); dark = 0.4; rate = 0.65; warmth = 0.95; }
             else if (style > 3.5) { bay = vec2(1.8, 3.8); pane4 = vec4(0.3, 0.7, 0.18, 0.85); dark = 0.45; rate = 0.45; warmth = 0.5; }
             float along = abs(vWinNormal.x) > 0.5 ? vWinPos.z : vWinPos.x;
@@ -1463,16 +1541,4 @@ function helipadTexture(): THREE.CanvasTexture {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
-}
-
-function poolTexture(): THREE.CanvasTexture {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d')!;
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
-  return new THREE.CanvasTexture(c);
 }
