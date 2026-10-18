@@ -158,7 +158,9 @@ export function compareDay(before: CityState, after: CityState, without: CitySta
     alive: living(after),
     held: held(after),
     fell,
-    saved: Math.round(living(after) + escaped(after) - (living(without) + escaped(without))),
+    // To the nearest ten: the replay drifts by a handful of people from things like rotor noise
+    // while parked, which aren't the player's doing.
+    saved: Math.round((living(after) + escaped(after) - (living(without) + escaped(without))) / 10) * 10 || 0,
     heldBecause: fellWithout.filter((n) => !fell.includes(n)),
     lostAnyway: fell.filter((n) => !fellWithout.includes(n)),
   };
