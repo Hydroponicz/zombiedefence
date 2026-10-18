@@ -63,6 +63,8 @@ export type Action =
   | 'sensor'
   /** On the end screen: start a new city. */
   | 'newGame'
+  /** Turn down an incoming radio call. */
+  | 'radioDismiss'
   | `overlay${number}`;
 
 const KEY_ACTIONS: Record<string, Action> = {
@@ -77,6 +79,7 @@ const KEY_ACTIONS: Record<string, Action> = {
   KeyP: 'command',
   KeyT: 'sensor',
   KeyN: 'newGame',
+  Backspace: 'radioDismiss',
   Enter: 'confirm',
   BracketRight: 'timeFaster',
   BracketLeft: 'timeSlower',

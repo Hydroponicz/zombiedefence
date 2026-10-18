@@ -171,6 +171,15 @@ reward. There are more than one helicopter can do: triage is the game.
   - **Overwatch:** a food truck crawling through infested streets. Hover over it (within 160 m,
     below 160 m) for 15 minutes; while you do it can't be lost, and while it waits for you its crew
     keeps its head down. Reward: a helicopter for the fleet.
+- **They come in over the radio:** each new request pops up as a transmission on a cockpit radio
+  (frequency display, signal bars, a squelch and call tones; one tone for routine traffic, three for a
+  FLASH call), typed out as it's read: "DUSTOFF 1-1, KESSLER ACTUAL. Research team in St. Mary's…
+  How copy? Over." It stays until you answer:
+  - <kbd>Enter</kbd> / <kbd>A</kbd> (or click): take it on.
+  - <kbd>P</kbd> / <kbd>L3</kbd>: open it in Flight Command to hand it to a pilot.
+  - <kbd>Backspace</kbd> / <kbd>B</kbd>: turn it down (it stays open in Flight Command).
+
+  The first press finishes the typing. Calls that come in together queue up.
 - **Taking them on:** Flight Command (P) → Requests. "Take it on" puts the request under the clock
   with its distance and bearing, a gold beam marks the place in the world, and a gold diamond marks
   it on the map (the other requests are white diamonds).

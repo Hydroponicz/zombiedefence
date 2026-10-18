@@ -314,3 +314,118 @@ kbd {
 .end-card .days th { text-align: left; color: var(--muted); font-weight: 500; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding: 4px 6px; }
 .end-card .days td { padding: 3px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
 .end-card .hint { margin-top: 16px; color: var(--muted); }
+
+/* Incoming radio call: a cockpit radio's faceplate with the transmission typed out below. */
+#radio-call {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  width: min(600px, calc(100vw - 32px));
+  pointer-events: auto;
+  animation: rc-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+#radio-call[hidden] { display: none; }
+@keyframes rc-in { from { transform: translate(-50%, -30px) scale(0.96); opacity: 0; } to { transform: translate(-50%, 0) scale(1); opacity: 1; } }
+
+.rc-radio {
+  position: relative;
+  overflow: hidden;
+  padding: 14px 18px 12px;
+  border-radius: 10px;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0 2px, transparent 2px 5px),
+    linear-gradient(170deg, #59603f 0%, #474d31 55%, #3a3f28 100%);
+  border: 2px solid #23261a;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08) inset, 0 12px 40px rgba(0,0,0,0.6), 0 2px 0 #6b7350 inset;
+  color: #e9ecd8;
+  font-family: 'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace;
+}
+.rc-rivet { position: absolute; width: 9px; height: 9px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #c9cdb4, #5a5f46 60%, #2b2e20); }
+.rc-rivet.tl { top: 7px; left: 7px; } .rc-rivet.tr { top: 7px; right: 7px; }
+.rc-rivet.bl { bottom: 7px; left: 7px; } .rc-rivet.br { bottom: 7px; right: 7px; }
+
+.rc-top { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 0.2em; color: #c8cca8; margin: 0 6px 8px; }
+.rc-model { flex: 1; font-weight: 700; text-shadow: 0 1px 0 #2a2e1d; }
+.rc-led { width: 9px; height: 9px; border-radius: 50%; background: #ff3a2a; box-shadow: 0 0 8px #ff3a2a; animation: rc-blink 0.5s steps(2) infinite; }
+.rc-led-label { color: #ffb0a8; }
+@keyframes rc-blink { 50% { opacity: 0.2; box-shadow: none; } }
+
+.rc-face { display: grid; grid-template-columns: 210px 1fr; grid-template-rows: auto 30px; gap: 8px 12px; margin-bottom: 10px; }
+.rc-lcd {
+  grid-row: span 2;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #9fbf6a, #86a957);
+  color: #1d2a12;
+  box-shadow: 0 0 0 3px #23261a, inset 0 2px 6px rgba(0,0,0,0.35);
+  text-shadow: 0 0 1px rgba(29,42,18,0.4);
+}
+.rc-freq { font-size: 30px; font-weight: 700; letter-spacing: 0.04em; line-height: 1; }
+.rc-freq small { font-size: 11px; margin-left: 4px; }
+.rc-bars { display: flex; align-items: flex-end; gap: 3px; height: 16px; margin: 6px 0 4px; }
+.rc-bars i { width: 7px; background: #1d2a12; animation: rc-signal 0.9s ease-in-out infinite; }
+.rc-bars i:nth-child(1) { height: 30%; } .rc-bars i:nth-child(2) { height: 50%; animation-delay: 0.1s; }
+.rc-bars i:nth-child(3) { height: 70%; animation-delay: 0.2s; } .rc-bars i:nth-child(4) { height: 85%; animation-delay: 0.3s; }
+.rc-bars i:nth-child(5) { height: 100%; animation-delay: 0.4s; }
+@keyframes rc-signal { 50% { opacity: 0.35; } }
+.rc-meta { font-size: 10px; letter-spacing: 0.08em; }
+.rc-grille {
+  border-radius: 4px;
+  background: radial-gradient(circle, #1b1d14 1.6px, transparent 2px) 0 0 / 7px 7px, #2e3222;
+  box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);
+}
+.rc-wave { width: 100%; height: 30px; background: #1b1d14; border-radius: 4px; }
+.rc-wave polyline { fill: none; stroke: #9fff6a; stroke-width: 1.6; filter: drop-shadow(0 0 2px #9fff6a); animation: rc-wave 0.6s linear infinite; }
+@keyframes rc-wave { 0% { transform: scaleY(1); } 33% { transform: scaleY(0.4) translateY(22px); } 66% { transform: scaleY(1.2) translateY(-3px); } 100% { transform: scaleY(1); } }
+
+.rc-paper {
+  background: linear-gradient(180deg, #e8e2c8, #ddd6b8);
+  color: #1f2116;
+  border-radius: 3px;
+  padding: 10px 14px 8px;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15), 0 2px 0 rgba(0,0,0,0.3);
+  min-height: 110px;
+}
+.rc-head { display: flex; align-items: center; gap: 10px; font-size: 11px; letter-spacing: 0.12em; color: #4a4a38; margin-bottom: 6px; }
+.rc-prio { padding: 2px 8px; border-radius: 2px; font-weight: 700; color: #fff; letter-spacing: 0.15em; border: 2px solid currentColor; }
+.rc-prio.flash { background: #b3261e; color: #fff; animation: rc-blink 0.7s steps(2) infinite; }
+.rc-prio.immediate { background: #c4601a; }
+.rc-prio.priority { background: #9a7a12; }
+.rc-prio.routine { background: #3d5a32; }
+.rc-text { display: inline; font-size: 15px; line-height: 1.45; white-space: pre-wrap; }
+.rc-over { display: inline; font-size: 15px; animation: rc-blink 0.8s steps(2) infinite; }
+.rc-over.on { animation-duration: 1.2s; }
+.rc-foot { display: flex; gap: 14px; margin-top: 8px; font-size: 11px; letter-spacing: 0.1em; color: #5a5a44; }
+.rc-queue { margin-left: auto; color: #b3261e; font-weight: 700; }
+
+.rc-buttons { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.rc-btn {
+  flex: 1;
+  min-width: 150px;
+  text-align: center;
+  padding: 7px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  background: linear-gradient(180deg, #3a3e2a, #2a2d1e);
+  border: 1px solid #1c1e14;
+  box-shadow: 0 2px 0 #15170f, inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.rc-btn:hover { filter: brightness(1.25); }
+.rc-btn.take { background: linear-gradient(180deg, #4d7a3a, #355a28); }
+.rc-btn kbd { font-size: 10px; padding: 0 4px; margin-right: 4px; border-radius: 3px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); }
+.rc-static {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.07;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,0.6) 0 1px, transparent 1px 3px);
+  animation: rc-roll 2.5s linear infinite;
+  mix-blend-mode: overlay;
+}
+@keyframes rc-roll { from { background-position: 0 0; } to { background-position: 0 60px; } }

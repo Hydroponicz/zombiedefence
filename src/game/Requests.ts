@@ -1,6 +1,6 @@
 // Command requests on the player's side: the request taken on shows under the clock with how far
-// and which way it is, a beam of light marks the place in the world, new requests are announced,
-// and hovering over a food truck that needs overwatch reports it to the simulation.
+// and which way it is, a beam of light marks the place in the world (new requests come in over the
+// radio: see Transmission), and hovering over a food truck that needs overwatch reports it to the simulation.
 
 import * as THREE from 'three';
 import { districtCenter } from '../sim/layout';
@@ -25,17 +25,12 @@ export class RequestTracker {
   readonly marker = new THREE.Group();
   private beam: THREE.Mesh;
   private el = document.getElementById('hud-request')!;
-  private seen = new Set<number>();
-  private primed = false;
   private reported = new Map<number, number>();
   private time = 0;
   private lastHtml = '';
 
-  /**
-   * @param send issue a command to the simulation
-   * @param toast show a short message
-   */
-  constructor(private send: (cmd: PlayerCommand) => void, private toast: (text: string) => void) {
+  /** @param send issue a command to the simulation */
+  constructor(private send: (cmd: PlayerCommand) => void) {
     const geo = new THREE.CylinderGeometry(2.5, 2.5, 600, 12, 1, true);
     geo.translate(0, 300, 0);
     this.beam = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
@@ -54,14 +49,6 @@ export class RequestTracker {
     this.time += dt;
     if (!s) return false;
     const open = s.requests.filter((r) => r.status === 'open');
-
-    // New requests are announced (not the ones already there when the game loads).
-    for (const r of open) {
-      if (this.seen.has(r.id)) continue;
-      this.seen.add(r.id);
-      if (this.primed) this.toast(`New Command request: ${r.title}. P to see it`);
-    }
-    this.primed = true;
 
     // Overwatch: low over a truck that needs it, once a game minute.
     let watching = false;

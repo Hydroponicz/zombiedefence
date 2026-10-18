@@ -20,7 +20,8 @@ import { Traffic } from './world/Traffic';
 import { Cars } from './world/Cars';
 import { cityLight } from './world/CityLight';
 import { Lures } from './world/Lures';
-import { RequestTracker } from './game/Requests';
+import { RequestTracker, requestTarget } from './game/Requests';
+import { Transmission } from './ui/Transmission';
 import { hasResearch } from './sim/research';
 import { CampaignView } from './ui/CampaignView';
 import { Joc } from './world/Joc';
@@ -80,7 +81,17 @@ const fleet = new AiFleet(city.helipads);
 scene.add(fleet.group);
 const lures = new Lures();
 scene.add(lures.group);
-const requests = new RequestTracker((cmd) => sim.command(cmd), (text) => hud.toast(text, 4));
+const requests = new RequestTracker((cmd) => sim.command(cmd));
+// New requests come in over the radio, and wait for an answer.
+const radio = new Transmission((r, how) => {
+  if (how === 'take' && !r.tracked) {
+    sim.command({ type: 'trackRequest', request: r.id });
+    hud.toast(`Taken on: ${r.title}`, 3);
+  } else if (how === 'open') {
+    command.showRequest(r.id);
+    input.releasePointer();
+  }
+});
 scene.add(requests.marker);
 
 const heli = new Helicopter();
@@ -151,6 +162,8 @@ function setPaused(value: boolean): void {
 function handleActions(frame: FrameInput): void {
   const a = frame.actions;
   // The campaign is over: fly on, or start a new city.
+  // An incoming radio call takes its answer first (not while a menu is open over it).
+  if (!map.visible && !command.visible && !paused && radio.handle(a)) return;
   if (campaignView.endVisible) {
     if (a.has('confirm')) {
       sim.command({ type: 'freePlay' });
@@ -343,6 +356,7 @@ function update(dt: number): void {
   if (!heli.destroyed) agents.doorGunners(dt, heli.position, (state?.cargo.troops ?? 0) + doorGun);
   lures.update(dt);
   requests.update(dt, state, sim.time, heli.position, altitude);
+  radio.update(dt, state, heli.position, (r) => (state ? requestTarget(state, r, sim.time) : null));
   effects.update(dt, night);
   farps.update(dt);
   sites.update(dt, night);

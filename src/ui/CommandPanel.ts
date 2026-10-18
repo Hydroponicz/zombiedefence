@@ -108,6 +108,16 @@ export class CommandPanel {
     }
   }
 
+  /** Open on the Requests tab with a request selected. */
+  showRequest(id: number): void {
+    this.tab = 'requests';
+    const s = this.state;
+    if (s) this.row = Math.max(0, openRequests(s).sort((a, b) => a.deadline - b.deadline).findIndex((r) => r.id === id));
+    this.fields.requests = REQUEST_FIELDS.indexOf('pilot');
+    if (!this.visible) this.toggle();
+    this.lastKey = '';
+  }
+
   toggle(): boolean {
     this.visible = !this.visible;
     this.el.hidden = !this.visible;
